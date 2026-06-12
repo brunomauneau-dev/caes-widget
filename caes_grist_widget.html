@@ -8,9 +8,13 @@
   <style>
     :root {
       --bleu:   #1a3a5c;
+      --bleu2:  #2d5f8a;
       --vert:   #2a7a4b;
       --orange: #b45309;
       --rouge:  #b91c1c;
+      --violet: #6d28d9;
+      --cyan:   #0e7490;
+      --rose:   #be185d;
       --gris0:  #f5f6f8;
       --gris1:  #e8eaed;
       --gris2:  #c8cdd5;
@@ -60,7 +64,7 @@
       display: grid;
       grid-template-columns: repeat(4, 1fr);
       gap: 10px;
-      margin-bottom: 16px;
+      margin-bottom: 20px;
     }
     .kpi {
       background: var(--blanc);
@@ -76,31 +80,65 @@
     .kpi.rouge  .val { color: var(--rouge); }
     .kpi.orange .val { color: var(--orange); }
 
-    /* Tableaux */
+    /* Sections */
     .section-title {
       font-size: 13px;
       font-weight: 700;
       color: var(--bleu);
       text-transform: uppercase;
       letter-spacing: 0.4px;
-      margin: 20px 0 10px;
-      padding-left: 4px;
+      margin: 22px 0 12px;
+      padding-left: 8px;
       border-left: 3px solid var(--bleu);
     }
-    .tables-grid {
+
+    /* Grille camembert + tableau */
+    .chart-block {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-bottom: 16px;
-    }
-    .table-card {
+      grid-template-columns: 200px 1fr;
+      gap: 0;
       background: var(--blanc);
       border: 1px solid var(--gris1);
       border-radius: 8px;
       overflow: hidden;
+      margin-bottom: 14px;
     }
-    .table-card.full { grid-column: 1 / -1; }
-    .table-card .thead {
+    .chart-block.wide { grid-template-columns: 180px 1fr; }
+
+    .pie-side {
+      background: var(--gris0);
+      border-right: 1px solid var(--gris1);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 16px 12px;
+      gap: 10px;
+    }
+    .pie-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--bleu);
+      text-align: center;
+    }
+    .pie-legend { width: 100%; }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--texte);
+      margin-bottom: 4px;
+      line-height: 1.3;
+    }
+    .legend-dot {
+      width: 9px; height: 9px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .table-side { overflow-x: auto; }
+    .table-head {
       background: var(--bleu);
       color: var(--blanc);
       padding: 8px 14px;
@@ -123,6 +161,7 @@
       padding: 7px 12px;
       font-size: 12px;
       border-bottom: 1px solid var(--gris1);
+      vertical-align: middle;
     }
     tr:last-child td { border-bottom: none; }
     tr:hover td { background: var(--gris0); }
@@ -131,15 +170,19 @@
       background: var(--gris1);
       border-radius: 4px;
       height: 6px;
-      width: 80px;
+      width: 70px;
       display: inline-block;
       vertical-align: middle;
       margin-left: 6px;
     }
-    .bar-fill {
-      height: 100%;
-      border-radius: 4px;
-      background: var(--bleu);
+    .bar-fill { height: 100%; border-radius: 4px; }
+
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 700;
     }
 
     /* Synthèse */
@@ -174,6 +217,7 @@
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       gap: 12px;
+      margin-bottom: 14px;
     }
     .scenario-card {
       background: var(--blanc);
@@ -204,9 +248,11 @@
     .scenario-card .sc-body ul { padding-left: 16px; }
     .scenario-card .sc-body li { margin-bottom: 2px; }
 
-    @media (max-width: 600px) {
-      .kpi-row, .tables-grid, .scenarios-grid { grid-template-columns: 1fr 1fr; }
-      .table-card.full { grid-column: 1 / -1; }
+    @media (max-width: 640px) {
+      .kpi-row { grid-template-columns: 1fr 1fr; }
+      .chart-block { grid-template-columns: 1fr; }
+      .pie-side { border-right: none; border-bottom: 1px solid var(--gris1); }
+      .scenarios-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -228,6 +274,13 @@
 <div id="app" style="display:none"></div>
 
 <script>
+// ── Palette de couleurs pour les camemberts ──────────────────────
+const COLORS = [
+  '#1a3a5c','#2a7a4b','#b45309','#b91c1c','#6d28d9',
+  '#0e7490','#be185d','#065f46','#92400e','#1e40af',
+  '#7c3aed','#047857','#b45309','#dc2626','#4338ca'
+];
+
 grist.ready({
   requiredAccess: 'read table',
   columns: [
@@ -263,35 +316,84 @@ function v(row, key) {
   const val = row[key];
   return (val !== undefined && val !== null && val !== '') ? String(val) : '';
 }
-
 function countBy(records, key) {
   const c = {};
   records.forEach(r => { const k = v(r,key)||'Non renseigné'; c[k]=(c[k]||0)+1; });
   return Object.entries(c).sort((a,b)=>b[1]-a[1]);
 }
-
 function isOui(val) {
   return ['oui','Oui','OUI','true','1','yes'].includes(String(val).trim());
 }
-
 function pct(n, total) { return total ? Math.round(n/total*100) : 0; }
 
-// ── Tableaux ─────────────────────────────────────────────────────
-function makeTable(title, entries, total, full) {
-  const cls = full ? 'table-card full' : 'table-card';
+// ── Camembert SVG ────────────────────────────────────────────────
+function makePie(entries, total, size) {
+  size = size || 120;
+  const cx = size/2, cy = size/2, r = size/2 - 4;
+  if (!total) return `<svg width="${size}" height="${size}"></svg>`;
+
+  let paths = '';
+  let angle = -Math.PI / 2;
+
+  entries.forEach(([, n], i) => {
+    if (!n) return;
+    const slice = (n / total) * 2 * Math.PI;
+    const x1 = cx + r * Math.cos(angle);
+    const y1 = cy + r * Math.sin(angle);
+    const x2 = cx + r * Math.cos(angle + slice);
+    const y2 = cy + r * Math.sin(angle + slice);
+    const large = slice > Math.PI ? 1 : 0;
+    const color = COLORS[i % COLORS.length];
+
+    paths += `<path d="M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${large},1 ${x2},${y2} Z"
+      fill="${color}" stroke="white" stroke-width="1.5"/>`;
+    angle += slice;
+  });
+
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${paths}</svg>`;
+}
+
+// ── Bloc camembert + tableau ─────────────────────────────────────
+function makeChartBlock(title, entries, total, colorOffset) {
+  colorOffset = colorOffset || 0;
+  const topEntries = entries.slice(0, 10);
+
+  // Légende (5 max pour la lisibilité)
+  let legend = '';
+  topEntries.slice(0, 6).forEach(([k, n], i) => {
+    const color = COLORS[(i + colorOffset) % COLORS.length];
+    const label = k.length > 22 ? k.slice(0, 20) + '…' : k;
+    legend += `<div class="legend-item">
+      <span class="legend-dot" style="background:${color}"></span>
+      <span>${label} <strong>(${pct(n,total)}%)</strong></span>
+    </div>`;
+  });
+
+  // Lignes tableau
   let rows = '';
-  entries.forEach(([k,n]) => {
-    const p = pct(n,total);
+  topEntries.forEach(([k, n], i) => {
+    const p = pct(n, total);
+    const color = COLORS[(i + colorOffset) % COLORS.length];
     rows += `<tr>
-      <td>${k}</td>
+      <td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:6px;vertical-align:middle"></span>${k}</td>
       <td><strong>${n}</strong></td>
-      <td>${p}%<span class="bar-wrap"><span class="bar-fill" style="width:${p}%"></span></span></td>
+      <td>${p}%<span class="bar-wrap"><span class="bar-fill" style="width:${p}%;background:${color}"></span></span></td>
     </tr>`;
   });
-  return `<div class="${cls}">
-    <div class="thead">${title}</div>
-    <table><thead><tr><th>Valeur</th><th>Nb</th><th>%</th></tr></thead>
-    <tbody>${rows}</tbody></table>
+
+  return `<div class="chart-block">
+    <div class="pie-side">
+      <div class="pie-title">${title}</div>
+      ${makePie(topEntries, total, 130)}
+      <div class="pie-legend">${legend}</div>
+    </div>
+    <div class="table-side">
+      <div class="table-head">${title}</div>
+      <table>
+        <thead><tr><th>Valeur</th><th>Nb</th><th>%</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
   </div>`;
 }
 
@@ -299,7 +401,7 @@ function makeTable(title, entries, total, full) {
 function buildSynthese(records) {
   const total     = records.length;
   const fav       = records.filter(r => /favor/i.test(v(r,'Etat_demande'))).length;
-  const def       = records.filter(r => /favor/i.test(v(r,'Etat_demande')) === false && /fav|accord/i.test(v(r,'Etat_demande')) === false && /refus|défav|defav/i.test(v(r,'Etat_demande'))).length;
+  const def       = records.filter(r => /refus|défav|defav/i.test(v(r,'Etat_demande'))).length;
   const hdl       = records.filter(r => isOui(v(r,'Hors_delai_PC'))).length;
   const deroga    = records.filter(r => isOui(v(r,'Derogatoire'))).length;
   const alertes   = records.filter(r => v(r,'Alerte') !== '').length;
@@ -318,20 +420,22 @@ function buildSynthese(records) {
       <p>La commission a reçu <strong>${total} dossiers</strong> au total.
       Parmi eux, <strong>${deroga} sont dérogatoires</strong> (${pct(deroga,total)}%)
       et <strong>${hdl} sont hors délai Parcoursup</strong> (${pct(hdl,total)}%).
-      ${alertes > 0 ? `<strong>${alertes} dossier${alertes>1?'s':''} présentent une alerte</strong> nécessitant une attention particulière.` : 'Aucune alerte particulière n\'est signalée.'}</p>
+      ${alertes > 0
+        ? `<strong>${alertes} dossier${alertes>1?'s':''} présentent une alerte</strong> nécessitant une attention particulière.`
+        : "Aucune alerte particulière n'est signalée."}</p>
 
       <h4>Motifs dominants</h4>
-      <p>Les trois motifs les plus fréquents sont : ${motifsTxt}.
-      Ils représentent ${pct(motifs.reduce((s,[,n])=>s+n,0),total)}% de l'ensemble des demandes.</p>
+      <p>Les trois motifs les plus fréquents sont : ${motifsTxt},
+      représentant ${pct(motifs.reduce((s,[,n])=>s+n,0),total)}% des demandes.</p>
 
       <h4>État de traitement</h4>
       <p><strong>${fav} dossiers sont favorables</strong> (${pct(fav,total)}%),
       <strong>${def} défavorables</strong> (${pct(def,total)}%).
-      Les dossiers restants sont en attente ou en cours de traitement.</p>
+      Les dossiers restants sont en attente ou en cours d'instruction.</p>
 
       <h4>Formations et domaines sollicités</h4>
-      <p>Les domaines les plus représentés sont ${domainesTxt}.
-      Les formations les plus demandées sont ${formationsTxt}.</p>
+      <p>Domaines les plus représentés : ${domainesTxt}.
+      Formations les plus demandées : ${formationsTxt}.</p>
 
       <h4>Points de vigilance</h4>
       <ul>
@@ -346,27 +450,25 @@ function buildSynthese(records) {
 
 // ── Scénarios prospectifs ─────────────────────────────────────────
 function buildScenarios(records) {
-  const total   = records.length;
-  const hdl     = records.filter(r => isOui(v(r,'Hors_delai_PC'))).length;
-  const deroga  = records.filter(r => isOui(v(r,'Derogatoire'))).length;
-  const fav     = records.filter(r => /favor/i.test(v(r,'Etat_demande'))).length;
-  const motifs  = countBy(records,'Motif_CAES').slice(0,2).map(([k])=>k);
-  const pHdl    = pct(hdl,total);
-  const pFav    = pct(fav,total);
+  const total  = records.length;
+  const hdl    = records.filter(r => isOui(v(r,'Hors_delai_PC'))).length;
+  const deroga = records.filter(r => isOui(v(r,'Derogatoire'))).length;
+  const fav    = records.filter(r => /favor/i.test(v(r,'Etat_demande'))).length;
+  const motifs = countBy(records,'Motif_CAES').slice(0,2).map(([k])=>k);
+  const pHdl   = pct(hdl,total);
+  const pFav   = pct(fav,total);
 
-  return `<div class="section-title">🔭 Scénarios prospectifs</div>
-  <div class="scenarios-grid">
-
+  return `<div class="scenarios-grid">
     <div class="scenario-card">
       <div class="sc-head" style="background:var(--vert)">Scénario 1 — Traitement accéléré</div>
       <div class="sc-body">
         <h5>Hypothèse</h5>
-        <p>La commission priorise les ${hdl} dossiers hors délai (${pHdl}%) et les ${deroga} dérogatoires pour un traitement en urgence.</p>
+        <p>Priorisation des ${hdl} dossiers hors délai (${pHdl}%) et des ${deroga} dérogatoires.</p>
         <h5>Impact</h5>
-        <p>Taux de dossiers traités dans les délais porté à 95%+. Réduction du risque contentieux.</p>
+        <p>Taux de traitement dans les délais porté à 95%+. Réduction du risque contentieux.</p>
         <h5>Actions</h5>
         <ul>
-          <li>Session de traitement dédiée aux dossiers hors délai</li>
+          <li>Session dédiée aux dossiers hors délai</li>
           <li>Binôme instructeur pour les cas dérogatoires</li>
           <li>Relance des lycées concernés sous 48h</li>
         </ul>
@@ -376,12 +478,12 @@ function buildScenarios(records) {
     </div>
 
     <div class="scenario-card">
-      <div class="sc-head" style="background:var(--orange)">Scénario 2 — Consolidation des motifs dominants</div>
+      <div class="sc-head" style="background:var(--orange)">Scénario 2 — Harmonisation doctrinale</div>
       <div class="sc-body">
         <h5>Hypothèse</h5>
-        <p>Les motifs <strong>${motifs[0]||'principaux'}</strong> et <strong>${motifs[1]||'secondaires'}</strong> concentrent les décisions — la commission harmonise sa doctrine sur ces cas.</p>
+        <p>Les motifs <strong>${motifs[0]||'principaux'}</strong> et <strong>${motifs[1]||'secondaires'}</strong> concentrent les décisions.</p>
         <h5>Impact</h5>
-        <p>Cohérence des avis renforcée, réduction des recours. Gain de temps estimé : 20% sur les instructions répétitives.</p>
+        <p>Cohérence des avis renforcée. Gain de temps estimé : 20% sur les instructions répétitives.</p>
         <h5>Actions</h5>
         <ul>
           <li>Grille d'instruction commune pour les motifs récurrents</li>
@@ -389,7 +491,7 @@ function buildScenarios(records) {
           <li>Point hebdomadaire sur les cas limites</li>
         </ul>
         <h5>Indicateur cible</h5>
-        <p>Taux de cohérence des avis ≥ 90% sur les motifs dominants.</p>
+        <p>Cohérence des avis ≥ 90% sur les motifs dominants.</p>
       </div>
     </div>
 
@@ -397,29 +499,28 @@ function buildScenarios(records) {
       <div class="sc-head" style="background:var(--rouge)">Scénario 3 — Afflux supplémentaire</div>
       <div class="sc-body">
         <h5>Hypothèse</h5>
-        <p>Le volume de dossiers augmente de 30% (tendance constatée sur les dernières sessions). La capacité de traitement actuelle atteint ses limites.</p>
+        <p>Volume de dossiers en hausse de 30%. Capacité de traitement actuelle à ses limites.</p>
         <h5>Impact</h5>
-        <p>Risque de dépassement des délais réglementaires. Taux favorable actuel de ${pFav}% difficile à maintenir sans renfort.</p>
+        <p>Risque de dépassement réglementaire. Taux favorable actuel (${pFav}%) difficile à maintenir.</p>
         <h5>Actions</h5>
         <ul>
-          <li>Anticipation des ressources humaines supplémentaires</li>
-          <li>Simplification du circuit pour les dossiers non dérogatoires</li>
-          <li>Communication préventive aux établissements sur les délais</li>
+          <li>Anticipation des ressources supplémentaires</li>
+          <li>Circuit simplifié pour les dossiers non dérogatoires</li>
+          <li>Communication préventive aux établissements</li>
         </ul>
         <h5>Indicateur cible</h5>
-        <p>Capacité de traitement ≥ ${Math.round(total*1.3)} dossiers sans dégradation de qualité.</p>
+        <p>Capacité ≥ ${Math.round(total*1.3)} dossiers sans dégradation de qualité.</p>
       </div>
     </div>
-
   </div>`;
 }
 
 // ── Rendu principal ───────────────────────────────────────────────
 function render(records) {
-  const total  = records.length;
-  const fav    = records.filter(r => /favor/i.test(v(r,'Etat_demande'))).length;
-  const def    = records.filter(r => /refus|défav|defav/i.test(v(r,'Etat_demande'))).length;
-  const hdl    = records.filter(r => isOui(v(r,'Hors_delai_PC'))).length;
+  const total = records.length;
+  const fav   = records.filter(r => /favor/i.test(v(r,'Etat_demande'))).length;
+  const def   = records.filter(r => /refus|défav|defav/i.test(v(r,'Etat_demande'))).length;
+  const hdl   = records.filter(r => isOui(v(r,'Hors_delai_PC'))).length;
 
   const app = document.getElementById('app');
   app.innerHTML = '';
@@ -432,23 +533,29 @@ function render(records) {
     <div class="kpi orange"><div class="val">${hdl}</div><div class="lbl">Hors délai PC</div></div>
   </div>`;
 
-  // Tableaux récapitulatifs
-  app.innerHTML += `<div class="section-title">📊 Tableaux récapitulatifs</div>`;
-  const grid = document.createElement('div');
-  grid.className = 'tables-grid';
-  grid.innerHTML =
-    makeTable('Par motif CAES',         countBy(records,'Motif_CAES'),       total, false) +
-    makeTable('Par état de la demande', countBy(records,'Etat_demande'),      total, false) +
-    makeTable('Par domaine',            countBy(records,'Domaine'),           total, false) +
-    makeTable('Par formation',          countBy(records,'Formation'),         total, false) +
-    makeTable('Dérogatoire',            countBy(records,'Derogatoire'),       total, false) +
-    makeTable('Par lycée d\'origine',   countBy(records,'Lycee'),             total, false);
-  app.appendChild(grid);
+  // Bloc 1 — États et dérogatoires
+  app.innerHTML += `<div class="section-title">📊 Répartition des demandes</div>`;
+  app.innerHTML += makeChartBlock('État des demandes',   countBy(records,'Etat_demande'),  total, 0);
+  app.innerHTML += makeChartBlock('Motifs CAES',         countBy(records,'Motif_CAES'),    total, 2);
+  app.innerHTML += makeChartBlock('Dérogatoire / Non',   countBy(records,'Derogatoire'),   total, 4);
+
+  // Bloc 2 — Orientation
+  app.innerHTML += `<div class="section-title">🎓 Orientation et formations</div>`;
+  app.innerHTML += makeChartBlock('Par domaine',         countBy(records,'Domaine'),       total, 5);
+  app.innerHTML += makeChartBlock('Par formation',       countBy(records,'Formation'),     total, 7);
+
+  // Bloc 3 — Profils
+  app.innerHTML += `<div class="section-title">🏫 Profils des candidats</div>`;
+  app.innerHTML += makeChartBlock('Par lycée d\'origine', countBy(records,'Lycee'),        total, 9);
+  app.innerHTML += makeChartBlock('Par série de Bac',    countBy(records,'Serie_Bac'),     total, 11);
+  app.innerHTML += makeChartBlock('Par type de Bac',     countBy(records,'Type_Bac'),      total, 13);
 
   // Synthèse
+  app.innerHTML += `<div class="section-title">📋 Analyse</div>`;
   app.innerHTML += buildSynthese(records);
 
   // Scénarios
+  app.innerHTML += `<div class="section-title">🔭 Scénarios prospectifs</div>`;
   app.innerHTML += buildScenarios(records);
 }
 </script>
