@@ -1,0 +1,974 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🎡 Quiz Parcoursup – La Roue des Savoirs</title>
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;600;800&family=Nunito:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0f1b2d;
+    --surface: #162136;
+    --card: #1e2f4a;
+    --accent1: #f7c948;
+    --accent3: #4ecdc4;
+    --accent4: #a29bfe;
+    --text: #e8f0fe;
+    --text-dim: #8fa3c0;
+    --correct: #43d98a;
+    --wrong: #ff6b6b;
+    --radius: 14px;
+    --border: rgba(255,255,255,0.08);
+    --card-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    --wheel-glow: 0 0 30px rgba(78,205,196,0.2), 0 0 60px rgba(247,201,72,0.1);
+    --pointer-glow: rgba(247,201,72,0.6);
+  }
+
+  /* Thème clair pensé comme une "matinée" (papier billet, encre) plutôt
+     qu'une simple inversion du thème sombre ("spectacle du soir") */
+  body.light-theme {
+    --bg: #f6f1e7;
+    --surface: #ffffff;
+    --card: #ffffff;
+    --text: #1f2937;
+    --text-dim: #756b58;
+    --border: rgba(31,24,15,0.12);
+    --accent1: #b8790a;
+    --accent3: #157f76;
+    --correct: #1a9d5c;
+    --wrong: #d64545;
+    --card-shadow: 0 6px 20px rgba(31,24,15,0.10);
+    --wheel-glow: 0 4px 24px rgba(31,24,15,0.12);
+    --pointer-glow: rgba(184,121,10,0.45);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  html, body {
+    height: 100%;
+    overflow-x: hidden;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Nunito', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 12px 24px;
+    background-image: radial-gradient(ellipse at 20% 20%, rgba(78,205,196,0.08) 0%, transparent 50%),
+                      radial-gradient(ellipse at 80% 80%, rgba(247,201,72,0.06) 0%, transparent 50%);
+    transition: background-color 0.3s, color 0.3s;
+  }
+
+  h1 {
+    font-family: 'Baloo 2', cursive;
+    font-size: 1.5rem;
+    font-weight: 800;
+    text-align: center;
+    margin-bottom: 3px;
+    background: linear-gradient(135deg, var(--accent1), var(--accent3));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    color: var(--text-dim);
+    text-align: center;
+    font-size: 0.78rem;
+    margin-bottom: 10px;
+    padding: 0 8px;
+  }
+
+  /* ===== SCORE BAR (chrome d'info : pas une pilule, réservée aux actions) ===== */
+  .score-bar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 12px;
+    background: var(--surface);
+    padding: 8px 16px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    border-top: 3px solid var(--accent1);
+    width: 100%;
+    max-width: 380px;
+    justify-content: center;
+  }
+  .score-pill {
+    font-family: 'Baloo 2', cursive;
+    font-weight: 800;
+    font-size: 0.95rem;
+  }
+  .score-pill span { color: var(--accent1); }
+  .progress-dots { display: flex; gap: 5px; }
+  .dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--card);
+    border: 2px solid var(--text-dim);
+    transition: all 0.3s;
+  }
+  .dot.done { background: var(--correct); border-color: var(--correct); }
+  .dot.active { background: var(--accent1); border-color: var(--accent1); transform: scale(1.3); }
+
+  /* ===== MAIN LAYOUT ===== */
+  .game-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    max-width: 420px;
+  }
+
+  /* ===== WHEEL (l'élément signature : la roue de fête foraine) ===== */
+  .wheel-wrapper {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .wheel-outer {
+    position: relative;
+    width: min(260px, 72vw);
+    height: min(260px, 72vw);
+  }
+
+  .wheel-pointer {
+    position: absolute;
+    top: -14px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 11px solid transparent;
+    border-right: 11px solid transparent;
+    border-top: 22px solid var(--accent1);
+    z-index: 10;
+    filter: drop-shadow(0 2px 6px var(--pointer-glow));
+  }
+
+  #wheelCanvas {
+    border-radius: 50%;
+    box-shadow: var(--wheel-glow);
+    cursor: pointer;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  .spin-btn {
+    margin-top: 12px;
+    padding: 13px 32px;
+    font-family: 'Baloo 2', cursive;
+    font-size: 1.05rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--accent1), #f5a623);
+    color: #0f1b2d;
+    border: none;
+    border-radius: 50px;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: 0 4px 20px rgba(247,201,72,0.4);
+    letter-spacing: 0.5px;
+    width: 100%;
+    max-width: 260px;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .spin-btn:active { transform: scale(0.97); }
+  .spin-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+  /* ===== QUESTION CARD (bord en pointillés = ticket que l'on vient de tirer) ===== */
+  .question-card {
+    width: 100%;
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-top: 3px dashed var(--accent1);
+    box-shadow: var(--card-shadow);
+    display: none;
+    animation: slideUp 0.4s ease;
+  }
+  .question-card.visible { display: block; }
+
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .q-number {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--accent3);
+    margin-bottom: 10px;
+  }
+  .q-number::before, .q-number::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--accent3);
+    opacity: 0.35;
+  }
+
+  .q-text {
+    font-size: 0.95rem;
+    font-weight: 700;
+    line-height: 1.5;
+    color: var(--text);
+    margin-bottom: 14px;
+  }
+
+  .options { display: flex; flex-direction: column; gap: 8px; }
+
+  .option-btn {
+    background: var(--surface);
+    border: 2px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    font-family: 'Nunito', sans-serif;
+    font-size: 0.88rem;
+    font-weight: 600;
+    padding: 12px 14px;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.2s;
+    line-height: 1.4;
+    width: 100%;
+    min-height: 44px;
+  }
+  .option-btn:active:not(:disabled) {
+    border-color: var(--accent3);
+    background: rgba(78,205,196,0.1);
+  }
+  .option-btn.correct {
+    border-color: var(--correct);
+    background: rgba(67,217,138,0.15);
+    color: var(--correct);
+  }
+  .option-btn.wrong {
+    border-color: var(--wrong);
+    background: rgba(255,107,107,0.12);
+    color: var(--wrong);
+  }
+  .option-btn:disabled { cursor: default; }
+
+  .feedback {
+    margin-top: 12px;
+    padding: 11px 14px;
+    border-radius: 10px;
+    font-weight: 700;
+    font-size: 0.88rem;
+    display: none;
+    align-items: flex-start;
+    gap: 8px;
+    line-height: 1.4;
+  }
+  .feedback.show { display: flex; animation: fadeIn 0.3s ease; }
+  .feedback.correct-fb { background: rgba(67,217,138,0.15); color: var(--correct); border: 1px solid rgba(67,217,138,0.3); }
+  .feedback.wrong-fb { background: rgba(255,107,107,0.12); color: var(--wrong); border: 1px solid rgba(255,107,107,0.25); }
+  #feedbackIcon { display: flex; align-items: center; flex-shrink: 0; margin-top: 2px; }
+
+  .next-btn {
+    margin-top: 12px;
+    padding: 12px 26px;
+    font-family: 'Baloo 2', cursive;
+    font-size: 1rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--accent3), #3ab5ad);
+    color: #0f1b2d;
+    border: none;
+    border-radius: 50px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: none;
+    min-height: 46px;
+    width: 100%;
+  }
+  .next-btn.show { display: flex; align-items: center; justify-content: center; gap: 8px; animation: fadeIn 0.3s ease; }
+  .next-btn:active { opacity: 0.9; transform: scale(0.98); }
+
+  @keyframes fadeIn {
+    from { opacity: 0; } to { opacity: 1; }
+  }
+
+  /* ===== END SCREEN ===== */
+  .end-screen {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 14px;
+    padding: 24px 16px;
+    width: 100%;
+    max-width: 420px;
+    animation: slideUp 0.5s ease;
+  }
+  .end-screen.show { display: flex; }
+
+  .trophy {
+    font-size: 4rem;
+    line-height: 1;
+    filter: drop-shadow(0 4px 16px rgba(247,201,72,0.5));
+  }
+
+  .end-title {
+    font-family: 'Baloo 2', cursive;
+    font-size: 1.6rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--accent1), var(--accent3));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .end-score {
+    font-size: 3rem;
+    font-family: 'Baloo 2', cursive;
+    font-weight: 800;
+    color: var(--accent1);
+  }
+
+  .end-msg {
+    color: var(--text-dim);
+    font-size: 0.92rem;
+    max-width: 320px;
+    line-height: 1.6;
+  }
+
+  /* Récapitulatif des 6 questions : pour repérer d'un coup d'œil ce qu'il faut revoir */
+  .recap-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    margin-top: 2px;
+  }
+  .recap-chip {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 11px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    font-family: 'Baloo 2', cursive;
+  }
+  .recap-chip.ok { background: rgba(67,217,138,0.15); color: var(--correct); border: 1px solid rgba(67,217,138,0.3); }
+  .recap-chip.ko { background: rgba(255,107,107,0.12); color: var(--wrong); border: 1px solid rgba(255,107,107,0.25); }
+
+  .restart-btn {
+    padding: 14px 40px;
+    font-family: 'Baloo 2', cursive;
+    font-size: 1.05rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--accent3), #3ab5ad);
+    color: #0f1b2d;
+    border: none;
+    border-radius: 50px;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: 0 4px 20px rgba(78,205,196,0.35);
+    margin-top: 6px;
+    min-height: 50px;
+    width: 100%;
+    max-width: 260px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .restart-btn:active { transform: scale(0.97); }
+
+  /* ===== INSTRUCTION ===== */
+  .instruction {
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    text-align: center;
+    margin-top: 4px;
+    padding: 0 8px;
+  }
+
+  /* ===== WHEEL LABEL INDICATOR (chrome d'info, même traitement que score-bar) ===== */
+  .current-q-label {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--accent1);
+    border-radius: 8px;
+    padding: 5px 16px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--accent1);
+    margin-top: 6px;
+    display: none;
+  }
+  .current-q-label.show { display: block; }
+
+  /* ===== THEME TOGGLE ===== */
+  .theme-toggle {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-size: 1.1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+  }
+  .theme-toggle:active { transform: scale(0.92); }
+</style>
+</head>
+<body>
+
+<button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" aria-label="Changer de thème">🌙</button>
+
+<h1>🎡 La Roue Parcoursup</h1>
+<p class="subtitle">Tourne la roue, réponds aux questions et teste tes connaissances !</p>
+
+<div class="score-bar">
+  <div class="score-pill">Score : <span id="scoreDisplay">0</span> / <span id="scoreTotal">6</span></div>
+  <div class="progress-dots" id="progressDots"></div>
+</div>
+
+<div class="game-container" id="gameArea">
+
+  <!-- WHEEL -->
+  <div class="wheel-wrapper">
+    <div class="wheel-outer">
+      <div class="wheel-pointer"></div>
+      <canvas id="wheelCanvas" width="320" height="320"></canvas>
+    </div>
+    <div class="current-q-label" id="currentQLabel">Question en cours</div>
+    <button class="spin-btn" id="spinBtn" onclick="spinWheel()">Tourner la roue !</button>
+    <p class="instruction" id="instrText">Touche le bouton pour découvrir une question</p>
+  </div>
+
+  <!-- QUESTION CARD -->
+  <div class="question-card" id="questionCard">
+    <div class="q-number"><span id="qNumber">Question 1</span></div>
+    <div class="q-text" id="qText"></div>
+    <div class="options" id="optionsContainer"></div>
+    <div class="feedback" id="feedbackBox">
+      <span id="feedbackIcon"></span>
+      <span id="feedbackText"></span>
+    </div>
+    <button class="next-btn" id="nextBtn" onclick="nextRound()">Suivant</button>
+  </div>
+
+</div>
+
+<!-- END SCREEN -->
+<div class="end-screen" id="endScreen">
+  <div class="trophy" id="trophyIcon">🏆</div>
+  <div class="end-title">Quiz terminé !</div>
+  <div class="end-score" id="finalScore">0 / 6</div>
+  <div class="end-msg" id="endMsg"></div>
+  <div class="recap-row" id="recapRow"></div>
+  <button class="restart-btn" id="restartBtn" onclick="restartGame()">Recommencer</button>
+</div>
+
+<script>
+// ===== Icônes (remplacent les emojis pour les repères récurrents : rendu cohérent
+// d'un téléphone à l'autre). Les emojis "ambiance" (🎡, 🏆, 🥇...) sont conservés. =====
+const ICON_CHECK = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+const ICON_CROSS = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+const ICON_WARNING = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 L22 20 L2 20 Z"></path><line x1="12" y1="9" x2="12" y2="14"></line><circle cx="12" cy="17" r="0.6" fill="currentColor" stroke="none"></circle></svg>';
+const ICON_ARROW = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="13 6 19 12 13 18"></polyline></svg>';
+const ICON_SPIN = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"></circle><line x1="12" y1="3.5" x2="12" y2="7"></line><line x1="12" y1="17" x2="12" y2="20.5"></line><line x1="3.5" y1="12" x2="7" y2="12"></line><line x1="17" y1="12" x2="20.5" y2="12"></line></svg>';
+const ICON_RESTART = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"></path><polyline points="21 3 21 9 15 9"></polyline></svg>';
+
+const questions = [
+  {
+    text: "Qui peut formuler des vœux sur Parcoursup ?",
+    options: [
+      "Tous les lycéens",
+      "Les candidats en réorientation",
+      "Uniquement les élèves de terminale",
+      "Tous les candidats titulaires ou en préparation du diplôme de baccalauréat ou son équivalent (DAEU)"
+    ],
+    correct: 3,
+    feedback: "Tous les candidats titulaires ou en préparation du diplôme de baccalauréat (ou de son équivalent comme le DAEU) peuvent formuler des vœux sur Parcoursup."
+  },
+  {
+    text: "Faut-il avoir un dossier Parcoursup pour consulter les formations disponibles sur la plateforme ?",
+    options: ["Oui", "Non"],
+    correct: 1,
+    feedback: "Non ! Consulter les formations sur Parcoursup est libre et ne nécessite aucun compte."
+  },
+  {
+    text: "Qui analyse les candidatures sur Parcoursup ?",
+    options: [
+      "L'algorithme",
+      "La commission d'examen des vœux de chaque formation",
+      "L'équipe Parcoursup"
+    ],
+    correct: 1,
+    feedback: "C'est la commission d'examen des vœux propre à chaque formation qui analyse les dossiers, pas un algorithme seul."
+  },
+  {
+    text: "Que deviennent les candidats sans propositions d'admission ?",
+    options: [
+      "Les candidats peuvent participer à la phase complémentaire pour formuler de nouveaux vœux",
+      "Ils doivent retenter leur chance l'an prochain",
+      "Ils peuvent solliciter la CAES, les commissions d'accès à l'enseignement supérieur, pour trouver une solution adaptée à leur situation"
+    ],
+    correct: [0, 2],
+    feedback: "Deux solutions existent : la phase complémentaire pour formuler de nouveaux vœux, et la CAES (commissions d'accès à l'enseignement supérieur) qui accompagne les candidats sans proposition d'admission."
+  },
+  {
+    text: "Si les candidats formulent des vœux sur Parcoursup, peuvent-ils candidater à des formations hors Parcoursup ou à l'étranger ?",
+    options: [
+      "Les candidats peuvent à la fois formuler des vœux sur Parcoursup et présenter leurs candidatures pour des formations hors Parcoursup ou à l'étranger",
+      "Si les candidats participent à la procédure Parcoursup, ils ne peuvent pas présenter de candidature en dehors de la plateforme"
+    ],
+    correct: 0,
+    feedback: "Parcoursup n'empêche pas de candidater en parallèle à des formations hors plateforme ou à l'étranger !"
+  },
+  {
+    text: "Si ma première année d'études supérieures ne me convient pas, est-ce que je pourrais reformuler des vœux la session suivante ?",
+    options: [
+      "Non, vous ne pouvez tenter votre chance qu'une seule fois",
+      "Oui, chaque session Parcoursup est complètement indépendante de l'autre, vous pouvez recandidater la session suivante"
+    ],
+    correct: 1,
+    feedback: "Oui ! Chaque session Parcoursup est complètement indépendante de la précédente, tu peux tout à fait recandidater à la session suivante."
+  }
+];
+
+const segColors = [
+  "#f7c948", "#4ecdc4", "#ff6b6b", "#a29bfe", "#fd79a8", "#00b894"
+];
+const segLabels = ["Q1", "Q2", "Q3", "Q4", "Q5", "Q6"];
+
+let score = 0;
+let answeredQuestions = new Set();
+let questionResults = {}; // qIdx -> true/false, pour le souvenir visuel sur la roue + le récap final
+let currentQuestionIndex = -1;
+let isSpinning = false;
+let rotation = 0;
+let answered = false;
+let isLightTheme = false;
+
+const canvas = document.getElementById("wheelCanvas");
+const ctx = canvas.getContext("2d");
+const size = canvas.width;
+const cx = size / 2, cy = size / 2, r = size / 2 - 8;
+const numSeg = questions.length;
+const segAngle = (2 * Math.PI) / numSeg;
+
+function drawWheel(rot) {
+  ctx.clearRect(0, 0, size, size);
+
+  // Cadre fixe (ne tourne pas) autour de la roue
+  ctx.beginPath();
+  ctx.arc(cx, cy, r + 6, 0, 2 * Math.PI);
+  ctx.strokeStyle = isLightTheme ? "rgba(31,24,15,0.12)" : "rgba(255,255,255,0.07)";
+  ctx.lineWidth = 10;
+  ctx.stroke();
+
+  for (let i = 0; i < numSeg; i++) {
+    const start = rot + i * segAngle - Math.PI / 2;
+    const end = start + segAngle;
+    const done = answeredQuestions.has(i);
+    const wasCorrect = questionResults[i];
+
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, r, start, end);
+    ctx.closePath();
+    ctx.fillStyle = done
+      ? (wasCorrect ? "rgba(67,217,138,0.32)" : "rgba(255,107,107,0.3)")
+      : segColors[i];
+    ctx.fill();
+    ctx.strokeStyle = "#0f1b2d";
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(start + segAngle / 2);
+
+    if (done) {
+      // Tampon à l'encre : coche ou croix à la place du numéro, pour garder
+      // une trace visuelle de la réussite directement sur la roue
+      const mx = r - 26, my = 0, s = size * 0.05;
+      ctx.strokeStyle = "#0f1b2d";
+      ctx.lineWidth = s * 0.22;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      if (wasCorrect) {
+        ctx.moveTo(mx - s * 0.5, my);
+        ctx.lineTo(mx - s * 0.1, my + s * 0.4);
+        ctx.lineTo(mx + s * 0.5, my - s * 0.35);
+      } else {
+        ctx.moveTo(mx - s * 0.35, my - s * 0.35);
+        ctx.lineTo(mx + s * 0.35, my + s * 0.35);
+        ctx.moveTo(mx + s * 0.35, my - s * 0.35);
+        ctx.lineTo(mx - s * 0.35, my + s * 0.35);
+      }
+      ctx.stroke();
+    } else {
+      ctx.textAlign = "right";
+      ctx.fillStyle = "#0f1b2d";
+      ctx.font = `bold ${size * 0.065}px 'Baloo 2', cursive`;
+      ctx.fillText(segLabels[i], r - 18, 6);
+    }
+    ctx.restore();
+  }
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, 28, 0, 2 * Math.PI);
+  ctx.fillStyle = "#0f1b2d";
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.15)";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  ctx.fillStyle = "#e8f0fe";
+  ctx.font = `bold ${size * 0.06}px 'Baloo 2', cursive`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText("GO", cx, cy);
+}
+
+function spinWheel() {
+  if (isSpinning || answeredQuestions.size >= numSeg) return;
+
+  const unanswered = [];
+  for (let i = 0; i < numSeg; i++) {
+    if (!answeredQuestions.has(i)) unanswered.push(i);
+  }
+  if (unanswered.length === 0) return;
+
+  const target = unanswered[Math.floor(Math.random() * unanswered.length)];
+
+  isSpinning = true;
+  document.getElementById("spinBtn").disabled = true;
+  document.getElementById("questionCard").classList.remove("visible");
+  document.getElementById("currentQLabel").classList.remove("show");
+
+  const startRot = rotation;
+
+  const targetAngleInWheel = target * segAngle + segAngle / 2;
+  const desiredRotMod = (-(targetAngleInWheel) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+  const currentRotMod = ((startRot % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+
+  let delta = (desiredRotMod - currentRotMod + 2 * Math.PI) % (2 * Math.PI);
+  if (delta < 0.01) delta += 2 * Math.PI;
+
+  const fullSpins = (5 + Math.floor(Math.random() * 4)) * 2 * Math.PI;
+  const endRot = startRot + fullSpins + delta;
+
+  const duration = 3200 + Math.random() * 800;
+  const startTime = performance.now();
+
+  function easeOut(t) {
+    return 1 - Math.pow(1 - t, 4);
+  }
+
+  function animate(now) {
+    const elapsed = now - startTime;
+    const t = Math.min(elapsed / duration, 1);
+    rotation = startRot + (endRot - startRot) * easeOut(t);
+    drawWheel(rotation);
+
+    if (t < 1) {
+      requestAnimationFrame(animate);
+    } else {
+      rotation = endRot;
+      isSpinning = false;
+      currentQuestionIndex = target;
+      showQuestion(target);
+    }
+  }
+
+  requestAnimationFrame(animate);
+}
+
+let selectedAnswers = new Set();
+
+function showQuestion(idx) {
+  const q = questions[idx];
+  const isMulti = Array.isArray(q.correct) && q.correct.length > 1;
+
+  document.getElementById("qNumber").textContent = `Question ${idx + 1}`;
+  document.getElementById("qText").textContent = q.text;
+
+  let hint = document.getElementById("multiHint");
+  if (!hint) {
+    hint = document.createElement("div");
+    hint.id = "multiHint";
+    hint.style.cssText = "display:flex;align-items:center;gap:6px;font-size:0.78rem;color:var(--accent1);font-weight:700;margin-bottom:8px;";
+    document.getElementById("optionsContainer").before(hint);
+  }
+  hint.innerHTML = isMulti ? (ICON_WARNING + ` <span>${q.correct.length} bonnes réponses à sélectionner</span>`) : "";
+
+  selectedAnswers = new Set();
+  const container = document.getElementById("optionsContainer");
+  container.innerHTML = "";
+
+  q.options.forEach((opt, i) => {
+    const btn = document.createElement("button");
+    btn.className = "option-btn";
+    btn.textContent = opt;
+    btn.onclick = () => isMulti ? toggleMultiAnswer(i, idx) : checkAnswer(i, idx);
+    container.appendChild(btn);
+  });
+
+  let validateBtn = document.getElementById("validateBtn");
+  if (!validateBtn) {
+    validateBtn = document.createElement("button");
+    validateBtn.id = "validateBtn";
+    validateBtn.className = "next-btn";
+    validateBtn.innerHTML = ICON_CHECK + " Valider mes réponses";
+    validateBtn.style.marginTop = "10px";
+    document.getElementById("nextBtn").before(validateBtn);
+  }
+  validateBtn.onclick = () => submitMultiAnswer(idx);
+  validateBtn.className = isMulti ? "next-btn show" : "next-btn";
+  validateBtn.disabled = true;
+  validateBtn.style.opacity = "0.4";
+
+  document.getElementById("feedbackBox").className = "feedback";
+  document.getElementById("nextBtn").className = "next-btn";
+  document.getElementById("questionCard").classList.add("visible");
+
+  const label = document.getElementById("currentQLabel");
+  label.textContent = `Question ${idx + 1} sélectionnée`;
+  label.classList.add("show");
+
+  document.getElementById("instrText").textContent = "Réponds à la question ci-dessous !";
+
+  // Auto-scroll vers la carte de question (déclenché après la fin de l'animation slideUp)
+  setTimeout(() => {
+    document.getElementById("questionCard").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, 450);
+
+  answered = false;
+}
+
+function toggleMultiAnswer(selected, qIdx) {
+  if (answered) return;
+  const q = questions[qIdx];
+  const correctAnswers = Array.isArray(q.correct) ? q.correct : [q.correct];
+  const btns = document.querySelectorAll(".option-btn");
+
+  if (selectedAnswers.has(selected)) {
+    selectedAnswers.delete(selected);
+    btns[selected].style.borderColor = "";
+    btns[selected].style.background = "";
+  } else {
+    selectedAnswers.add(selected);
+    btns[selected].style.borderColor = "var(--accent4)";
+    btns[selected].style.background = "rgba(162,155,254,0.15)";
+  }
+
+  const validateBtn = document.getElementById("validateBtn");
+  if (selectedAnswers.size === correctAnswers.length) {
+    validateBtn.disabled = false;
+    validateBtn.style.opacity = "1";
+  } else {
+    validateBtn.disabled = true;
+    validateBtn.style.opacity = "0.4";
+  }
+}
+
+function submitMultiAnswer(qIdx) {
+  if (answered) return;
+  answered = true;
+
+  const q = questions[qIdx];
+  const correctAnswers = Array.isArray(q.correct) ? q.correct : [q.correct];
+  const btns = document.querySelectorAll(".option-btn");
+  btns.forEach(b => { b.disabled = true; b.style.borderColor = ""; b.style.background = ""; });
+
+  document.getElementById("validateBtn").className = "next-btn";
+
+  const isCorrect = correctAnswers.every(c => selectedAnswers.has(c)) && selectedAnswers.size === correctAnswers.length;
+
+  selectedAnswers.forEach(si => {
+    if (!correctAnswers.includes(si)) btns[si].classList.add("wrong");
+  });
+  correctAnswers.forEach(ci => btns[ci].classList.add("correct"));
+
+  questionResults[qIdx] = isCorrect;
+  if (isCorrect) {
+    score++;
+    document.getElementById("scoreDisplay").textContent = score;
+    showFeedback(true, "Bonne réponse ! " + q.feedback);
+  } else {
+    showFeedback(false, q.feedback);
+  }
+
+  answeredQuestions.add(qIdx);
+  updateDots();
+  drawWheel(rotation);
+  document.getElementById("nextBtn").className = "next-btn show";
+}
+
+function checkAnswer(selected, qIdx) {
+  if (answered) return;
+  answered = true;
+
+  const q = questions[qIdx];
+  const btns = document.querySelectorAll(".option-btn");
+  btns.forEach(b => b.disabled = true);
+
+  const correctAnswers = Array.isArray(q.correct) ? q.correct : [q.correct];
+  const isCorrect = correctAnswers.includes(selected);
+
+  correctAnswers.forEach(ci => btns[ci].classList.add("correct"));
+  if (!isCorrect) btns[selected].classList.add("wrong");
+
+  questionResults[qIdx] = isCorrect;
+  if (isCorrect) {
+    score++;
+    document.getElementById("scoreDisplay").textContent = score;
+    showFeedback(true, "Bonne réponse ! " + q.feedback);
+  } else {
+    showFeedback(false, q.feedback);
+  }
+
+  answeredQuestions.add(qIdx);
+  updateDots();
+  drawWheel(rotation);
+  document.getElementById("nextBtn").className = "next-btn show";
+}
+
+function showFeedback(correct, msg) {
+  const box = document.getElementById("feedbackBox");
+  box.className = "feedback show " + (correct ? "correct-fb" : "wrong-fb");
+  document.getElementById("feedbackIcon").innerHTML = correct ? ICON_CHECK : ICON_CROSS;
+  document.getElementById("feedbackText").textContent = msg;
+}
+
+function nextRound() {
+  document.getElementById("questionCard").classList.remove("visible");
+  document.getElementById("currentQLabel").classList.remove("show");
+
+  if (answeredQuestions.size >= numSeg) {
+    showEndScreen();
+    return;
+  }
+
+  document.getElementById("spinBtn").disabled = false;
+  document.getElementById("instrText").textContent = "Tourne la roue pour la prochaine question !";
+
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function updateDots() {
+  const dots = document.querySelectorAll(".dot");
+  dots.forEach((d, i) => {
+    d.classList.remove("done", "active");
+    if (answeredQuestions.has(i)) d.classList.add("done");
+    else if (i === currentQuestionIndex) d.classList.add("active");
+  });
+}
+
+function showEndScreen() {
+  document.getElementById("gameArea").style.display = "none";
+  const end = document.getElementById("endScreen");
+  end.classList.add("show");
+  document.getElementById("finalScore").textContent = `${score} / ${numSeg}`;
+
+  let trophy, msg;
+  if (score === numSeg) {
+    trophy = "🏆"; msg = "Parfait ! Tu maîtrises Parcoursup sur le bout des doigts. Tu es prêt(e) pour la procédure !";
+  } else if (score >= 4) {
+    trophy = "🥇"; msg = "Très bien ! Tu as de solides connaissances sur Parcoursup. Quelques révisions et tu seras au top !";
+  } else if (score >= 2) {
+    trophy = "📚"; msg = "Pas mal, mais quelques points méritent d'être revus. N'hésite pas à explorer le site Parcoursup.fr !";
+  } else {
+    trophy = "💪"; msg = "Il faut encore réviser ! Retente ta chance et consulte les ressources officielles sur parcoursup.fr.";
+  }
+  document.getElementById("trophyIcon").textContent = trophy;
+  document.getElementById("endMsg").textContent = msg;
+
+  const recap = document.getElementById("recapRow");
+  recap.innerHTML = "";
+  for (let i = 0; i < numSeg; i++) {
+    const chip = document.createElement("div");
+    const ok = questionResults[i];
+    chip.className = "recap-chip " + (ok ? "ok" : "ko");
+    chip.innerHTML = (ok ? ICON_CHECK : ICON_CROSS) + ` Q${i + 1}`;
+    recap.appendChild(chip);
+  }
+}
+
+function restartGame() {
+  score = 0;
+  answeredQuestions = new Set();
+  questionResults = {};
+  currentQuestionIndex = -1;
+  rotation = 0;
+  answered = false;
+
+  document.getElementById("scoreDisplay").textContent = "0";
+  document.getElementById("endScreen").classList.remove("show");
+  document.getElementById("gameArea").style.display = "flex";
+  document.getElementById("questionCard").classList.remove("visible");
+  document.getElementById("currentQLabel").classList.remove("show");
+  document.getElementById("spinBtn").disabled = false;
+  document.getElementById("instrText").textContent = "Touche le bouton pour découvrir une question";
+  document.getElementById("recapRow").innerHTML = "";
+
+  updateDots();
+  drawWheel(0);
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function initDots() {
+  const container = document.getElementById("progressDots");
+  for (let i = 0; i < numSeg; i++) {
+    const d = document.createElement("div");
+    d.className = "dot";
+    container.appendChild(d);
+  }
+}
+
+function toggleTheme() {
+  isLightTheme = document.body.classList.toggle("light-theme");
+  document.getElementById("themeToggle").textContent = isLightTheme ? "☀️" : "🌙";
+  drawWheel(rotation);
+}
+
+// Respecte le thème déjà configuré sur le téléphone, au premier chargement
+if (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) {
+  document.body.classList.add("light-theme");
+  isLightTheme = true;
+  document.getElementById("themeToggle").textContent = "☀️";
+}
+
+document.getElementById("scoreTotal").textContent = numSeg;
+document.getElementById("spinBtn").innerHTML = ICON_SPIN + " Tourner la roue !";
+document.getElementById("nextBtn").innerHTML = "Suivant " + ICON_ARROW;
+document.getElementById("restartBtn").innerHTML = ICON_RESTART + " Recommencer";
+
+initDots();
+drawWheel(0);
+</script>
+</body>
+</html>
