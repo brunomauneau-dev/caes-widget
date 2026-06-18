@@ -16,7 +16,7 @@ const DATA_ENGINE_TOOLS = [
   { name: 'chart', description: 'Afficher un graphique local à partir du dernier résultat ou d’un group_by' }
 ];
 
-// V21 — mémoire légère de la dernière analyse locale.
+// V22 — mémoire d'analyse locale.
 // Sert aux demandes de suivi : "par académie", "seulement les boursiers", "graphique", "exporte en Excel".
 window.__DATA_ENGINE_STATE = window.__DATA_ENGINE_STATE || { lastPlan: null, lastExecution: null, history: [] };
 
@@ -27,7 +27,7 @@ function getDataEngineState() {
 
 function isFollowUpQuestion(question) {
   const q = normalizeText(question || '');
-  return !!getDataEngineState().lastPlan && /^(par|selon|uniquement|seulement|sauf|hors|avec|sans|graphique|camembert|histogramme|barres?|excel|csv|export|exporte|trie|tri|top|les boursiers|les non boursiers)/.test(q);
+  return !!getDataEngineState().lastPlan && /^(par|selon|uniquement|seulement|sauf|hors|avec|sans|graphique|camembert|histogramme|barres?|excel|csv|export|exporte|trie|tri|les boursiers|les non boursiers)/.test(q);
 }
 
 function isChartRequest(question) {
@@ -38,6 +38,22 @@ function isChartRequest(question) {
 function isExportCurrentRequest(question) {
   const q = normalizeText(question || '');
   return /export|exporte|excel|xlsx|csv|telecharg|t[eé]l[eé]charg/.test(q);
+}
+
+
+function isBareChartRequest(question) {
+  const q = normalizeText(question || '');
+  return /^(graphique|graphe|diagramme|histogramme|camembert|barres?|chart|fais un graphique|affiche un graphique)$/.test(q);
+}
+
+function isBareExportRequest(question) {
+  const q = normalizeText(question || '');
+  return /^(export|exporte|exporte en excel|excel|xlsx|csv|exporte en csv|telecharge|télécharge|telechargement|téléchargement)$/.test(q);
+}
+
+function isDimensionOnlyFollowUp(question) {
+  const q = normalizeText(question || '');
+  return /^(par|selon)\s+/.test(q);
 }
 
 function mergeFiltersUnique(base, extra) {
@@ -61,30 +77,31 @@ function inheritConversationContext(plan, question) {
   }
 
   // Demandes courtes de suivi : on conserve les filtres précédents et on ajoute les nouveaux.
-  const shortFollowUp = isFollowUpQuestion(question) || q.split(/\s+/).length <= 5;
+  // Important : les requêtes explicites de type "Top 10 des formations du Pays Basque"
+  // ne doivent PAS hériter de filtres précédents non mentionnés.
+  const explicitFreshQuery = /(top|classement|tableau crois[eé]|croise|pivot|moyenne|moyen|median|nombre moyen|repartition|r[eé]partition).{0,80}(pays basque|basque|boursier|hors|bordeaux|bac|but|dut|bts|formation|academie|acad[eé]mie)/.test(q);
+  const shortFollowUp = !explicitFreshQuery && (isFollowUpQuestion(question) || q.split(/\s+/).length <= 5);
   if (shortFollowUp) {
     plan.filters = mergeFiltersUnique(prev.filters || [], plan.filters || []);
 
+    // "Par académie" / "selon la série" = nouvelle répartition sur le périmètre courant.
+    if (isDimensionOnlyFollowUp(question)) {
+      plan.tool = 'group_by';
+    }
     // Si la demande n'indique pas explicitement un nouvel outil, conserver l'outil précédent.
-    if (!/(combien|nombre|effectif|repartition|r[eé]partition|top|tableau crois[eé]|croise|moyenne|moyen|median|export|excel|csv|graphique|camembert|histogramme)/.test(q)) {
+    else if (!/(combien|nombre|effectif|repartition|r[eé]partition|top|tableau crois[eé]|croise|moyenne|moyen|median|export|excel|csv|graphique|camembert|histogramme)/.test(q)) {
       plan.tool = prev.tool || plan.tool;
     }
 
-    // "Par académie" / "par série" conserve les filtres mais change la dimension.
-    if ((plan.tool === 'group_by' || plan.tool === 'top' || plan.tool === 'pivot') && !plan.targetCol && prev.targetCol) {
+    // Pour les demandes de suivi non dimensionnelles, conserver la dernière dimension si aucune nouvelle n'est détectée.
+    if (!isDimensionOnlyFollowUp(question) && (plan.tool === 'group_by' || plan.tool === 'top' || plan.tool === 'pivot') && !plan.targetCol && prev.targetCol) {
       plan.targetCol = prev.targetCol;
     }
 
-    // "graphique" sans autre précision reprend la dernière répartition/top.
-    if (isChartRequest(question)) {
-      plan.renderChart = true;
-      plan.tool = ['group_by','top'].includes(prev.tool) ? prev.tool : (plan.tool === 'count_rows' ? 'group_by' : plan.tool);
-      plan.targetCol = plan.targetCol || prev.targetCol;
-      plan.filters = mergeFiltersUnique(prev.filters || [], plan.filters || []);
-    }
+    if (isChartRequest(question)) plan.renderChart = true;
 
-    // "Excel" seul exporte le périmètre courant.
-    if (isExportCurrentRequest(question)) {
+    // "Excel" seul exporte le résultat courant quand possible ; le cas est traité avant planification.
+    if (isExportCurrentRequest(question) && !isBareExportRequest(question)) {
       plan.tool = /\bcsv\b/.test(q) ? 'export_csv' : 'export_excel';
       plan.filters = mergeFiltersUnique(prev.filters || [], plan.filters || []);
     }
@@ -166,6 +183,39 @@ function findMentionedColumns(headers, question, max = 3) {
     .map(x => x.col);
 }
 
+
+function buildCurrentResultPlan(question, table) {
+  const state = getDataEngineState();
+  const prevExec = state.lastExecution;
+  if (!prevExec) return null;
+  const q = normalizeText(question || '');
+  if (isBareChartRequest(question)) {
+    return {
+      tool: 'chart_current',
+      table: table || prevExec.plan?.table,
+      sourceExecution: prevExec,
+      question,
+      filters: prevExec.plan?.filters || [],
+      targetCol: prevExec.plan?.targetCol || null,
+      mentionedCols: prevExec.plan?.mentionedCols || [],
+      createdAt: new Date().toISOString()
+    };
+  }
+  if (isBareExportRequest(question)) {
+    return {
+      tool: /\bcsv\b/.test(q) ? 'export_current_csv' : 'export_current_excel',
+      table: table || prevExec.plan?.table,
+      sourceExecution: prevExec,
+      question,
+      filters: prevExec.plan?.filters || [],
+      targetCol: prevExec.plan?.targetCol || null,
+      mentionedCols: prevExec.plan?.mentionedCols || [],
+      createdAt: new Date().toISOString()
+    };
+  }
+  return null;
+}
+
 function detectDataEnginePlan(question, filterContextText = question) {
   if (!isDataEngineQuestion(question)) return null;
   const tables = getActiveQueryTables();
@@ -173,6 +223,12 @@ function detectDataEnginePlan(question, filterContextText = question) {
   const table = tables[0]; // Grist est déjà prioritaire dans getActiveQueryTables()
   if (!table || !table.objects || !table.objects.length) return null;
   const headers = table.headers || Object.keys(table.objects[0] || {});
+
+  // "Graphique" / "Excel" seuls agissent sur le dernier résultat calculé,
+  // pas sur une nouvelle requête replanifiée.
+  const currentPlan = buildCurrentResultPlan(question, table);
+  if (currentPlan) return currentPlan;
+
   const tool = inferMeasureIntent(question);
   if (!tool) return null;
 
@@ -200,8 +256,101 @@ function detectDataEnginePlan(question, filterContextText = question) {
   }, question);
 }
 
+
+function currentExecutionToRows(exec) {
+  if (!exec) return [];
+  const p = exec.plan || {};
+  if (exec.kind === 'group_by' || exec.kind === 'top') {
+    const label = p.targetCol || 'Valeur';
+    return (exec.result?.rows || []).map(r => ({
+      [label]: r.value,
+      Nombre: r.count,
+      Pourcentage: Number((r.pct || 0).toFixed(2))
+    }));
+  }
+  if (exec.kind === 'pivot') {
+    const rowLabel = exec.result?.rowCol || p.targetCol || 'Ligne';
+    const cols = exec.result?.colValues || [];
+    return (exec.result?.matrix || []).map(r => {
+      const o = { [rowLabel]: r.value };
+      cols.forEach((c, i) => { o[c] = r.cells[i] || 0; });
+      o.Total = r.total;
+      return o;
+    });
+  }
+  if (exec.kind === 'stats') {
+    return [{
+      Colonne: p.targetCol || '',
+      'Valeurs numériques': exec.result?.numericCount ?? '',
+      'Total lignes': exec.result?.total ?? '',
+      Moyenne: exec.result?.avg ?? '',
+      Médiane: exec.result?.median ?? '',
+      Min: exec.result?.min ?? '',
+      Max: exec.result?.max ?? ''
+    }];
+  }
+  if (exec.kind === 'count') {
+    const table = p.table;
+    return applyLocalActionFilters(table?.objects || [], p.filters || []);
+  }
+  return [];
+}
+
+function downloadRowsAsFile(rows, filename, format) {
+  if (!rows || !rows.length) return { ok: false, html: '<h4>Export impossible</h4><p>Aucune donnée à exporter.</p>' };
+  const ws = XLSX.utils.json_to_sheet(rows);
+  if (format === 'csv') {
+    const csv = XLSX.utils.sheet_to_csv(ws);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 500);
+  } else {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Resultat');
+    XLSX.writeFile(wb, filename);
+  }
+  return { ok: true, html: `<h4>Export généré</h4><p>J'ai créé <strong>${escapeHtml(filename)}</strong> avec <strong>${rows.length.toLocaleString('fr-FR')}</strong> ligne${rows.length>1?'s':''}.</p>` };
+}
+
+function renderCurrentChartExecution(plan) {
+  const prev = plan.sourceExecution;
+  if (!prev) return null;
+  if (prev.kind === 'group_by' || prev.kind === 'top') {
+    const rows = prev.result?.rows || [];
+    const clonedPlan = { ...(prev.plan || {}), renderChart: true };
+    const html = renderDataEngineResultHtml(prev.plan?.tool || prev.kind, clonedPlan, prev.result);
+    return { kind: prev.kind, plan: clonedPlan, result: prev.result, text: prev.text, html };
+  }
+  // Si le dernier résultat n'est pas graphiquable, produire une répartition par la dernière dimension connue.
+  const fallbackCol = prev.plan?.targetCol || 'Série de la Classe';
+  const rows = applyLocalActionFilters(prev.plan?.table?.objects || [], prev.plan?.filters || []);
+  const counts = topCountsForRows(rows, fallbackCol, 30);
+  const result = { total: rows.length, filled: counts.filled, distinct: counts.distinct, rows: counts.top.slice(0, 12) };
+  const clonedPlan = { ...(prev.plan || {}), tool: 'group_by', targetCol: fallbackCol, renderChart: true };
+  return { kind: 'group_by', plan: clonedPlan, result, text: '', html: renderDataEngineResultHtml('group_by', clonedPlan, result) };
+}
+
 function runDataEnginePlan(plan) {
   if (!plan || !plan.table) return null;
+  if (plan.tool === 'chart_current') {
+    const exec = renderCurrentChartExecution(plan);
+    if (exec) rememberDataEngineExecution(exec);
+    return exec;
+  }
+  if (plan.tool === 'export_current_excel' || plan.tool === 'export_current_csv') {
+    const prev = plan.sourceExecution || getDataEngineState().lastExecution;
+    const rows = currentExecutionToRows(prev);
+    const format = plan.tool === 'export_current_csv' ? 'csv' : 'xlsx';
+    const filename = format === 'csv' ? 'resultat_analyse.csv' : 'resultat_analyse.xlsx';
+    const res = downloadRowsAsFile(rows, filename, format);
+    return { kind: 'export', plan, result: res, html: res.html };
+  }
   if (plan.tool === 'export_excel' || plan.tool === 'export_csv') {
     const action = {
       tool: plan.tool,
@@ -334,7 +483,7 @@ function dataEngineResultToContext(exec) {
   if (!exec || !exec.plan) return '';
   const p = exec.plan;
   const filters = (p.filters || []).map(f => `${f.col} ${f.op === 'neq' ? '≠' : '='} "${f.value}"`).join(' ; ') || 'aucun';
-  let out = `=== DATA ENGINE V21 — RÉSULTAT CALCULÉ SUR LIGNES BRUTES ===\n`;
+  let out = `=== DATA ENGINE V22 — RÉSULTAT CALCULÉ SUR LIGNES BRUTES ===\n`;
   out += `Outil : ${p.tool}\nSource : ${p.table?.source || 'Données'} · ${p.table?.name || 'table'}\nFiltres : ${filters}\n`;
   if (exec.kind === 'count') out += `Résultat : ${exec.result.count} ligne(s) sur ${exec.result.total}.\n`;
   if (exec.kind === 'group_by' || exec.kind === 'top') {
@@ -373,7 +522,7 @@ function renderDataEngineResultHtml(tool, plan, result) {
   }
   if (tool === 'stats') {
     const fmt = v => v === null || v === undefined ? '—' : Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 2 });
-    return `<h4>Statistiques calculées localement</h4><p>Colonne : <strong>${escapeHtml(plan.targetCol)}</strong></p><ul><li>Valeurs numériques : <strong>${result.numericCount.toLocaleString('fr-FR')}</strong> / ${result.total.toLocaleString('fr-FR')}</li><li>Moyenne : <strong>${fmt(result.avg)}</strong></li><li>Médiane : <strong>${fmt(result.median)}</strong></li><li>Min : <strong>${fmt(result.min)}</strong></li><li>Max : <strong>${fmt(result.max)}</strong></li></ul>${plan.renderChart ? renderMiniBarChart(rows, result.total) : ''}${filtersHtml}${debug}`;
+    return `<h4>Statistiques calculées localement</h4><p>Colonne : <strong>${escapeHtml(plan.targetCol)}</strong></p><ul><li>Valeurs numériques : <strong>${result.numericCount.toLocaleString('fr-FR')}</strong> / ${result.total.toLocaleString('fr-FR')}</li><li>Moyenne : <strong>${fmt(result.avg)}</strong></li><li>Médiane : <strong>${fmt(result.median)}</strong></li><li>Min : <strong>${fmt(result.min)}</strong></li><li>Max : <strong>${fmt(result.max)}</strong></li></ul>${filtersHtml}${debug}`;
   }
   return `<h4>Résultat calculé localement</h4>${debug}`;
 }
