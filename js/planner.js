@@ -587,6 +587,12 @@
   function targetColumn(schema, question, tool, filters) {
     if (!['group_by','top','pivot','stats'].includes(tool)) return null;
     const q = nrm(question);
+    if (tool === 'stats' && /voeu|voeux|vœu|vœux|confirm/.test(q)) {
+      const voeu = schema.columns
+        .filter(e => e.kind === 'voeu' || /voeu|vœu|confirm/.test(e.norm))
+        .sort((a,b) => (columnPriority(b, q) + contextScore(b, q)) - (columnPriority(a, q) + contextScore(a, q)))[0];
+      if (voeu) return voeu.column;
+    }
     const parMatch = q.match(/(?:par|selon|repartition par|répartition par|top\s+\d*\s*(?:des|de)?|principaux|principales)\s+([a-z0-9 ]{3,100})/);
     const phrase = parMatch ? parMatch[1] : q;
     return targetColumnForPhrase(schema, phrase, q, tool, filters, []);
@@ -660,7 +666,7 @@
       mentionedCols,
       question,
       planner: {
-        version: 'v20-data-engine-pipeline-fixes',
+        version: 'v21-memory-charts-export',
         confidence,
         reasons,
         schema: {

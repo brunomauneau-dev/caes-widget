@@ -12,17 +12,116 @@ const DATA_ENGINE_TOOLS = [
   { name: 'pivot', description: 'Croiser deux colonnes sur un sous-ensemble filtré' },
   { name: 'stats', description: 'Calculer moyenne, médiane, min, max sur une colonne numérique' },
   { name: 'export_excel', description: 'Exporter les lignes filtrées en Excel' },
-  { name: 'export_csv', description: 'Exporter les lignes filtrées en CSV' }
+  { name: 'export_csv', description: 'Exporter les lignes filtrées en CSV' },
+  { name: 'chart', description: 'Afficher un graphique local à partir du dernier résultat ou d’un group_by' }
 ];
+
+// V21 — mémoire légère de la dernière analyse locale.
+// Sert aux demandes de suivi : "par académie", "seulement les boursiers", "graphique", "exporte en Excel".
+window.__DATA_ENGINE_STATE = window.__DATA_ENGINE_STATE || { lastPlan: null, lastExecution: null, history: [] };
+
+function getDataEngineState() {
+  window.__DATA_ENGINE_STATE = window.__DATA_ENGINE_STATE || { lastPlan: null, lastExecution: null, history: [] };
+  return window.__DATA_ENGINE_STATE;
+}
+
+function isFollowUpQuestion(question) {
+  const q = normalizeText(question || '');
+  return !!getDataEngineState().lastPlan && /^(par|selon|uniquement|seulement|sauf|hors|avec|sans|graphique|camembert|histogramme|barres?|excel|csv|export|exporte|trie|tri|top|les boursiers|les non boursiers)/.test(q);
+}
+
+function isChartRequest(question) {
+  const q = normalizeText(question || '');
+  return /graphique|graphe|diagramme|histogramme|barres?|camembert|chart/.test(q);
+}
+
+function isExportCurrentRequest(question) {
+  const q = normalizeText(question || '');
+  return /export|exporte|excel|xlsx|csv|telecharg|t[eé]l[eé]charg/.test(q);
+}
+
+function mergeFiltersUnique(base, extra) {
+  const out = [];
+  [...(base || []), ...(extra || [])].forEach(f => {
+    if (!f || !f.col) return;
+    const key = `${f.col}::${f.op || 'eq'}::${String(f.value)}`;
+    if (!out.some(x => `${x.col}::${x.op || 'eq'}::${String(x.value)}` === key)) out.push(f);
+  });
+  return out;
+}
+
+function inheritConversationContext(plan, question) {
+  if (!plan) return plan;
+  const state = getDataEngineState();
+  const prev = state.lastPlan;
+  const q = normalizeText(question || '');
+  if (!prev) {
+    if (isChartRequest(question)) plan.renderChart = true;
+    return plan;
+  }
+
+  // Demandes courtes de suivi : on conserve les filtres précédents et on ajoute les nouveaux.
+  const shortFollowUp = isFollowUpQuestion(question) || q.split(/\s+/).length <= 5;
+  if (shortFollowUp) {
+    plan.filters = mergeFiltersUnique(prev.filters || [], plan.filters || []);
+
+    // Si la demande n'indique pas explicitement un nouvel outil, conserver l'outil précédent.
+    if (!/(combien|nombre|effectif|repartition|r[eé]partition|top|tableau crois[eé]|croise|moyenne|moyen|median|export|excel|csv|graphique|camembert|histogramme)/.test(q)) {
+      plan.tool = prev.tool || plan.tool;
+    }
+
+    // "Par académie" / "par série" conserve les filtres mais change la dimension.
+    if ((plan.tool === 'group_by' || plan.tool === 'top' || plan.tool === 'pivot') && !plan.targetCol && prev.targetCol) {
+      plan.targetCol = prev.targetCol;
+    }
+
+    // "graphique" sans autre précision reprend la dernière répartition/top.
+    if (isChartRequest(question)) {
+      plan.renderChart = true;
+      plan.tool = ['group_by','top'].includes(prev.tool) ? prev.tool : (plan.tool === 'count_rows' ? 'group_by' : plan.tool);
+      plan.targetCol = plan.targetCol || prev.targetCol;
+      plan.filters = mergeFiltersUnique(prev.filters || [], plan.filters || []);
+    }
+
+    // "Excel" seul exporte le périmètre courant.
+    if (isExportCurrentRequest(question)) {
+      plan.tool = /\bcsv\b/.test(q) ? 'export_csv' : 'export_excel';
+      plan.filters = mergeFiltersUnique(prev.filters || [], plan.filters || []);
+    }
+  } else if (isChartRequest(question)) {
+    plan.renderChart = true;
+  }
+  return plan;
+}
+
+function rememberDataEngineExecution(exec) {
+  if (!exec || !exec.plan || exec.kind === 'export') return;
+  const state = getDataEngineState();
+  state.lastPlan = exec.plan;
+  state.lastExecution = exec;
+  state.history = state.history || [];
+  state.history.push({ at: new Date().toISOString(), plan: exec.plan, kind: exec.kind, summary: dataEngineResultToContext(exec).slice(0, 1000) });
+  state.history = state.history.slice(-12);
+}
+
+function renderMiniBarChart(rows, total) {
+  if (!rows || !rows.length) return '';
+  const max = Math.max(...rows.map(r => r.count || 0), 1);
+  return `<div style="margin:10px 0;display:grid;gap:6px;max-width:560px">${rows.slice(0,12).map(r => {
+    const w = Math.max(2, Math.round((r.count || 0) / max * 100));
+    return `<div style="display:grid;grid-template-columns:minmax(120px,220px) 1fr auto;gap:8px;align-items:center"><div style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(r.value)}">${escapeHtml(r.value)}</div><div style="height:12px;background:var(--gris1);border-radius:6px;overflow:hidden"><div style="height:12px;width:${w}%;background:var(--albert);border-radius:6px"></div></div><div style="font-size:11px;font-weight:700">${(r.count || 0).toLocaleString('fr-FR')}</div></div>`;
+  }).join('')}</div>`;
+}
 
 function isDataEngineQuestion(question) {
   const q = normalizeText(question || '');
   if (!q) return false;
-  return /combien|nombre|effectif|compte|compter|repartition|r[eé]partition|ventilation|par |groupe|group[eé]|top|classement|principa|plus frequen|plus fréquent|croise|crois[eé]|tableau crois[eé]|pivot|moyen|moyenne|median|m[eé]diane|minimum|maximum|min|max|export|excel|csv|liste|filtre/.test(q);
+  return /combien|nombre|effectif|compte|compter|repartition|r[eé]partition|ventilation|par |groupe|group[eé]|top|classement|principa|plus frequen|plus fréquent|croise|crois[eé]|tableau crois[eé]|pivot|moyen|moyenne|median|m[eé]diane|minimum|maximum|min|max|export|excel|csv|liste|filtre|graphique|graphe|diagramme|histogramme|camembert|barres?|boursier|basque|hors|sauf|seulement|uniquement/.test(q) || isFollowUpQuestion(question);
 }
 
 function inferMeasureIntent(question) {
   const q = normalizeText(question || '');
+  if (/graphique|graphe|diagramme|histogramme|camembert|barres?|chart/.test(q)) return 'group_by';
   if (/export|excel|xlsx|csv|telecharg|t[eé]l[eé]charg|sors moi|sort moi|extraire|extrait|liste/.test(q)) {
     return /\bcsv\b/.test(q) ? 'export_csv' : 'export_excel';
   }
@@ -31,6 +130,7 @@ function inferMeasureIntent(question) {
   if (/top|classement|principales?|plus frequentes?|plus fréquentes?|les plus/.test(q)) return 'top';
   if (/repartition|r[eé]partition|ventilation|par |groupe|group[eé]|pourcentage|proportion/.test(q)) return 'group_by';
   if (/combien|nombre|effectif|compte|compter|total/.test(q)) return 'count_rows';
+  if (isFollowUpQuestion(question)) return getDataEngineState().lastPlan?.tool || 'count_rows';
   return null;
 }
 
@@ -81,7 +181,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
   // « bac général » non transformé en Série de la Classe = Générale.
   if (typeof buildPlannerPlan === 'function') {
     const plannerPlan = buildPlannerPlan(question, filterContextText, table, tool);
-    if (plannerPlan) return plannerPlan;
+    if (plannerPlan) return inheritConversationContext(plannerPlan, question);
   }
 
   // Fallback V16 si planner indisponible.
@@ -89,7 +189,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
   const mentionedCols = findMentionedColumns(headers, question, 4);
   const targetCol = tool === 'group_by' ? (detectTargetColumn(headers, q) || mentionedCols[0] || null) : null;
   const filters = detectFilters(table, normalizeText(filterContextText || question), targetCol);
-  return {
+  return inheritConversationContext({
     tool,
     table,
     filters,
@@ -97,7 +197,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
     mentionedCols,
     question,
     createdAt: new Date().toISOString()
-  };
+  }, question);
 }
 
 function runDataEnginePlan(plan) {
@@ -114,13 +214,15 @@ function runDataEnginePlan(plan) {
   }
   const rows = applyLocalActionFilters(plan.table.objects || [], plan.filters || []);
   if (plan.tool === 'count_rows') {
-    return {
+    const exec = {
       kind: 'count',
       plan,
       result: { count: rows.length, total: (plan.table.objects || []).length },
       text: `COUNT_ROWS = ${rows.length}`,
       html: renderDataEngineResultHtml('count_rows', plan, { count: rows.length, total: (plan.table.objects || []).length })
     };
+    rememberDataEngineExecution(exec);
+    return exec;
   }
   if (plan.tool === 'group_by' || plan.tool === 'top') {
     const col = plan.targetCol || plan.mentionedCols?.[0];
@@ -128,38 +230,45 @@ function runDataEnginePlan(plan) {
     const limit = plan.limit || detectLimit(plan.question) || (plan.tool === 'top' ? 10 : 30);
     const counts = topCountsForRows(rows, col, Math.max(limit, 30));
     const topRows = counts.top.slice(0, limit);
-    return {
+    const exec = {
       kind: plan.tool,
       plan: { ...plan, targetCol: col, limit },
       result: { total: rows.length, filled: counts.filled, distinct: counts.distinct, rows: topRows },
       text: topRows.map(x => `${x.value}: ${x.count} (${x.pct.toFixed(1)}%)`).join('\n'),
       html: renderDataEngineResultHtml(plan.tool, { ...plan, targetCol: col, limit }, { total: rows.length, filled: counts.filled, distinct: counts.distinct, rows: topRows })
     };
+    rememberDataEngineExecution(exec);
+    return exec;
   }
   if (plan.tool === 'pivot') {
     const rowCol = plan.targetCol || plan.mentionedCols?.[0];
     const colCol = plan.targetCol2 || plan.mentionedCols?.find(c => c !== rowCol);
     if (!rowCol || !colCol) return null;
     const pivot = pivotRows(rows, rowCol, colCol, 12, 8);
-    return {
+    const exec = {
       kind: 'pivot',
       plan: { ...plan, targetCol: rowCol, targetCol2: colCol },
       result: pivot,
       text: `Pivot ${rowCol} × ${colCol}`,
       html: renderDataEngineResultHtml('pivot', { ...plan, targetCol: rowCol, targetCol2: colCol }, pivot)
     };
+    rememberDataEngineExecution(exec);
+    return exec;
   }
   if (plan.tool === 'stats') {
-    const col = plan.targetCol || plan.mentionedCols?.[0] || inferNumericStatsColumn(plan.table, plan.question);
+    const inferredStatsCol = inferNumericStatsColumn(plan.table, plan.question);
+    const col = inferredStatsCol || plan.targetCol || plan.mentionedCols?.[0];
     if (!col) return null;
     const stats = numericStats(rows, col);
-    return {
+    const exec = {
       kind: 'stats',
       plan: { ...plan, targetCol: col },
       result: stats,
       text: `Stats ${col}: moyenne ${stats.avg}`,
       html: renderDataEngineResultHtml('stats', { ...plan, targetCol: col }, stats)
     };
+    rememberDataEngineExecution(exec);
+    return exec;
   }
   return null;
 }
@@ -225,7 +334,7 @@ function dataEngineResultToContext(exec) {
   if (!exec || !exec.plan) return '';
   const p = exec.plan;
   const filters = (p.filters || []).map(f => `${f.col} ${f.op === 'neq' ? '≠' : '='} "${f.value}"`).join(' ; ') || 'aucun';
-  let out = `=== DATA ENGINE V16 — RÉSULTAT CALCULÉ SUR LIGNES BRUTES ===\n`;
+  let out = `=== DATA ENGINE V21 — RÉSULTAT CALCULÉ SUR LIGNES BRUTES ===\n`;
   out += `Outil : ${p.tool}\nSource : ${p.table?.source || 'Données'} · ${p.table?.name || 'table'}\nFiltres : ${filters}\n`;
   if (exec.kind === 'count') out += `Résultat : ${exec.result.count} ligne(s) sur ${exec.result.total}.\n`;
   if (exec.kind === 'group_by' || exec.kind === 'top') {
@@ -254,7 +363,7 @@ function renderDataEngineResultHtml(tool, plan, result) {
   if (tool === 'group_by' || tool === 'top') {
     const rows = result.rows || [];
     const title = tool === 'top' ? 'Top calculé localement' : 'Répartition calculée localement';
-    return `<h4>${title}</h4><p><strong>${result.total.toLocaleString('fr-FR')}</strong> ligne${result.total>1?'s':''} retenue${result.total>1?'s':''}. Analyse par <strong>${escapeHtml(plan.targetCol)}</strong>.</p><ul>${rows.slice(0,20).map(r => `<li>${escapeHtml(r.value)} : <strong>${r.count.toLocaleString('fr-FR')}</strong> (${r.pct.toFixed(1).replace('.', ',')} %)</li>`).join('')}</ul>${filtersHtml}${debug}`;
+    return `<h4>${title}</h4><p><strong>${result.total.toLocaleString('fr-FR')}</strong> ligne${result.total>1?'s':''} retenue${result.total>1?'s':''}. Analyse par <strong>${escapeHtml(plan.targetCol)}</strong>.</p><ul>${rows.slice(0,20).map(r => `<li>${escapeHtml(r.value)} : <strong>${r.count.toLocaleString('fr-FR')}</strong> (${r.pct.toFixed(1).replace('.', ',')} %)</li>`).join('')}</ul>${plan.renderChart ? renderMiniBarChart(rows, result.total) : ''}${filtersHtml}${debug}`;
   }
   if (tool === 'pivot') {
     const cols = result.colValues || [];
@@ -264,7 +373,7 @@ function renderDataEngineResultHtml(tool, plan, result) {
   }
   if (tool === 'stats') {
     const fmt = v => v === null || v === undefined ? '—' : Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 2 });
-    return `<h4>Statistiques calculées localement</h4><p>Colonne : <strong>${escapeHtml(plan.targetCol)}</strong></p><ul><li>Valeurs numériques : <strong>${result.numericCount.toLocaleString('fr-FR')}</strong> / ${result.total.toLocaleString('fr-FR')}</li><li>Moyenne : <strong>${fmt(result.avg)}</strong></li><li>Médiane : <strong>${fmt(result.median)}</strong></li><li>Min : <strong>${fmt(result.min)}</strong></li><li>Max : <strong>${fmt(result.max)}</strong></li></ul>${filtersHtml}${debug}`;
+    return `<h4>Statistiques calculées localement</h4><p>Colonne : <strong>${escapeHtml(plan.targetCol)}</strong></p><ul><li>Valeurs numériques : <strong>${result.numericCount.toLocaleString('fr-FR')}</strong> / ${result.total.toLocaleString('fr-FR')}</li><li>Moyenne : <strong>${fmt(result.avg)}</strong></li><li>Médiane : <strong>${fmt(result.median)}</strong></li><li>Min : <strong>${fmt(result.min)}</strong></li><li>Max : <strong>${fmt(result.max)}</strong></li></ul>${plan.renderChart ? renderMiniBarChart(rows, result.total) : ''}${filtersHtml}${debug}`;
   }
   return `<h4>Résultat calculé localement</h4>${debug}`;
 }
