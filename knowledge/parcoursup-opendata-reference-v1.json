@@ -1,0 +1,949 @@
+{
+  "meta": {
+    "source_type": "opendata",
+    "source_title": "OpenData Parcoursup - formations et indicateurs 2025",
+    "source_url": "https://data.enseignementsup-recherche.gouv.fr/pages/parcoursupdata/?flg=fr-fr&disjunctive.fili",
+    "rows": 14252,
+    "columns": 118,
+    "sessions": [
+      2025
+    ]
+  },
+  "important_columns": [
+    "Session",
+    "Statut de l’établissement de la filière de formation (public, privé…)",
+    "Établissement",
+    "Département de l’établissement",
+    "Région de l’établissement",
+    "Académie de l’établissement",
+    "Commune de l’établissement",
+    "Filière de formation",
+    "Sélectivité",
+    "Filière de formation très agrégée",
+    "Filière de formation détaillée",
+    "Filière de formation très détaillée",
+    "Capacité de l’établissement par formation",
+    "Effectif total des candidats pour une formation",
+    "Effectif total des candidats en phase principale",
+    "Effectif total des candidats en phase complémentaire",
+    "Effectif total des candidats classés par l’établissement en phase principale",
+    "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement",
+    "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)",
+    "Dont effectif des admis boursiers néo bacheliers",
+    "Effectif des admis néo bacheliers",
+    "Dont effectif des admises issues du même établissement (BTS/CPGE)",
+    "Dont effectif des admis issus de la même académie",
+    "% d’admis néo bacheliers boursiers",
+    "% d’admis néo bacheliers",
+    "Taux d’accès",
+    "Part des terminales générales qui étaient en position de recevoir une proposition en phase principale",
+    "Part des terminales technologiques qui étaient en position de recevoir une proposition en phase principale",
+    "Part des terminales professionnelles qui étaient en position de recevoir une proposition en phase principale",
+    "Rang du dernier appelé du groupe 1",
+    "Lien de la formation sur la plateforme Parcoursup"
+  ],
+  "dimensions": {
+    "filiere_tres_agregee": [
+      {
+        "label": "BTS",
+        "count": 5351,
+        "percent": 37.55
+      },
+      {
+        "label": "Licence",
+        "count": 3052,
+        "percent": 21.41
+      },
+      {
+        "label": "Autre formation",
+        "count": 1815,
+        "percent": 12.74
+      },
+      {
+        "label": "CPGE",
+        "count": 986,
+        "percent": 6.92
+      },
+      {
+        "label": "BUT",
+        "count": 820,
+        "percent": 5.75
+      },
+      {
+        "label": "Ecole d'Ingénieur",
+        "count": 585,
+        "percent": 4.1
+      },
+      {
+        "label": "Licence_Las",
+        "count": 513,
+        "percent": 3.6
+      },
+      {
+        "label": "IFSI",
+        "count": 344,
+        "percent": 2.41
+      },
+      {
+        "label": "PASS",
+        "count": 287,
+        "percent": 2.01
+      },
+      {
+        "label": "Ecole de Commerce",
+        "count": 256,
+        "percent": 1.8
+      },
+      {
+        "label": "EFTS",
+        "count": 243,
+        "percent": 1.71
+      }
+    ],
+    "filiere_detaillee": [
+      {
+        "label": "Concours Puissance Alpha - Formation d'ingénieur Bac + 5 - Bacs généraux - 2 Sciences",
+        "count": 79,
+        "percent": 0.55
+      },
+      {
+        "label": "Concours SESAME - Formation des écoles de commerce et de management",
+        "count": 60,
+        "percent": 0.42
+      },
+      {
+        "label": "Concours Geipi Polytech - Formation d'ingénieur Bac + 5 - Bac général",
+        "count": 48,
+        "percent": 0.34
+      },
+      {
+        "label": "Concours Puissance Alpha - Formation d'ingénieur Bac + 5 - Bacs généraux - 1 Science",
+        "count": 48,
+        "percent": 0.34
+      },
+      {
+        "label": "Concours Puissance Alpha - Formation d'ingénieur Bac + 5 - Bacs technologiques",
+        "count": 45,
+        "percent": 0.32
+      },
+      {
+        "label": "Concours Geipi Polytech - Formation d'ingénieur Bac + 5 - bac STI2D",
+        "count": 25,
+        "percent": 0.18
+      },
+      {
+        "label": "Concours Advance - Formation d'ingénieur Bac + 5 - Bac Série générale",
+        "count": 23,
+        "percent": 0.16
+      },
+      {
+        "label": "Université Bourgogne Europe (ex université de Bourgogne) - Licence - Parcours d'Accès Spécifique Santé (PASS)",
+        "count": 23,
+        "percent": 0.16
+      },
+      {
+        "label": "CESI Ecole d’Ingénieurs - Formation d'ingénieur Bac + 5 - Cycle Préparatoire Intégré - Spécialité Généraliste, BTP, Informatique, Systèmes embarqués",
+        "count": 23,
+        "percent": 0.16
+      },
+      {
+        "label": "Concours Puissance Alpha - Formation Bac + 3",
+        "count": 23,
+        "percent": 0.16
+      },
+      {
+        "label": "Regroupement IFSI Université de Lille - D.E Infirmier",
+        "count": 22,
+        "percent": 0.15
+      },
+      {
+        "label": "Concours Avenir - Formation d'ingénieur Bac + 5 - Voie d'accès réservée aux BAC +1 uniquement",
+        "count": 18,
+        "percent": 0.13
+      },
+      {
+        "label": "Regroupement IFSI Université de Lorraine - D.E Infirmier",
+        "count": 18,
+        "percent": 0.13
+      },
+      {
+        "label": "Regroupement IFSI Université de Bordeaux - D.E Infirmier",
+        "count": 18,
+        "percent": 0.13
+      },
+      {
+        "label": "Université Lumière - Lyon 2 - Licence - Langues étrangères appliquées",
+        "count": 18,
+        "percent": 0.13
+      }
+    ],
+    "academie": [
+      {
+        "label": "Paris",
+        "count": 1034,
+        "percent": 7.26
+      },
+      {
+        "label": "Lille",
+        "count": 960,
+        "percent": 6.74
+      },
+      {
+        "label": "Versailles",
+        "count": 875,
+        "percent": 6.14
+      },
+      {
+        "label": "Nantes",
+        "count": 840,
+        "percent": 5.89
+      },
+      {
+        "label": "Lyon",
+        "count": 832,
+        "percent": 5.84
+      },
+      {
+        "label": "Créteil",
+        "count": 782,
+        "percent": 5.49
+      },
+      {
+        "label": "Rennes",
+        "count": 758,
+        "percent": 5.32
+      },
+      {
+        "label": "Toulouse",
+        "count": 651,
+        "percent": 4.57
+      },
+      {
+        "label": "Normandie",
+        "count": 631,
+        "percent": 4.43
+      },
+      {
+        "label": "Bordeaux",
+        "count": 631,
+        "percent": 4.43
+      },
+      {
+        "label": "Aix-Marseille",
+        "count": 607,
+        "percent": 4.26
+      },
+      {
+        "label": "Grenoble",
+        "count": 582,
+        "percent": 4.08
+      },
+      {
+        "label": "Montpellier",
+        "count": 567,
+        "percent": 3.98
+      },
+      {
+        "label": "Nancy-Metz",
+        "count": 472,
+        "percent": 3.31
+      },
+      {
+        "label": "Orléans-Tours",
+        "count": 461,
+        "percent": 3.23
+      }
+    ],
+    "region": [
+      {
+        "label": "Ile-de-France",
+        "count": 2691,
+        "percent": 18.88
+      },
+      {
+        "label": "Auvergne-Rhône-Alpes",
+        "count": 1730,
+        "percent": 12.14
+      },
+      {
+        "label": "Hauts-de-France",
+        "count": 1272,
+        "percent": 8.93
+      },
+      {
+        "label": "Occitanie",
+        "count": 1218,
+        "percent": 8.55
+      },
+      {
+        "label": "Nouvelle Aquitaine",
+        "count": 1162,
+        "percent": 8.15
+      },
+      {
+        "label": "Grand-Est",
+        "count": 1150,
+        "percent": 8.07
+      },
+      {
+        "label": "Provence-Alpes-Côte d'Azur",
+        "count": 973,
+        "percent": 6.83
+      },
+      {
+        "label": "Pays-de-la-Loire",
+        "count": 840,
+        "percent": 5.89
+      },
+      {
+        "label": "Bretagne",
+        "count": 758,
+        "percent": 5.32
+      },
+      {
+        "label": "Normandie",
+        "count": 631,
+        "percent": 4.43
+      },
+      {
+        "label": "Bourgogne-Franche-Comté",
+        "count": 580,
+        "percent": 4.07
+      },
+      {
+        "label": "Centre",
+        "count": 461,
+        "percent": 3.23
+      },
+      {
+        "label": "Réunion",
+        "count": 246,
+        "percent": 1.73
+      },
+      {
+        "label": "Guadeloupe",
+        "count": 130,
+        "percent": 0.91
+      },
+      {
+        "label": "Martinique",
+        "count": 127,
+        "percent": 0.89
+      }
+    ],
+    "selectivite": [
+      {
+        "label": "formation sélective",
+        "count": 11056,
+        "percent": 77.58
+      },
+      {
+        "label": "formation non sélective",
+        "count": 3196,
+        "percent": 22.42
+      }
+    ],
+    "statut": [
+      {
+        "label": "Public",
+        "count": 11108,
+        "percent": 77.94
+      },
+      {
+        "label": "Privé sous contrat d'association",
+        "count": 1938,
+        "percent": 13.6
+      },
+      {
+        "label": "Privé enseignement supérieur",
+        "count": 1101,
+        "percent": 7.73
+      },
+      {
+        "label": "Privé hors contrat",
+        "count": 105,
+        "percent": 0.74
+      }
+    ]
+  },
+  "aggregates": {
+    "par_filiere_tres_agregee": [
+      {
+        "label": "Licence",
+        "Effectif total des candidats pour une formation": 3321257,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 282143,
+        "Capacité de l’établissement par formation": 309090,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 1457317,
+        "taux_admis_sur_candidats_pct": 8.5,
+        "taux_propositions_sur_candidats_pct": 43.88,
+        "pression_candidats_par_place": 10.75
+      },
+      {
+        "label": "BTS",
+        "Effectif total des candidats pour une formation": 2227321,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 117086,
+        "Capacité de l’établissement par formation": 169033,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 572835,
+        "taux_admis_sur_candidats_pct": 5.26,
+        "taux_propositions_sur_candidats_pct": 25.72,
+        "pression_candidats_par_place": 13.18
+      },
+      {
+        "label": "IFSI",
+        "Effectif total des candidats pour une formation": 1445145,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 30572,
+        "Capacité de l’établissement par formation": 30813,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 397325,
+        "taux_admis_sur_candidats_pct": 2.12,
+        "taux_propositions_sur_candidats_pct": 27.49,
+        "pression_candidats_par_place": 46.9
+      },
+      {
+        "label": "BUT",
+        "Effectif total des candidats pour une formation": 1332694,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 56727,
+        "Capacité de l’établissement par formation": 59255,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 317911,
+        "taux_admis_sur_candidats_pct": 4.26,
+        "taux_propositions_sur_candidats_pct": 23.85,
+        "pression_candidats_par_place": 22.49
+      },
+      {
+        "label": "CPGE",
+        "Effectif total des candidats pour une formation": 1300268,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 42086,
+        "Capacité de l’établissement par formation": 46784,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 320242,
+        "taux_admis_sur_candidats_pct": 3.24,
+        "taux_propositions_sur_candidats_pct": 24.63,
+        "pression_candidats_par_place": 27.79
+      },
+      {
+        "label": "PASS",
+        "Effectif total des candidats pour une formation": 1113774,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 26485,
+        "Capacité de l’établissement par formation": 26646,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 173590,
+        "taux_admis_sur_candidats_pct": 2.38,
+        "taux_propositions_sur_candidats_pct": 15.59,
+        "pression_candidats_par_place": 41.8
+      },
+      {
+        "label": "Ecole d'Ingénieur",
+        "Effectif total des candidats pour une formation": 957829,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 21042,
+        "Capacité de l’établissement par formation": 26318,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 453588,
+        "taux_admis_sur_candidats_pct": 2.2,
+        "taux_propositions_sur_candidats_pct": 47.36,
+        "pression_candidats_par_place": 36.39
+      },
+      {
+        "label": "Autre formation",
+        "Effectif total des candidats pour une formation": 864049,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 41759,
+        "Capacité de l’établissement par formation": 49834,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 152253,
+        "taux_admis_sur_candidats_pct": 4.83,
+        "taux_propositions_sur_candidats_pct": 17.62,
+        "pression_candidats_par_place": 17.34
+      },
+      {
+        "label": "Licence_Las",
+        "Effectif total des candidats pour une formation": 504226,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 20435,
+        "Capacité de l’établissement par formation": 21017,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 125112,
+        "taux_admis_sur_candidats_pct": 4.05,
+        "taux_propositions_sur_candidats_pct": 24.81,
+        "pression_candidats_par_place": 23.99
+      },
+      {
+        "label": "Ecole de Commerce",
+        "Effectif total des candidats pour une formation": 387966,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 15403,
+        "Capacité de l’établissement par formation": 22868,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 154510,
+        "taux_admis_sur_candidats_pct": 3.97,
+        "taux_propositions_sur_candidats_pct": 39.83,
+        "pression_candidats_par_place": 16.97
+      },
+      {
+        "label": "EFTS",
+        "Effectif total des candidats pour une formation": 47856,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 7014,
+        "Capacité de l’établissement par formation": 7693,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 15576,
+        "taux_admis_sur_candidats_pct": 14.66,
+        "taux_propositions_sur_candidats_pct": 32.55,
+        "pression_candidats_par_place": 6.22
+      }
+    ],
+    "par_academie": [
+      {
+        "label": "Paris",
+        "Effectif total des candidats pour une formation": 1869466,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 60068,
+        "Capacité de l’établissement par formation": 63771,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 338114,
+        "taux_admis_sur_candidats_pct": 3.21,
+        "taux_propositions_sur_candidats_pct": 18.09,
+        "pression_candidats_par_place": 29.32
+      },
+      {
+        "label": "Versailles",
+        "Effectif total des candidats pour une formation": 1230011,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 43834,
+        "Capacité de l’établissement par formation": 48034,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 279668,
+        "taux_admis_sur_candidats_pct": 3.56,
+        "taux_propositions_sur_candidats_pct": 22.74,
+        "pression_candidats_par_place": 25.61
+      },
+      {
+        "label": "Créteil",
+        "Effectif total des candidats pour une formation": 1097765,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 38695,
+        "Capacité de l’établissement par formation": 41424,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 233462,
+        "taux_admis_sur_candidats_pct": 3.52,
+        "taux_propositions_sur_candidats_pct": 21.27,
+        "pression_candidats_par_place": 26.5
+      },
+      {
+        "label": "Lyon",
+        "Effectif total des candidats pour une formation": 1093303,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 41514,
+        "Capacité de l’établissement par formation": 55661,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 287454,
+        "taux_admis_sur_candidats_pct": 3.8,
+        "taux_propositions_sur_candidats_pct": 26.29,
+        "pression_candidats_par_place": 19.64
+      },
+      {
+        "label": "Lille",
+        "Effectif total des candidats pour une formation": 801360,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 50052,
+        "Capacité de l’établissement par formation": 58473,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 301802,
+        "taux_admis_sur_candidats_pct": 6.25,
+        "taux_propositions_sur_candidats_pct": 37.66,
+        "pression_candidats_par_place": 13.7
+      },
+      {
+        "label": "Toulouse",
+        "Effectif total des candidats pour une formation": 692251,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 34427,
+        "Capacité de l’établissement par formation": 35390,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 195488,
+        "taux_admis_sur_candidats_pct": 4.97,
+        "taux_propositions_sur_candidats_pct": 28.24,
+        "pression_candidats_par_place": 19.56
+      },
+      {
+        "label": "Aix-Marseille",
+        "Effectif total des candidats pour une formation": 654330,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 28630,
+        "Capacité de l’établissement par formation": 31162,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 205334,
+        "taux_admis_sur_candidats_pct": 4.38,
+        "taux_propositions_sur_candidats_pct": 31.38,
+        "pression_candidats_par_place": 21.0
+      },
+      {
+        "label": "Bordeaux",
+        "Effectif total des candidats pour une formation": 615239,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 29536,
+        "Capacité de l’établissement par formation": 33197,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 203710,
+        "taux_admis_sur_candidats_pct": 4.8,
+        "taux_propositions_sur_candidats_pct": 33.11,
+        "pression_candidats_par_place": 18.53
+      },
+      {
+        "label": "Montpellier",
+        "Effectif total des candidats pour une formation": 612171,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 28816,
+        "Capacité de l’établissement par formation": 32216,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 191249,
+        "taux_admis_sur_candidats_pct": 4.71,
+        "taux_propositions_sur_candidats_pct": 31.24,
+        "pression_candidats_par_place": 19.0
+      },
+      {
+        "label": "Nantes",
+        "Effectif total des candidats pour une formation": 600556,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 34116,
+        "Capacité de l’établissement par formation": 40203,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 242365,
+        "taux_admis_sur_candidats_pct": 5.68,
+        "taux_propositions_sur_candidats_pct": 40.36,
+        "pression_candidats_par_place": 14.94
+      },
+      {
+        "label": "Rennes",
+        "Effectif total des candidats pour une formation": 560917,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 33840,
+        "Capacité de l’établissement par formation": 39861,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 215983,
+        "taux_admis_sur_candidats_pct": 6.03,
+        "taux_propositions_sur_candidats_pct": 38.51,
+        "pression_candidats_par_place": 14.07
+      },
+      {
+        "label": "Grenoble",
+        "Effectif total des candidats pour une formation": 435595,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 23753,
+        "Capacité de l’établissement par formation": 37768,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 163516,
+        "taux_admis_sur_candidats_pct": 5.45,
+        "taux_propositions_sur_candidats_pct": 37.54,
+        "pression_candidats_par_place": 11.53
+      },
+      {
+        "label": "Normandie",
+        "Effectif total des candidats pour une formation": 408501,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 28662,
+        "Capacité de l’établissement par formation": 33139,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 183484,
+        "taux_admis_sur_candidats_pct": 7.02,
+        "taux_propositions_sur_candidats_pct": 44.92,
+        "pression_candidats_par_place": 12.33
+      },
+      {
+        "label": "Nancy-Metz",
+        "Effectif total des candidats pour une formation": 342406,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 20574,
+        "Capacité de l’établissement par formation": 22916,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 134352,
+        "taux_admis_sur_candidats_pct": 6.01,
+        "taux_propositions_sur_candidats_pct": 39.24,
+        "pression_candidats_par_place": 14.94
+      },
+      {
+        "label": "Nice",
+        "Effectif total des candidats pour une formation": 339482,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 17629,
+        "Capacité de l’établissement par formation": 19536,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 102727,
+        "taux_admis_sur_candidats_pct": 5.19,
+        "taux_propositions_sur_candidats_pct": 30.26,
+        "pression_candidats_par_place": 17.38
+      },
+      {
+        "label": "Orléans-Tours",
+        "Effectif total des candidats pour une formation": 318857,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 19524,
+        "Capacité de l’établissement par formation": 21746,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 126591,
+        "taux_admis_sur_candidats_pct": 6.12,
+        "taux_propositions_sur_candidats_pct": 39.7,
+        "pression_candidats_par_place": 14.66
+      },
+      {
+        "label": "Strasbourg",
+        "Effectif total des candidats pour une formation": 313866,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 19420,
+        "Capacité de l’établissement par formation": 21306,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 110453,
+        "taux_admis_sur_candidats_pct": 6.19,
+        "taux_propositions_sur_candidats_pct": 35.19,
+        "pression_candidats_par_place": 14.73
+      },
+      {
+        "label": "Dijon",
+        "Effectif total des candidats pour une formation": 223743,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 11941,
+        "Capacité de l’établissement par formation": 13526,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 80570,
+        "taux_admis_sur_candidats_pct": 5.34,
+        "taux_propositions_sur_candidats_pct": 36.01,
+        "pression_candidats_par_place": 16.54
+      },
+      {
+        "label": "Clermont-Ferrand",
+        "Effectif total des candidats pour une formation": 204158,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 12697,
+        "Capacité de l’établissement par formation": 14942,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 79445,
+        "taux_admis_sur_candidats_pct": 6.22,
+        "taux_propositions_sur_candidats_pct": 38.91,
+        "pression_candidats_par_place": 13.66
+      },
+      {
+        "label": "Poitiers",
+        "Effectif total des candidats pour une formation": 196333,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 14203,
+        "Capacité de l’établissement par formation": 20858,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 85995,
+        "taux_admis_sur_candidats_pct": 7.23,
+        "taux_propositions_sur_candidats_pct": 43.8,
+        "pression_candidats_par_place": 9.41
+      },
+      {
+        "label": "Amiens",
+        "Effectif total des candidats pour une formation": 190427,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 14701,
+        "Capacité de l’établissement par formation": 16344,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 76482,
+        "taux_admis_sur_candidats_pct": 7.72,
+        "taux_propositions_sur_candidats_pct": 40.16,
+        "pression_candidats_par_place": 11.65
+      },
+      {
+        "label": "Reims",
+        "Effectif total des candidats pour une formation": 162506,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 12500,
+        "Capacité de l’établissement par formation": 14585,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 73399,
+        "taux_admis_sur_candidats_pct": 7.69,
+        "taux_propositions_sur_candidats_pct": 45.17,
+        "pression_candidats_par_place": 11.14
+      },
+      {
+        "label": "Besancon",
+        "Effectif total des candidats pour une formation": 125952,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 9193,
+        "Capacité de l’établissement par formation": 10945,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 50924,
+        "taux_admis_sur_candidats_pct": 7.3,
+        "taux_propositions_sur_candidats_pct": 40.43,
+        "pression_candidats_par_place": 11.51
+      },
+      {
+        "label": "La Réunion",
+        "Effectif total des candidats pour une formation": 117222,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 10584,
+        "Capacité de l’établissement par formation": 13734,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 57574,
+        "taux_admis_sur_candidats_pct": 9.03,
+        "taux_propositions_sur_candidats_pct": 49.12,
+        "pression_candidats_par_place": 8.54
+      },
+      {
+        "label": "Limoges",
+        "Effectif total des candidats pour une formation": 113025,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 7280,
+        "Capacité de l’établissement par formation": 8649,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 47770,
+        "taux_admis_sur_candidats_pct": 6.44,
+        "taux_propositions_sur_candidats_pct": 42.26,
+        "pression_candidats_par_place": 13.07
+      }
+    ],
+    "par_region": [
+      {
+        "label": "Ile-de-France",
+        "Effectif total des candidats pour une formation": 4197242,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 142597,
+        "Capacité de l’établissement par formation": 153229,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 851244,
+        "taux_admis_sur_candidats_pct": 3.4,
+        "taux_propositions_sur_candidats_pct": 20.28,
+        "pression_candidats_par_place": 27.39
+      },
+      {
+        "label": "Auvergne-Rhône-Alpes",
+        "Effectif total des candidats pour une formation": 1733056,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 77964,
+        "Capacité de l’établissement par formation": 108371,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 530415,
+        "taux_admis_sur_candidats_pct": 4.5,
+        "taux_propositions_sur_candidats_pct": 30.61,
+        "pression_candidats_par_place": 15.99
+      },
+      {
+        "label": "Occitanie",
+        "Effectif total des candidats pour une formation": 1304422,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 63243,
+        "Capacité de l’établissement par formation": 67606,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 386737,
+        "taux_admis_sur_candidats_pct": 4.85,
+        "taux_propositions_sur_candidats_pct": 29.65,
+        "pression_candidats_par_place": 19.29
+      },
+      {
+        "label": "Provence-Alpes-Côte d'Azur",
+        "Effectif total des candidats pour une formation": 993812,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 46259,
+        "Capacité de l’établissement par formation": 50698,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 308061,
+        "taux_admis_sur_candidats_pct": 4.65,
+        "taux_propositions_sur_candidats_pct": 31.0,
+        "pression_candidats_par_place": 19.6
+      },
+      {
+        "label": "Hauts-de-France",
+        "Effectif total des candidats pour une formation": 991787,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 64753,
+        "Capacité de l’établissement par formation": 74817,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 378284,
+        "taux_admis_sur_candidats_pct": 6.53,
+        "taux_propositions_sur_candidats_pct": 38.14,
+        "pression_candidats_par_place": 13.26
+      },
+      {
+        "label": "Nouvelle Aquitaine",
+        "Effectif total des candidats pour une formation": 924597,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 51019,
+        "Capacité de l’établissement par formation": 62704,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 337475,
+        "taux_admis_sur_candidats_pct": 5.52,
+        "taux_propositions_sur_candidats_pct": 36.5,
+        "pression_candidats_par_place": 14.75
+      },
+      {
+        "label": "Grand-Est",
+        "Effectif total des candidats pour une formation": 818778,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 52494,
+        "Capacité de l’établissement par formation": 58807,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 318204,
+        "taux_admis_sur_candidats_pct": 6.41,
+        "taux_propositions_sur_candidats_pct": 38.86,
+        "pression_candidats_par_place": 13.92
+      },
+      {
+        "label": "Pays-de-la-Loire",
+        "Effectif total des candidats pour une formation": 600556,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 34116,
+        "Capacité de l’établissement par formation": 40203,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 242365,
+        "taux_admis_sur_candidats_pct": 5.68,
+        "taux_propositions_sur_candidats_pct": 40.36,
+        "pression_candidats_par_place": 14.94
+      },
+      {
+        "label": "Bretagne",
+        "Effectif total des candidats pour une formation": 560917,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 33840,
+        "Capacité de l’établissement par formation": 39861,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 215983,
+        "taux_admis_sur_candidats_pct": 6.03,
+        "taux_propositions_sur_candidats_pct": 38.51,
+        "pression_candidats_par_place": 14.07
+      },
+      {
+        "label": "Normandie",
+        "Effectif total des candidats pour une formation": 408501,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 28662,
+        "Capacité de l’établissement par formation": 33139,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 183484,
+        "taux_admis_sur_candidats_pct": 7.02,
+        "taux_propositions_sur_candidats_pct": 44.92,
+        "pression_candidats_par_place": 12.33
+      },
+      {
+        "label": "Bourgogne-Franche-Comté",
+        "Effectif total des candidats pour une formation": 349695,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 21134,
+        "Capacité de l’établissement par formation": 24471,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 131494,
+        "taux_admis_sur_candidats_pct": 6.04,
+        "taux_propositions_sur_candidats_pct": 37.6,
+        "pression_candidats_par_place": 14.29
+      },
+      {
+        "label": "Centre",
+        "Effectif total des candidats pour une formation": 318857,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 19524,
+        "Capacité de l’établissement par formation": 21746,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 126591,
+        "taux_admis_sur_candidats_pct": 6.12,
+        "taux_propositions_sur_candidats_pct": 39.7,
+        "pression_candidats_par_place": 14.66
+      },
+      {
+        "label": "Réunion",
+        "Effectif total des candidats pour une formation": 117222,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 10584,
+        "Capacité de l’établissement par formation": 13734,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 57574,
+        "taux_admis_sur_candidats_pct": 9.03,
+        "taux_propositions_sur_candidats_pct": 49.12,
+        "pression_candidats_par_place": 8.54
+      },
+      {
+        "label": "Non renseigné",
+        "Effectif total des candidats pour une formation": 55103,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 2490,
+        "Capacité de l’établissement par formation": 3329,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 19691,
+        "taux_admis_sur_candidats_pct": 4.52,
+        "taux_propositions_sur_candidats_pct": 35.73,
+        "pression_candidats_par_place": 16.55
+      },
+      {
+        "label": "Guadeloupe",
+        "Effectif total des candidats pour une formation": 32912,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 3570,
+        "Capacité de l’établissement par formation": 5177,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 16903,
+        "taux_admis_sur_candidats_pct": 10.85,
+        "taux_propositions_sur_candidats_pct": 51.36,
+        "pression_candidats_par_place": 6.36
+      },
+      {
+        "label": "Martinique",
+        "Effectif total des candidats pour une formation": 30749,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 2871,
+        "Capacité de l’établissement par formation": 4654,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 14748,
+        "taux_admis_sur_candidats_pct": 9.34,
+        "taux_propositions_sur_candidats_pct": 47.96,
+        "pression_candidats_par_place": 6.61
+      },
+      {
+        "label": "Mayotte",
+        "Effectif total des candidats pour une formation": 28516,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 1500,
+        "Capacité de l’établissement par formation": 1569,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 4359,
+        "taux_admis_sur_candidats_pct": 5.26,
+        "taux_propositions_sur_candidats_pct": 15.29,
+        "pression_candidats_par_place": 18.17
+      },
+      {
+        "label": "Corse",
+        "Effectif total des candidats pour une formation": 19284,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 1949,
+        "Capacité de l’établissement par formation": 2650,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 9435,
+        "taux_admis_sur_candidats_pct": 10.11,
+        "taux_propositions_sur_candidats_pct": 48.93,
+        "pression_candidats_par_place": 7.28
+      },
+      {
+        "label": "Guyane",
+        "Effectif total des candidats pour une formation": 16379,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 2183,
+        "Capacité de l’établissement par formation": 2586,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 7212,
+        "taux_admis_sur_candidats_pct": 13.33,
+        "taux_propositions_sur_candidats_pct": 44.03,
+        "pression_candidats_par_place": 6.33
+      }
+    ],
+    "par_selectivite": [
+      {
+        "label": "formation sélective",
+        "Effectif total des candidats pour une formation": 9087525,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 355451,
+        "Capacité de l’établissement par formation": 440050,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 2495187,
+        "taux_admis_sur_candidats_pct": 3.91,
+        "taux_propositions_sur_candidats_pct": 27.46,
+        "pression_candidats_par_place": 20.65
+      },
+      {
+        "label": "formation non sélective",
+        "Effectif total des candidats pour une formation": 4414860,
+        "Effectif total des candidats ayant accepté la proposition de l’établissement (admis)": 305301,
+        "Capacité de l’établissement par formation": 329301,
+        "Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement": 1645072,
+        "taux_admis_sur_candidats_pct": 6.92,
+        "taux_propositions_sur_candidats_pct": 37.26,
+        "pression_candidats_par_place": 13.41
+      }
+    ]
+  }
+}
