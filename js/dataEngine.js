@@ -25,6 +25,48 @@ function getDataEngineState() {
   return window.__DATA_ENGINE_STATE;
 }
 
+
+
+// V23.1 — réinitialisation du dialogue et du contexte d'analyse.
+// Conserve les documents chargés, la table Grist et la configuration Albert.
+function resetCopilotDialogue() {
+  const ok = confirm('Réinitialiser le dialogue et le contexte d’analyse ?\n\nLes documents chargés, la table Grist et la configuration Albert seront conservés.');
+  if (!ok) return;
+
+  window.__DATA_ENGINE_STATE = { lastPlan: null, lastExecution: null, history: [] };
+
+  try {
+    if (typeof chatHistory !== 'undefined') chatHistory.length = 0;
+  } catch (e) {
+    console.warn('Impossible de vider chatHistory :', e);
+  }
+
+  const wrap = document.getElementById('chat-messages');
+  if (wrap) {
+    wrap.innerHTML = `
+      <div class="empty-state" id="empty-state">
+        <div class="es-icon">💬</div>
+        <div class="es-title">Posez une question sur vos documents</div>
+        <div class="es-sub">Dialogue réinitialisé. Les sources chargées restent disponibles ; vous repartez avec un contexte d'analyse vide.</div>
+        <div class="suggestions" id="suggestions"></div>
+      </div>`;
+  }
+
+  const input = document.getElementById('chat-input');
+  if (input) {
+    input.value = '';
+    input.style.height = 'auto';
+  }
+
+  const pills = document.getElementById('context-pills');
+  if (pills) pills.innerHTML = '';
+
+  if (typeof renderSuggestions === 'function') renderSuggestions();
+  if (typeof updateChatSub === 'function') updateChatSub();
+  if (typeof updateSourceHub === 'function') updateSourceHub();
+}
+window.resetCopilotDialogue = resetCopilotDialogue;
+
 function isFollowUpQuestion(question) {
   const q = normalizeText(question || '');
   return !!getDataEngineState().lastPlan && /^(par|selon|uniquement|seulement|sauf|hors|avec|sans|graphique|camembert|histogramme|barres?|excel|csv|export|exporte|trie|tri|les boursiers|les non boursiers)/.test(q);
