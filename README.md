@@ -1,7 +1,8 @@
-Patch planner v2.3
+# Patch v23.1 — contexte + bouton reset
 
-Remplacer dans GitHub :
-- index.html (pour forcer le navigateur à recharger planner.js via ?v=23)
-- js/planner.js
+À remplacer dans GitHub :
 
-Pourquoi index.html aussi : GitHub Pages / le navigateur peuvent garder l'ancien planner.js en cache. La capture montrait encore v2.1, donc le nouveau fichier n'était probablement pas chargé.
+- `js/dataEngine.js`
+- `index.html`
+
+Ajout : bouton `↺` en haut à droite pour réinitialiser le dialogue et le contexte d'analyse, sans perdre les documents, la table Grist ni la configuration Albert.
