@@ -18,7 +18,7 @@ const DATA_ENGINE_TOOLS = [
 function isDataEngineQuestion(question) {
   const q = normalizeText(question || '');
   if (!q) return false;
-  return /combien|nombre|effectif|compte|compter|repartition|r[eé]partition|ventilation|par |groupe|group[eé]|top|classement|principa|plus frequen|plus fréquent|croise|crois[eé]|tableau crois[eé]|pivot|moyenne|median|m[eé]diane|minimum|maximum|min|max|export|excel|csv|liste|filtre/.test(q);
+  return /combien|nombre|effectif|compte|compter|repartition|r[eé]partition|ventilation|par |groupe|group[eé]|top|classement|principa|plus frequen|plus fréquent|croise|crois[eé]|tableau crois[eé]|pivot|moyen|moyenne|median|m[eé]diane|minimum|maximum|min|max|export|excel|csv|liste|filtre/.test(q);
 }
 
 function inferMeasureIntent(question) {
@@ -27,7 +27,7 @@ function inferMeasureIntent(question) {
     return /\bcsv\b/.test(q) ? 'export_csv' : 'export_excel';
   }
   if (/croise|crois[eé]|tableau crois[eé]|pivot|par .* par /.test(q)) return 'pivot';
-  if (/moyenne|median|m[eé]diane|minimum|maximum|min|max/.test(q)) return 'stats';
+  if (/moyen|moyenne|median|m[eé]diane|minimum|maximum|\bmin\b|\bmax\b/.test(q)) return 'stats';
   if (/top|classement|principales?|plus frequentes?|plus fréquentes?|les plus/.test(q)) return 'top';
   if (/repartition|r[eé]partition|ventilation|par |groupe|group[eé]|pourcentage|proportion/.test(q)) return 'group_by';
   if (/combien|nombre|effectif|compte|compter|total/.test(q)) return 'count_rows';
@@ -150,7 +150,7 @@ function runDataEnginePlan(plan) {
     };
   }
   if (plan.tool === 'stats') {
-    const col = plan.targetCol || plan.mentionedCols?.[0];
+    const col = plan.targetCol || plan.mentionedCols?.[0] || inferNumericStatsColumn(plan.table, plan.question);
     if (!col) return null;
     const stats = numericStats(rows, col);
     return {
@@ -203,6 +203,23 @@ function numericStats(rows, col) {
   return { total: rows.length, numericCount: n, sum, avg, median, min: n ? nums[0] : null, max: n ? nums[n-1] : null };
 }
 
+
+function inferNumericStatsColumn(table, question) {
+  const q = normalizeText(question || '');
+  const headers = table.headers || Object.keys(table.objects?.[0] || {});
+  const candidates = headers.filter(h => h && !/^(id|manualSort)$/i.test(String(h))).map(h => {
+    const hn = normalizeText(h);
+    let score = 0;
+    if (/voeu|vœu|voeux|vœux/.test(q) && /voeu|vœu|voeux|vœux/.test(hn)) score += 120;
+    if (/confirm/.test(q) && /confirm/.test(hn)) score += 80;
+    if (/class/.test(q) && /class/.test(hn)) score += 50;
+    if (/moyen|moyenne/.test(q)) score += 10;
+    const stats = numericStats(table.objects || [], h);
+    if (stats.numericCount >= Math.max(5, (table.objects || []).length * 0.1)) score += 80;
+    return { col: h, score, stats };
+  }).filter(x => x.score > 80).sort((a,b)=>b.score-a.score);
+  return candidates[0]?.col || null;
+}
 
 function dataEngineResultToContext(exec) {
   if (!exec || !exec.plan) return '';

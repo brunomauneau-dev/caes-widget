@@ -525,35 +525,41 @@
     const q = nrm(question);
     if (/export|excel|xlsx|csv|telecharg|t[eé]l[eé]charg|liste|extraire|extrait|sors moi|sort moi/.test(q)) return /\bcsv\b/.test(q) ? 'export_csv' : 'export_excel';
     if (/croise|crois[eé]|tableau croise|pivot/.test(q)) return 'pivot';
-    if (/moyenne|median|m[eé]diane|minimum|maximum|\bmin\b|\bmax\b/.test(q)) return 'stats';
+    if (/moyen|moyenne|median|m[eé]diane|minimum|maximum|\bmin\b|\bmax\b/.test(q)) return 'stats';
     if (/top|classement|principales?|principaux|plus frequentes?|plus fréquentes?|les plus/.test(q)) return 'top';
     if (/repartition|r[eé]partition|ventilation|par\s+|group[eé]|pourcentage|proportion/.test(q) && !/combien|nombre|effectif/.test(q)) return 'group_by';
     if (/combien|nombre|effectif|compte|compter|total/.test(q)) return 'count_rows';
     return null;
   }
 
-  function targetColumn(schema, question, tool, filters) {
-    if (!['group_by','top','pivot','stats'].includes(tool)) return null;
-    const q = nrm(question);
-    const filtered = new Set((filters || []).map(f => f.col));
 
-    const parMatch = q.match(/(?:par|selon|repartition par|répartition par)\s+([a-z0-9 ]{3,80})/);
-    const phrase = parMatch ? parMatch[1] : q;
-    const phraseTokens = tokens(phrase);
+  function targetColumnForPhrase(schema, phrase, wholeQuestion, tool, filters, excludeCols = []) {
+    const q = nrm(wholeQuestion || phrase);
+    const ph = nrm(phrase || wholeQuestion || '');
+    const filtered = new Set((filters || []).map(f => f.col));
+    (excludeCols || []).forEach(c => filtered.add(c));
+    const phraseTokens = tokens(ph);
 
     const candidates = schema.columns
       .filter(e => !filtered.has(e.column))
       .map(e => {
         let s = contextScore(e, q) + columnPriority(e, q) / 3;
         const ctoks = tokens(e.column);
-        phraseTokens.forEach(t => { if (ctoks.includes(t) || e.norm.includes(t)) s += 25; });
-        if (/academie/.test(phrase) && e.kind === 'academie') s += e.role.accueil ? 90 : 45;
-        if (/serie|bac/.test(phrase) && e.kind === 'bac_series') s += 90;
-        if (/formation|filiere|specialite|mention|groupe/.test(phrase) && e.kind === 'formation') s += 90;
-        if (/departement/.test(phrase) && e.kind === 'departement') s += 85;
-        if (/commune|ville/.test(phrase) && e.kind === 'commune') s += 75;
-        if (/voeu|vœu|voeux|vœux/.test(phrase) && e.kind === 'voeu') s += 95;
-        if (tool === 'stats' && e.type === 'number') s += 70;
+        phraseTokens.forEach(t => { if (ctoks.includes(t) || e.norm.includes(t)) s += 28; });
+
+        if (/academie/.test(ph) && e.kind === 'academie') s += e.role.accueil ? 140 : 45;
+        if (/serie|bac/.test(ph) && e.kind === 'bac_series') s += 140;
+        if (/formation|filiere|specialite|mention|groupe|but|dut|bts|licence|cpge/.test(ph) && e.kind === 'formation') s += 125;
+        if (/etablissement|universite|lycee|cfa|iut/.test(ph) && e.kind === 'etablissement') s += e.role.accueil ? 180 : 105;
+        if (/etablissement/.test(ph) && e.kind === 'academie') s -= 120;
+        if (/departement/.test(ph) && e.kind === 'departement') s += 125;
+        if (/commune|ville/.test(ph) && e.kind === 'commune') s += 110;
+        if (/voeu|vœu|voeux|vœux/.test(ph) && e.kind === 'voeu') s += 155;
+        if (tool === 'stats') {
+          if (e.type === 'number') s += 95;
+          if (/voeu|vœu|voeux|vœux/.test(ph) && e.kind === 'voeu') s += 170;
+          if (/confirm/.test(ph) && /confirm/.test(e.norm)) s += 90;
+        }
         return { e, s };
       })
       .filter(x => x.s > 40)
@@ -561,18 +567,37 @@
     return candidates[0]?.e?.column || null;
   }
 
+  function pivotTargetColumns(schema, question, filters) {
+    const q = nrm(question);
+    let parts = [];
+    const m = q.match(/(?:entre|croise(?:ment)?(?: entre)?|tableau croise(?: entre)?)\s+(.+?)\s+(?:et|avec|x|×)\s+(.+)$/);
+    if (m) parts = [m[1], m[2]];
+    else {
+      // Fallback : utilise les deux concepts les plus explicitement nommés.
+      if (/serie|bac/.test(q)) parts.push('série de bac');
+      if (/academie/.test(q)) parts.push('académie accueil');
+      if (/formation/.test(q)) parts.push('formation');
+      if (/boursier/.test(q)) parts.push('boursier');
+    }
+    const first = targetColumnForPhrase(schema, parts[0] || q, q, 'pivot', filters, []);
+    const second = targetColumnForPhrase(schema, parts[1] || q, q, 'pivot', filters, first ? [first] : []);
+    return [first, second];
+  }
+
+  function targetColumn(schema, question, tool, filters) {
+    if (!['group_by','top','pivot','stats'].includes(tool)) return null;
+    const q = nrm(question);
+    const parMatch = q.match(/(?:par|selon|repartition par|répartition par|top\s+\d*\s*(?:des|de)?|principaux|principales)\s+([a-z0-9 ]{3,100})/);
+    const phrase = parMatch ? parMatch[1] : q;
+    return targetColumnForPhrase(schema, phrase, q, tool, filters, []);
+  }
+
 
   function secondTargetColumn(schema, question, tool, filters, firstCol) {
     if (tool !== 'pivot') return null;
-    const q = nrm(question);
-    const filtered = new Set((filters || []).map(f => f.col));
-    if (firstCol) filtered.add(firstCol);
-    const candidates = schema.columns
-      .filter(e => !filtered.has(e.column))
-      .map(e => ({ e, s: contextScore(e, q) + columnPriority(e, q) / 3 }))
-      .filter(x => x.s > 40)
-      .sort((a,b) => b.s - a.s);
-    return candidates[0]?.e?.column || null;
+    const [, second] = pivotTargetColumns(schema, question, filters);
+    if (second && second !== firstCol) return second;
+    return targetColumnForPhrase(schema, question, question, tool, filters, firstCol ? [firstCol] : []);
   }
 
   function publicFilters(filters) {
@@ -609,8 +634,13 @@
       upsertCandidateFilter(filters, c, reasons);
     });
 
-    const targetCol = targetColumn(schema, question, tool, filters);
-    const targetCol2 = secondTargetColumn(schema, question, tool, filters, targetCol);
+    let targetCol = targetColumn(schema, question, tool, filters);
+    let targetCol2 = secondTargetColumn(schema, question, tool, filters, targetCol);
+    if (tool === 'pivot') {
+      const pair = pivotTargetColumns(schema, question, filters);
+      targetCol = pair[0] || targetCol;
+      targetCol2 = pair[1] || targetCol2;
+    }
     const mentionedCols = schema.columns
       .map(e => ({ col: e.column, score: contextScore(e, q) + columnPriority(e, q) / 4 }))
       .filter(x => x.score > 60)
@@ -630,7 +660,7 @@
       mentionedCols,
       question,
       planner: {
-        version: 'v19-planner-data-engine-tools',
+        version: 'v20-data-engine-pipeline-fixes',
         confidence,
         reasons,
         schema: {
