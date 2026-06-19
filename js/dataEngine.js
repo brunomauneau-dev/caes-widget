@@ -814,16 +814,35 @@ function strongestCompareDifferences(catRows, groupRows, title, limit = 2) {
 
 function renderCompareInsights(groupRows, sections, statsRows) {
   const insights = [];
-  const first = groupRows?.[0]?.label || 'Population 1';
-  const second = groupRows?.[1]?.label || 'Population 2';
+
+  function sentenceFor(sectionTitle, d) {
+    const leader = d.delta >= 0 ? d.a : d.b;
+    const other = d.delta >= 0 ? d.b : d.a;
+    const leaderPct = d.delta >= 0 ? d.aPct : d.bPct;
+    const otherPct = d.delta >= 0 ? d.bPct : d.aPct;
+    const deltaAbs = Math.abs(d.delta);
+    const label = escapeHtml(d.value);
+    const lead = escapeHtml(leader);
+    const oth = escapeHtml(other);
+    const lp = fmtComparePct(leaderPct);
+    const op = fmtComparePct(otherPct);
+    const dp = fmtCompareNumber(deltaAbs, 1);
+
+    if (/formation|groupe/i.test(sectionTitle)) {
+      return `${lead} s’orientent davantage vers « ${label} » (${lp} contre ${op} pour ${oth}, soit +${dp} pts).`;
+    }
+    if (/acad/i.test(sectionTitle)) {
+      return `${lead} sont plus souvent accueillis dans « ${label} » (${lp} contre ${op} pour ${oth}, soit +${dp} pts).`;
+    }
+    if (/série|serie|bac/i.test(sectionTitle)) {
+      return `${lead} sont plus représentés en « ${label} » (${lp} contre ${op} pour ${oth}, soit +${dp} pts).`;
+    }
+    return `${lead} sont davantage représentés dans « ${label} » (${lp} contre ${op} pour ${oth}, soit +${dp} pts).`;
+  }
 
   (sections || []).forEach(sec => {
     strongestCompareDifferences(sec.rows, groupRows, sec.title, 2).forEach(d => {
-      const leader = d.delta >= 0 ? d.a : d.b;
-      const other = d.delta >= 0 ? d.b : d.a;
-      const leaderPct = d.delta >= 0 ? d.aPct : d.bPct;
-      const otherPct = d.delta >= 0 ? d.bPct : d.aPct;
-      insights.push(`${escapeHtml(leader)} sont davantage représentés dans « ${escapeHtml(d.value)} » (${fmtComparePct(leaderPct)} contre ${fmtComparePct(otherPct)} pour ${escapeHtml(other)}).`);
+      insights.push(sentenceFor(sec.title, d));
     });
   });
 
@@ -839,33 +858,33 @@ function renderCompareInsights(groupRows, sections, statsRows) {
   }
 
   if (!insights.length) return '';
-  return `<h5 style="margin:14px 0 6px">Points clés</h5><ul>${insights.slice(0, 5).map(x => `<li>${x}</li>`).join('')}</ul>`;
+  return `<section class="de-section de-insights" style="margin:16px 0;padding:14px 16px;border:1px solid var(--gris2,#e5e7eb);border-radius:12px;background:#fff"><h5 style="margin:0 0 8px;font-size:14px">Points clés</h5><ul style="margin:0;padding-left:18px;display:grid;gap:6px">${insights.slice(0, 5).map(x => `<li>${x}</li>`).join('')}</ul></section>`;
 }
 
 function renderCompareCategoryTable(title, col, catRows, groupRows) {
   if (!col || !catRows?.length) return '';
-  const head = groupRows.map(g => `<th colspan="2" style="text-align:center">${escapeHtml(g.label)}</th>`).join('');
-  const sub = groupRows.map(() => '<th style="text-align:right">n</th><th style="text-align:right">%</th>').join('');
-  const body = catRows.map(r => `<tr><td>${escapeHtml(r.value)}</td>${r.groups.map(g => `<td style="text-align:right">${g.count.toLocaleString('fr-FR')}</td><td style="text-align:right">${fmtComparePct(g.pct)}</td>`).join('')}</tr>`).join('');
-  return `<h5 style="margin:14px 0 6px">${escapeHtml(title)}</h5><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px"><tbody><tr><th>${escapeHtml(title)}</th>${head}</tr><tr><th></th>${sub}</tr>${body}</tbody></table></div>`;
+  const head = groupRows.map(g => `<th colspan="2" style="text-align:center;padding:8px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">${escapeHtml(g.label)}</th>`).join('');
+  const sub = groupRows.map(() => '<th style="text-align:right;padding:6px 10px;border-bottom:1px solid var(--gris2,#e5e7eb);color:var(--gris6,#6b7280)">n</th><th style="text-align:right;padding:6px 10px;border-bottom:1px solid var(--gris2,#e5e7eb);color:var(--gris6,#6b7280)">%</th>').join('');
+  const body = catRows.map(r => `<tr><td style="padding:7px 10px;border-bottom:1px solid var(--gris1,#f3f4f6);max-width:300px">${escapeHtml(r.value)}</td>${r.groups.map(g => `<td style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris1,#f3f4f6);white-space:nowrap">${g.count.toLocaleString('fr-FR')}</td><td style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris1,#f3f4f6);white-space:nowrap">${fmtComparePct(g.pct)}</td>`).join('')}</tr>`).join('');
+  return `<details class="de-detail-table" style="margin:10px 0;border:1px solid var(--gris2,#e5e7eb);border-radius:10px;background:#fff"><summary style="cursor:pointer;padding:10px 12px;font-weight:700">Tableau détaillé · ${escapeHtml(title)}</summary><div style="overflow:auto;padding:0 12px 12px"><table style="border-collapse:separate;border-spacing:0;width:100%;font-size:12px;min-width:560px"><tbody><tr><th style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">${escapeHtml(title)}</th>${head}</tr><tr><th style="border-bottom:1px solid var(--gris2,#e5e7eb)"></th>${sub}</tr>${body}</tbody></table></div></details>`;
 }
 
 function renderCompareStatsTable(col, statsRows) {
   if (!col || !statsRows?.length) return '';
-  const rows = statsRows.map(r => `<tr><td>${escapeHtml(r.label)}</td><td style="text-align:right">${(r.numericCount || 0).toLocaleString('fr-FR')}</td><td style="text-align:right">${fmtCompareNumber(r.avg, 2)}</td><td style="text-align:right">${fmtCompareNumber(r.median, 2)}</td><td style="text-align:right">${fmtCompareNumber(r.min, 2)}</td><td style="text-align:right">${fmtCompareNumber(r.max, 2)}</td></tr>`).join('');
-  return `<h5 style="margin:14px 0 6px">Vœux confirmés</h5><p style="font-size:12px;margin:0 0 6px">Colonne : ${escapeHtml(col)}</p><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px"><tbody><tr><th>Population</th><th style="text-align:right">Valeurs num.</th><th style="text-align:right">Moyenne</th><th style="text-align:right">Médiane</th><th style="text-align:right">Min</th><th style="text-align:right">Max</th></tr>${rows}</tbody></table></div>`;
+  const rows = statsRows.map(r => `<tr><td style="padding:8px 10px;border-bottom:1px solid var(--gris1,#f3f4f6)">${escapeHtml(r.label)}</td><td style="text-align:right;padding:8px 10px;border-bottom:1px solid var(--gris1,#f3f4f6)">${(r.numericCount || 0).toLocaleString('fr-FR')}</td><td style="text-align:right;padding:8px 10px;border-bottom:1px solid var(--gris1,#f3f4f6)"><strong>${fmtCompareNumber(r.avg, 2)}</strong></td><td style="text-align:right;padding:8px 10px;border-bottom:1px solid var(--gris1,#f3f4f6)">${fmtCompareNumber(r.median, 2)}</td><td style="text-align:right;padding:8px 10px;border-bottom:1px solid var(--gris1,#f3f4f6)">${fmtCompareNumber(r.min, 2)}</td><td style="text-align:right;padding:8px 10px;border-bottom:1px solid var(--gris1,#f3f4f6)">${fmtCompareNumber(r.max, 2)}</td></tr>`).join('');
+  return `<section class="de-section de-stats" style="margin:14px 0;padding:12px;border:1px solid var(--gris2,#e5e7eb);border-radius:10px;background:#fff"><h5 style="margin:0 0 4px;font-size:14px">Vœux confirmés</h5><p style="font-size:12px;margin:0 0 8px;color:var(--gris6,#6b7280)">Colonne : ${escapeHtml(col)}</p><div style="overflow:auto"><table style="border-collapse:separate;border-spacing:0;width:100%;font-size:12px;min-width:520px"><tbody><tr><th style="text-align:left;padding:8px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Population</th><th style="text-align:right;padding:8px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Valeurs num.</th><th style="text-align:right;padding:8px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Moyenne</th><th style="text-align:right;padding:8px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Médiane</th><th style="text-align:right;padding:8px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Min</th><th style="text-align:right;padding:8px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Max</th></tr>${rows}</tbody></table></div></section>`;
 }
 
 function renderCompareHtml(plan, result) {
   const filtersHtml = (plan.filters || []).length
-    ? `<p><strong>Filtres communs</strong></p><ul>${plan.filters.map(f => `<li>${escapeHtml(f.col)} ${f.op === 'neq' ? '≠' : '='} <strong>${escapeHtml(f.value)}</strong></li>`).join('')}</ul>`
-    : '<p><strong>Filtres communs</strong> : aucun.</p>';
+    ? `<div style="margin:10px 0"><strong>Filtres communs</strong><ul style="margin:6px 0 0;padding-left:18px">${plan.filters.map(f => `<li>${escapeHtml(f.col)} ${f.op === 'neq' ? '≠' : '='} <strong>${escapeHtml(f.value)}</strong></li>`).join('')}</ul></div>`
+    : '<p style="margin:10px 0"><strong>Filtres communs</strong> : aucun.</p>';
   const rows = result.rows || [];
   const baseTotal = result.baseTotal || rows.reduce((s, r) => s + (r.count || 0), 0);
   const groupedTotal = rows.reduce((s, r) => s + (r.count || 0), 0);
   const missing = Math.max(0, baseTotal - groupedTotal);
-  const tableRows = rows.map(r => `<tr><td>${escapeHtml(r.label)}</td><td style="text-align:right"><strong>${r.count.toLocaleString('fr-FR')}</strong></td><td style="text-align:right">${fmtComparePct(r.pct)}</td></tr>`).join('')
-    + (missing ? `<tr><td>Non renseigné / autre</td><td style="text-align:right"><strong>${missing.toLocaleString('fr-FR')}</strong></td><td style="text-align:right">${fmtComparePct(baseTotal ? missing / baseTotal * 100 : 0)}</td></tr>` : '');
+  const tableRows = rows.map(r => `<tr><td style="padding:7px 10px;border-bottom:1px solid var(--gris1,#f3f4f6)">${escapeHtml(r.label)}</td><td style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris1,#f3f4f6)"><strong>${r.count.toLocaleString('fr-FR')}</strong></td><td style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris1,#f3f4f6)">${fmtComparePct(r.pct)}</td></tr>`).join('');
+  const missingNote = missing ? `<p style="font-size:12px;color:var(--gris6,#6b7280);margin:8px 0 0">Autres / non renseignés hors groupes comparés : <strong>${missing.toLocaleString('fr-FR')}</strong> ligne${missing>1?'s':''} (${fmtComparePct(baseTotal ? missing / baseTotal * 100 : 0)}).</p>` : '';
   const cols = getCompareColumns(plan.table);
   const formationRows = compareCategoryRows(rows, cols.formation, 8);
   const academieRows = compareCategoryRows(rows, cols.academie, 8);
@@ -880,9 +899,10 @@ function renderCompareHtml(plan, result) {
   const academieTable = renderCompareCategoryTable('Académie d’accueil', cols.academie, academieRows, rows);
   const serieTable = renderCompareCategoryTable('Série de bac', cols.serie, serieRows, rows);
   const statsTable = renderCompareStatsTable(cols.voeux, statsRows);
-  const charts = plan.renderChart ? renderCompareCharts(plan, result) : '';
-  const debug = `<details class="msg-sources" open><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : compare<br><strong>Version</strong> : v25.2-compare-charts-export<br><strong>Source</strong> : ${escapeHtml(plan.table?.source || 'Données')} · ${escapeHtml(plan.table?.name || 'table')}<br><strong>Groupes</strong> : ${escapeHtml(rows.map(r => r.label).join(' / ') || '—')}</div></details>`;
-  return `<h4>Comparaison calculée localement</h4><p>Base comparée : <strong>${baseTotal.toLocaleString('fr-FR')}</strong> lignes.</p><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px"><tbody><tr><th>Population</th><th>Nombre</th><th>Part</th></tr>${tableRows}</tbody></table></div>${filtersHtml}${insights}${charts}${formationTable}${academieTable}${serieTable}${statsTable}${debug}`;
+  const charts = plan.renderChart ? `<section class="de-section de-charts" style="margin:14px 0">${renderCompareCharts(plan, result)}</section>` : '';
+  const detailsTables = `<details class="de-detail-tables" style="margin:14px 0"><summary style="cursor:pointer;font-weight:800;padding:10px 0">Voir les tableaux détaillés</summary>${formationTable}${academieTable}${serieTable}</details>`;
+  const debug = `<details class="msg-sources" open><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : compare<br><strong>Version</strong> : v25.3-sprint4-ux<br><strong>Source</strong> : ${escapeHtml(plan.table?.source || 'Données')} · ${escapeHtml(plan.table?.name || 'table')}<br><strong>Groupes</strong> : ${escapeHtml(rows.map(r => r.label).join(' / ') || '—')}</div></details>`;
+  return `<h4>Comparaison calculée localement</h4><p>Base comparée : <strong>${baseTotal.toLocaleString('fr-FR')}</strong> lignes.</p><section class="de-section de-population" style="margin:12px 0;padding:12px;border:1px solid var(--gris2,#e5e7eb);border-radius:10px;background:#fff"><div style="overflow:auto"><table style="border-collapse:separate;border-spacing:0;width:100%;font-size:12px;min-width:360px"><tbody><tr><th style="text-align:left;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Population</th><th style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Nombre</th><th style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Part</th></tr>${tableRows}</tbody></table></div>${missingNote}</section>${filtersHtml}${insights}${charts}${statsTable}${detailsTables}${debug}`;
 }
 
 function runDataEnginePlan(plan) {
