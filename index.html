@@ -3414,11 +3414,7 @@ function addInfographicMessage(html, title = 'Infographie adaptive générée') 
   chatHistory.push({ role: 'assistant', content: `[Infographie adaptive générée : ${title}]` });
 }
 
-async function generateInfographicLocal(question, localAnalysis) {
- return renderLocalInfographic(localAnalysis);
-}
-
-async function _disabled_generateInfographicWithAlbert(question, localAnalysis) {
+async function generateInfographicWithAlbert(question, localAnalysis) {
   const context = buildContext(localAnalysis);
   const specPrompt = `Tu es un directeur artistique, data analyst et rédacteur institutionnel.
 
@@ -3531,7 +3527,7 @@ async function sendMessage() {
 
   if (isInfographicRequest(question)) {
     try {
-      const html = await generateInfographicLocal(question, localAnalysis);
+      const html = await generateInfographicWithAlbert(question, localAnalysis);
       removeLoadingMessage(loadingId);
       addInfographicMessage(html, 'Infographie Albert');
       chatHistory.push({ role: 'user', content: question });
