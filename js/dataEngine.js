@@ -642,10 +642,10 @@ function getCompareColumns(table) {
     return patterns.every(p => p.test(n));
   });
   return {
-    formation: findColumnByConceptStrict(table, 'formation_groupe') || byRegex(/groupes?.*formation/) || byRegex(/formation.*accept/),
+    formation: findColumnByConceptStrict(table, 'formation_groupe') || byRegex(/grands?.*groupes?.*formation/) || byRegex(/formation.*accept/),
     academie: findColumnByConceptStrict(table, 'academie_accueil') || byRegex(/acad[eé]mie/, /accueil|accept/),
     serie: findColumnByConceptStrict(table, 'serie') || byRegex(/s[eé]rie/, /classe|bac/),
-    voeux: inferNumericStatsColumn(table, 'nombre moyen de voeux confirmés') || byRegex(/voeux|vœux/, /confirm/)
+    voeux: inferNumericStatsColumn(table, 'nombre moyen de voeux confirmés') || byRegex(/voeux|vœux|voeu|vœu/, /confirm/)
   };
 }
 
@@ -662,7 +662,7 @@ function topCountsForSpecificRows(rows, col, limit = 8) {
   });
   return [...map.entries()]
     .map(([value, count]) => ({ value, count, pct: filled ? count / filled * 100 : 0 }))
-    .sort((a,b) => b.count - a.count)
+    .sort((a,b) => b.count - a.count || String(a.value).localeCompare(String(b.value), 'fr'))
     .slice(0, limit);
 }
 
@@ -705,7 +705,8 @@ function renderCompareCategoryTable(title, col, catRows, groupRows) {
 
 function renderCompareStatsTable(col, statsRows) {
   if (!col || !statsRows?.length) return '';
-  const rows = statsRows.map(r => `<tr><td>${escapeHtml(r.label)}</td><td style="text-align:right">${(r.numericCount || 0).toLocaleString('fr-FR')}</td><td style="text-align:right">${r.avg ?? '—'}</td><td style="text-align:right">${r.median ?? '—'}</td><td style="text-align:right">${r.min ?? '—'}</td><td style="text-align:right">${r.max ?? '—'}</td></tr>`).join('');
+  const fmt = v => v === null || v === undefined ? '—' : Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 2 });
+  const rows = statsRows.map(r => `<tr><td>${escapeHtml(r.label)}</td><td style="text-align:right">${(r.numericCount || 0).toLocaleString('fr-FR')}</td><td style="text-align:right">${fmt(r.avg)}</td><td style="text-align:right">${fmt(r.median)}</td><td style="text-align:right">${fmt(r.min)}</td><td style="text-align:right">${fmt(r.max)}</td></tr>`).join('');
   return `<h5 style="margin:14px 0 6px">Vœux confirmés</h5><p style="font-size:12px;margin:0 0 6px">Colonne : ${escapeHtml(col)}</p><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px"><tbody><tr><th>Population</th><th style="text-align:right">Valeurs num.</th><th style="text-align:right">Moyenne</th><th style="text-align:right">Médiane</th><th style="text-align:right">Min</th><th style="text-align:right">Max</th></tr>${rows}</tbody></table></div>`;
 }
 
@@ -721,7 +722,7 @@ function renderCompareHtml(plan, result) {
   const academieTable = renderCompareCategoryTable('Académie d’accueil', cols.academie, compareCategoryRows(rows, cols.academie, 8), rows);
   const serieTable = renderCompareCategoryTable('Série de bac', cols.serie, compareCategoryRows(rows, cols.serie, 8), rows);
   const statsTable = renderCompareStatsTable(cols.voeux, compareNumericStatsRows(rows, cols.voeux));
-  const debug = `<details class="msg-sources" open><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : compare<br><strong>Version</strong> : v24.3-compare-rich-context<br><strong>Source</strong> : ${escapeHtml(plan.table?.source || 'Données')} · ${escapeHtml(plan.table?.name || 'table')}<br><strong>Groupes</strong> : ${escapeHtml(rows.map(r => r.label).join(' / ') || '—')}</div></details>`;
+  const debug = `<details class="msg-sources" open><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : compare<br><strong>Version</strong> : v24.4-compare-rich-context<br><strong>Source</strong> : ${escapeHtml(plan.table?.source || 'Données')} · ${escapeHtml(plan.table?.name || 'table')}<br><strong>Groupes</strong> : ${escapeHtml(rows.map(r => r.label).join(' / ') || '—')}</div></details>`;
   return `<h4>Comparaison calculée localement</h4><p>Base comparée : <strong>${baseTotal.toLocaleString('fr-FR')}</strong> lignes.</p><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px"><tbody><tr><th>Population</th><th>Nombre</th><th>Part</th></tr>${tableRows}</tbody></table></div>${filtersHtml}${formationTable}${academieTable}${serieTable}${statsTable}${debug}`;
 }
 
