@@ -358,6 +358,26 @@ function buildCurrentResultPlan(question, table) {
   return null;
 }
 
+
+// V24.1 — contexte pour les comparaisons.
+// Une comparaison hérite du périmètre courant, sauf pour la colonne qui sert à définir
+// les deux groupes comparés. Exemple : après "Pays Basque", "Compare les boursiers et
+// les non-boursiers" compare uniquement les candidats basques. Après reset, elle compare
+// toute la base.
+function getContextualCompareBaseFilters(table, question, groups) {
+  const q = normalizeText(question || '');
+  const noContext = /toute\s+la\s+base|ensemble\s+du\s+jeu|global|globale|sans\s+filtre|aucun\s+filtre/.test(q);
+  const groupCols = new Set((groups || []).flatMap(g => (g.filters || []).map(f => f && f.col).filter(Boolean)));
+  const strict = strictFiltersFromQuestion(table, question).filter(f => f && f.col && !groupCols.has(f.col));
+  if (noContext) return strict;
+
+  const prev = getDataEngineState().lastPlan;
+  const prevFilters = (prev && prev.table === table)
+    ? (prev.filters || []).filter(f => f && f.col && !groupCols.has(f.col))
+    : [];
+  return mergeFiltersUnique(prevFilters, strict);
+}
+
 function detectDataEnginePlan(question, filterContextText = question) {
   if (!isDataEngineQuestion(question)) return null;
   const tables = getActiveQueryTables();
@@ -377,7 +397,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
   if (tool === 'compare') {
     const groups = detectCompareGroups(table, question);
     if (groups.length >= 2) {
-      const baseFilters = strictFiltersFromQuestion(table, question).filter(f => !groups.some(g => (g.filters || []).some(gf => gf.col === f.col)));
+      const baseFilters = getContextualCompareBaseFilters(table, question, groups);
       return inheritConversationContext({
         tool: 'compare',
         table,
