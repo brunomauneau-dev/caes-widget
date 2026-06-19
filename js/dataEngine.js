@@ -711,17 +711,73 @@ function compareNumericStatsRows(groupRows, col) {
   });
 }
 
+
+// V24.7 — formatage lisible + points clés calculés localement.
+function fmtCompareNumber(v, decimals = 2) {
+  if (v === null || v === undefined || v === '' || !Number.isFinite(Number(v))) return '—';
+  return Number(v).toLocaleString('fr-FR', { maximumFractionDigits: decimals });
+}
+
+function fmtComparePct(v, decimals = 1) {
+  if (v === null || v === undefined || !Number.isFinite(Number(v))) return '—';
+  return `${Number(v).toLocaleString('fr-FR', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })} %`;
+}
+
+function strongestCompareDifferences(catRows, groupRows, title, limit = 2) {
+  if (!catRows?.length || !groupRows?.length || groupRows.length < 2) return [];
+  const a = groupRows[0]?.label || 'Population 1';
+  const b = groupRows[1]?.label || 'Population 2';
+  return catRows.map(r => {
+    const g1 = r.groups?.[0] || { pct: 0 };
+    const g2 = r.groups?.[1] || { pct: 0 };
+    const delta = (g1.pct || 0) - (g2.pct || 0);
+    return { title, value: r.value, a, b, aPct: g1.pct || 0, bPct: g2.pct || 0, delta };
+  }).filter(x => Math.abs(x.delta) >= 1.0)
+    .sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta))
+    .slice(0, limit);
+}
+
+function renderCompareInsights(groupRows, sections, statsRows) {
+  const insights = [];
+  const first = groupRows?.[0]?.label || 'Population 1';
+  const second = groupRows?.[1]?.label || 'Population 2';
+
+  (sections || []).forEach(sec => {
+    strongestCompareDifferences(sec.rows, groupRows, sec.title, 2).forEach(d => {
+      const leader = d.delta >= 0 ? d.a : d.b;
+      const other = d.delta >= 0 ? d.b : d.a;
+      const leaderPct = d.delta >= 0 ? d.aPct : d.bPct;
+      const otherPct = d.delta >= 0 ? d.bPct : d.aPct;
+      insights.push(`${escapeHtml(leader)} sont davantage représentés dans « ${escapeHtml(d.value)} » (${fmtComparePct(leaderPct)} contre ${fmtComparePct(otherPct)} pour ${escapeHtml(other)}).`);
+    });
+  });
+
+  if (statsRows?.length >= 2) {
+    const a = statsRows[0];
+    const b = statsRows[1];
+    if (Number.isFinite(Number(a.avg)) && Number.isFinite(Number(b.avg))) {
+      const delta = Number(a.avg) - Number(b.avg);
+      const leader = delta >= 0 ? a : b;
+      const other = delta >= 0 ? b : a;
+      insights.push(`${escapeHtml(leader.label)} formulent en moyenne ${fmtCompareNumber(leader.avg, 2)} vœux confirmés, contre ${fmtCompareNumber(other.avg, 2)} pour ${escapeHtml(other.label)}.`);
+    }
+  }
+
+  if (!insights.length) return '';
+  return `<h5 style="margin:14px 0 6px">Points clés</h5><ul>${insights.slice(0, 5).map(x => `<li>${x}</li>`).join('')}</ul>`;
+}
+
 function renderCompareCategoryTable(title, col, catRows, groupRows) {
   if (!col || !catRows?.length) return '';
   const head = groupRows.map(g => `<th colspan="2" style="text-align:center">${escapeHtml(g.label)}</th>`).join('');
   const sub = groupRows.map(() => '<th style="text-align:right">n</th><th style="text-align:right">%</th>').join('');
-  const body = catRows.map(r => `<tr><td>${escapeHtml(r.value)}</td>${r.groups.map(g => `<td style="text-align:right">${g.count.toLocaleString('fr-FR')}</td><td style="text-align:right">${g.pct.toFixed(1).replace('.', ',')} %</td>`).join('')}</tr>`).join('');
+  const body = catRows.map(r => `<tr><td>${escapeHtml(r.value)}</td>${r.groups.map(g => `<td style="text-align:right">${g.count.toLocaleString('fr-FR')}</td><td style="text-align:right">${fmtComparePct(g.pct)}</td>`).join('')}</tr>`).join('');
   return `<h5 style="margin:14px 0 6px">${escapeHtml(title)}</h5><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px"><tbody><tr><th>${escapeHtml(title)}</th>${head}</tr><tr><th></th>${sub}</tr>${body}</tbody></table></div>`;
 }
 
 function renderCompareStatsTable(col, statsRows) {
   if (!col || !statsRows?.length) return '';
-  const rows = statsRows.map(r => `<tr><td>${escapeHtml(r.label)}</td><td style="text-align:right">${(r.numericCount || 0).toLocaleString('fr-FR')}</td><td style="text-align:right">${r.avg ?? '—'}</td><td style="text-align:right">${r.median ?? '—'}</td><td style="text-align:right">${r.min ?? '—'}</td><td style="text-align:right">${r.max ?? '—'}</td></tr>`).join('');
+  const rows = statsRows.map(r => `<tr><td>${escapeHtml(r.label)}</td><td style="text-align:right">${(r.numericCount || 0).toLocaleString('fr-FR')}</td><td style="text-align:right">${fmtCompareNumber(r.avg, 2)}</td><td style="text-align:right">${fmtCompareNumber(r.median, 2)}</td><td style="text-align:right">${fmtCompareNumber(r.min, 2)}</td><td style="text-align:right">${fmtCompareNumber(r.max, 2)}</td></tr>`).join('');
   return `<h5 style="margin:14px 0 6px">Vœux confirmés</h5><p style="font-size:12px;margin:0 0 6px">Colonne : ${escapeHtml(col)}</p><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px"><tbody><tr><th>Population</th><th style="text-align:right">Valeurs num.</th><th style="text-align:right">Moyenne</th><th style="text-align:right">Médiane</th><th style="text-align:right">Min</th><th style="text-align:right">Max</th></tr>${rows}</tbody></table></div>`;
 }
 
@@ -730,15 +786,27 @@ function renderCompareHtml(plan, result) {
     ? `<p><strong>Filtres communs</strong></p><ul>${plan.filters.map(f => `<li>${escapeHtml(f.col)} ${f.op === 'neq' ? '≠' : '='} <strong>${escapeHtml(f.value)}</strong></li>`).join('')}</ul>`
     : '<p><strong>Filtres communs</strong> : aucun.</p>';
   const rows = result.rows || [];
-  const baseTotal = rows.reduce((s, r) => s + (r.count || 0), 0);
-  const tableRows = rows.map(r => `<tr><td>${escapeHtml(r.label)}</td><td style="text-align:right"><strong>${r.count.toLocaleString('fr-FR')}</strong></td><td style="text-align:right">${r.pct.toFixed(1).replace('.', ',')} %</td></tr>`).join('');
+  const baseTotal = result.baseTotal || rows.reduce((s, r) => s + (r.count || 0), 0);
+  const groupedTotal = rows.reduce((s, r) => s + (r.count || 0), 0);
+  const missing = Math.max(0, baseTotal - groupedTotal);
+  const tableRows = rows.map(r => `<tr><td>${escapeHtml(r.label)}</td><td style="text-align:right"><strong>${r.count.toLocaleString('fr-FR')}</strong></td><td style="text-align:right">${fmtComparePct(r.pct)}</td></tr>`).join('')
+    + (missing ? `<tr><td>Non renseigné / autre</td><td style="text-align:right"><strong>${missing.toLocaleString('fr-FR')}</strong></td><td style="text-align:right">${fmtComparePct(baseTotal ? missing / baseTotal * 100 : 0)}</td></tr>` : '');
   const cols = getCompareColumns(plan.table);
-  const formationTable = renderCompareCategoryTable('Grands groupes de formation', cols.formation, compareCategoryRows(rows, cols.formation, 8), rows);
-  const academieTable = renderCompareCategoryTable('Académie d’accueil', cols.academie, compareCategoryRows(rows, cols.academie, 8), rows);
-  const serieTable = renderCompareCategoryTable('Série de bac', cols.serie, compareCategoryRows(rows, cols.serie, 8), rows);
-  const statsTable = renderCompareStatsTable(cols.voeux, compareNumericStatsRows(rows, cols.voeux));
-  const debug = `<details class="msg-sources" open><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : compare<br><strong>Version</strong> : v24.6-compare-axis-sanitized<br><strong>Source</strong> : ${escapeHtml(plan.table?.source || 'Données')} · ${escapeHtml(plan.table?.name || 'table')}<br><strong>Groupes</strong> : ${escapeHtml(rows.map(r => r.label).join(' / ') || '—')}</div></details>`;
-  return `<h4>Comparaison calculée localement</h4><p>Base comparée : <strong>${baseTotal.toLocaleString('fr-FR')}</strong> lignes.</p><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px"><tbody><tr><th>Population</th><th>Nombre</th><th>Part</th></tr>${tableRows}</tbody></table></div>${filtersHtml}${formationTable}${academieTable}${serieTable}${statsTable}${debug}`;
+  const formationRows = compareCategoryRows(rows, cols.formation, 8);
+  const academieRows = compareCategoryRows(rows, cols.academie, 8);
+  const serieRows = compareCategoryRows(rows, cols.serie, 8);
+  const statsRows = compareNumericStatsRows(rows, cols.voeux);
+  const insights = renderCompareInsights(rows, [
+    { title: 'grands groupes de formation', rows: formationRows },
+    { title: 'académie d’accueil', rows: academieRows },
+    { title: 'série de bac', rows: serieRows }
+  ], statsRows);
+  const formationTable = renderCompareCategoryTable('Grands groupes de formation', cols.formation, formationRows, rows);
+  const academieTable = renderCompareCategoryTable('Académie d’accueil', cols.academie, academieRows, rows);
+  const serieTable = renderCompareCategoryTable('Série de bac', cols.serie, serieRows, rows);
+  const statsTable = renderCompareStatsTable(cols.voeux, statsRows);
+  const debug = `<details class="msg-sources" open><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : compare<br><strong>Version</strong> : v24.7-compare-format-insights<br><strong>Source</strong> : ${escapeHtml(plan.table?.source || 'Données')} · ${escapeHtml(plan.table?.name || 'table')}<br><strong>Groupes</strong> : ${escapeHtml(rows.map(r => r.label).join(' / ') || '—')}</div></details>`;
+  return `<h4>Comparaison calculée localement</h4><p>Base comparée : <strong>${baseTotal.toLocaleString('fr-FR')}</strong> lignes.</p><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px"><tbody><tr><th>Population</th><th>Nombre</th><th>Part</th></tr>${tableRows}</tbody></table></div>${filtersHtml}${insights}${formationTable}${academieTable}${serieTable}${statsTable}${debug}`;
 }
 
 function runDataEnginePlan(plan) {
@@ -750,7 +818,8 @@ function runDataEnginePlan(plan) {
     const commonFilters = sanitizeCompareCommonFilters(plan, groups);
     const comparePlan = { ...plan, filters: commonFilters, compareGroups: groups };
     const rows = compareGroupSummary(plan.table, groups, commonFilters);
-    const exec = { kind: 'compare', plan: comparePlan, result: { rows }, text: rows.map(r => `${r.label}: ${r.count}`).join('\n'), html: renderCompareHtml(comparePlan, { rows }) };
+    const baseTotal = applyLocalActionFilters(plan.table.objects || [], commonFilters).length;
+    const exec = { kind: 'compare', plan: comparePlan, result: { rows, baseTotal }, text: rows.map(r => `${r.label}: ${r.count}`).join('\n'), html: renderCompareHtml(comparePlan, { rows, baseTotal }) };
     rememberDataEngineExecution(exec);
     return exec;
   }
