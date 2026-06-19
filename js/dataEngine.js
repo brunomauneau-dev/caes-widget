@@ -78,6 +78,14 @@ function isChartRequest(question) {
   return /graphique|graphe|diagramme|histogramme|barres?|camembert|chart|visualis|repr[eé]sent|montre-?moi|dessine|trace/.test(q);
 }
 
+// v27.5.2 — détecte si la demande de graphique précise explicitement un camembert/pie.
+// N'influence aucune regex existante : sert uniquement à choisir le rendu une fois
+// que isChartRequest a déjà décidé qu'il fallait un graphique.
+function isPieChartRequest(question) {
+  const q = normalizeText(question || '');
+  return /camembert|pie\b|donut|secteurs?/.test(q);
+}
+
 function isExportCurrentRequest(question) {
   const q = normalizeText(question || '');
   return /export|exporte|excel|xlsx|csv|telecharg|t[eé]l[eé]charg/.test(q);
@@ -212,7 +220,10 @@ function inheritConversationContext(plan, question) {
   plan = replaceConceptFiltersWithStrict(plan, question);
 
   if (!prev) {
-    if (isChartRequest(question)) plan.renderChart = true;
+    if (isChartRequest(question)) {
+      plan.renderChart = true;
+      plan.chartType = isPieChartRequest(question) ? 'pie' : 'bar';
+    }
     return plan;
   }
 
@@ -222,7 +233,10 @@ function inheritConversationContext(plan, question) {
   const bareAction = isBareChartRequest(question) || isBareExportRequest(question);
 
   if (explicitFresh && !dimensionFollowUp && !filterFollowUp && !bareAction) {
-    if (isChartRequest(question)) plan.renderChart = true;
+    if (isChartRequest(question)) {
+      plan.renderChart = true;
+      plan.chartType = isPieChartRequest(question) ? 'pie' : 'bar';
+    }
     return plan;
   }
 
@@ -245,9 +259,13 @@ function inheritConversationContext(plan, question) {
       if (prev.mentionedCols && (!plan.mentionedCols || !plan.mentionedCols.length)) plan.mentionedCols = prev.mentionedCols;
     }
 
-    if (isChartRequest(question)) plan.renderChart = true;
+    if (isChartRequest(question)) {
+      plan.renderChart = true;
+      plan.chartType = isPieChartRequest(question) ? 'pie' : 'bar';
+    }
   } else if (isChartRequest(question)) {
     plan.renderChart = true;
+    plan.chartType = isPieChartRequest(question) ? 'pie' : 'bar';
   }
   return plan;
 }
@@ -269,6 +287,45 @@ function renderMiniBarChart(rows, total) {
     const w = Math.max(2, Math.round((r.count || 0) / max * 100));
     return `<div style="display:grid;grid-template-columns:minmax(120px,220px) 1fr auto;gap:8px;align-items:center"><div style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(r.value)}">${escapeHtml(r.value)}</div><div style="height:12px;background:var(--gris1);border-radius:6px;overflow:hidden"><div style="height:12px;width:${w}%;background:var(--albert);border-radius:6px"></div></div><div style="font-size:11px;font-weight:700">${(r.count || 0).toLocaleString('fr-FR')}</div></div>`;
   }).join('')}</div>`;
+}
+
+// v27.5.2 — rendu camembert en SVG inline (aucune dépendance externe).
+// N'est appelé qu'à la place de renderMiniBarChart, jamais en plus : zéro impact
+// sur les vues qui utilisent déjà les barres.
+const DE_PIE_COLORS = ['#2563eb', '#c85b00', '#16a34a', '#7c3aed', '#db2777', '#0891b2', '#ca8a04', '#dc2626', '#4f46e5', '#059669', '#9333ea', '#ea580c'];
+
+function renderMiniPieChart(rows, total) {
+  if (!rows || !rows.length) return '';
+  const top = rows.slice(0, 12);
+  const sum = top.reduce((acc, r) => acc + (r.count || 0), 0);
+  if (!sum) return '';
+
+  const cx = 90, cy = 90, r = 80;
+  let angleStart = -Math.PI / 2;
+  const slices = top.map((row, i) => {
+    const value = row.count || 0;
+    const fraction = value / sum;
+    const angleEnd = angleStart + fraction * Math.PI * 2;
+    const x1 = cx + r * Math.cos(angleStart);
+    const y1 = cy + r * Math.sin(angleStart);
+    const x2 = cx + r * Math.cos(angleEnd);
+    const y2 = cy + r * Math.sin(angleEnd);
+    const largeArc = (angleEnd - angleStart) > Math.PI ? 1 : 0;
+    const color = DE_PIE_COLORS[i % DE_PIE_COLORS.length];
+    const path = fraction >= 0.9995
+      ? `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${color}"></circle>`
+      : `<path d="M ${cx} ${cy} L ${x1.toFixed(2)} ${y1.toFixed(2)} A ${r} ${r} 0 ${largeArc} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} Z" fill="${color}"></path>`;
+    angleStart = angleEnd;
+    return { path, color, row, fraction };
+  });
+
+  const svg = `<svg viewBox="0 0 180 180" width="180" height="180" style="flex:0 0 auto">${slices.map(s => s.path).join('')}</svg>`;
+  const legend = `<div style="display:grid;gap:5px;align-content:center">${slices.map(s => {
+    const pct = (s.fraction * 100).toFixed(1).replace('.', ',');
+    return `<div style="display:flex;align-items:center;gap:7px;font-size:11px"><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${s.color};flex:0 0 auto"></i><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px" title="${escapeHtml(s.row.value)}">${escapeHtml(s.row.value)}</span><strong style="margin-left:auto">${(s.row.count || 0).toLocaleString('fr-FR')} · ${pct} %</strong></div>`;
+  }).join('')}</div>`;
+
+  return `<div style="margin:10px 0;display:flex;gap:18px;flex-wrap:wrap;align-items:center">${svg}${legend}</div>`;
 }
 
 
@@ -540,13 +597,13 @@ function renderCurrentChartExecution(plan) {
   const prev = plan.sourceExecution;
   if (!prev) return null;
   if (prev.kind === 'compare') {
-    const comparePlan = { ...(prev.plan || {}), renderChart: true };
+    const comparePlan = { ...(prev.plan || {}), renderChart: true, chartType: isPieChartRequest(plan.question || '') ? 'pie' : (prev.plan?.chartType || 'bar') };
     const html = `<h4>Graphiques de comparaison</h4>${renderCompareCharts(comparePlan, prev.result || {})}`;
     return { kind: 'compare', plan: comparePlan, result: prev.result, text: prev.text, html };
   }
   if (prev.kind === 'group_by' || prev.kind === 'top') {
     const rows = prev.result?.rows || [];
-    const clonedPlan = { ...(prev.plan || {}), renderChart: true };
+    const clonedPlan = { ...(prev.plan || {}), renderChart: true, chartType: isPieChartRequest(plan.question || '') ? 'pie' : (prev.plan?.chartType || 'bar') };
     const html = renderDataEngineResultHtml(prev.plan?.tool || prev.kind, clonedPlan, prev.result);
     return { kind: prev.kind, plan: clonedPlan, result: prev.result, text: prev.text, html };
   }
@@ -555,7 +612,7 @@ function renderCurrentChartExecution(plan) {
   const rows = applyLocalActionFilters(prev.plan?.table?.objects || [], prev.plan?.filters || []);
   const counts = topCountsForRows(rows, fallbackCol, 30);
   const result = { total: rows.length, filled: counts.filled, distinct: counts.distinct, rows: counts.top.slice(0, 12) };
-  const clonedPlan = { ...(prev.plan || {}), tool: 'group_by', targetCol: fallbackCol, renderChart: true };
+  const clonedPlan = { ...(prev.plan || {}), tool: 'group_by', targetCol: fallbackCol, renderChart: true, chartType: isPieChartRequest(plan.question || '') ? 'pie' : 'bar' };
   return { kind: 'group_by', plan: clonedPlan, result, text: '', html: renderDataEngineResultHtml('group_by', clonedPlan, result) };
 }
 
@@ -1098,7 +1155,7 @@ function renderDataEngineResultHtml(tool, plan, result) {
   if (tool === 'group_by' || tool === 'top') {
     const rows = result.rows || [];
     const title = tool === 'top' ? 'Top calculé localement' : 'Répartition calculée localement';
-    return `<h4>${title}</h4><p><strong>${result.total.toLocaleString('fr-FR')}</strong> ligne${result.total>1?'s':''} retenue${result.total>1?'s':''}. Analyse par <strong>${escapeHtml(plan.targetCol)}</strong>.</p><ul>${rows.slice(0,20).map(r => `<li>${escapeHtml(r.value)} : <strong>${r.count.toLocaleString('fr-FR')}</strong> (${r.pct.toFixed(1).replace('.', ',')} %)</li>`).join('')}</ul>${plan.renderChart ? renderMiniBarChart(rows, result.total) : ''}${filtersHtml}${debug}`;
+    return `<h4>${title}</h4><p><strong>${result.total.toLocaleString('fr-FR')}</strong> ligne${result.total>1?'s':''} retenue${result.total>1?'s':''}. Analyse par <strong>${escapeHtml(plan.targetCol)}</strong>.</p><ul>${rows.slice(0,20).map(r => `<li>${escapeHtml(r.value)} : <strong>${r.count.toLocaleString('fr-FR')}</strong> (${r.pct.toFixed(1).replace('.', ',')} %)</li>`).join('')}</ul>${plan.renderChart ? (plan.chartType === 'pie' ? renderMiniPieChart(rows, result.total) : renderMiniBarChart(rows, result.total)) : ''}${filtersHtml}${debug}`;
   }
   if (tool === 'pivot') {
     const cols = result.colValues || [];
