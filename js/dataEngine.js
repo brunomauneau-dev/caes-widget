@@ -108,45 +108,143 @@ function mergeFiltersUnique(base, extra) {
   return out;
 }
 
+
+// V23.3 — contexte strict.
+// Principe :
+// - une question explicite ("Combien de boursiers ?") repart de zéro ;
+// - une commande de suivi ("Par académie", "Seulement les boursiers", "Hors Bordeaux") hérite du contexte ;
+// - on ne fusionne jamais les colonnes détectées comme filtres.
+function isExplicitFreshDataQuestion(question) {
+  const q = normalizeText(question || '');
+  if (!q) return false;
+  if (/^(combien|nombre|effectif|total|quelle est|quel est|moyenne|nombre moyen|top|classement|repartition|r[eé]partition|tableau crois[eé]|croise|pivot)/.test(q)) return true;
+  return false;
+}
+
+function isFilterOnlyFollowUp(question) {
+  const q = normalizeText(question || '').trim();
+  return /^(seulement|uniquement|avec|sans|sauf|hors|excluant|en excluant|les boursiers|les non boursiers|non boursiers|boursiers|et pour)/.test(q);
+}
+
+function findColumnByConceptStrict(table, concept) {
+  const headers = table?.headers || Object.keys(table?.objects?.[0] || {});
+  const scored = headers.map(h => {
+    const hn = normalizeText(h);
+    let score = 0;
+    if (concept === 'boursier' && /boursier/.test(hn)) score += 100;
+    if (concept === 'basque' && /pays.*basque|zone.*basque/.test(hn)) score += 100;
+    if (concept === 'academie_accueil' && /acad[eé]mie/.test(hn) && /accueil|accept/.test(hn)) score += 100;
+    if (concept === 'serie' && /s[eé]rie.*classe|s[eé]rie.*bac/.test(hn)) score += 100;
+    if (concept === 'formation_groupe' && /grands?.*groupes?.*formation|groupe.*formation/.test(hn)) score += 100;
+    return { h, score };
+  }).filter(x => x.score > 0).sort((a,b)=>b.score-a.score);
+  return scored[0]?.h || null;
+}
+
+function pickColumnValue(table, col, kind) {
+  const vals = Array.from(new Set((table?.objects || []).map(r => r?.[col]).filter(v => v !== undefined && v !== null && String(v).trim() !== '').map(v => String(v).trim())));
+  const normVals = vals.map(v => ({ raw: v, n: normalizeText(v) }));
+  if (kind === 'boursier_oui') {
+    return (normVals.find(x => /boursier/.test(x.n) && !/non/.test(x.n)) || normVals.find(x => /^oui$|yes|true|1/.test(x.n)))?.raw || 'Oui';
+  }
+  if (kind === 'boursier_non') {
+    return (normVals.find(x => /non.*boursier|non/.test(x.n)) || normVals.find(x => /^non$|no|false|0/.test(x.n)))?.raw || 'Non';
+  }
+  if (kind === 'oui') {
+    return (normVals.find(x => /^oui$|yes|true|1/.test(x.n)) || normVals.find(x => /oui/.test(x.n)))?.raw || 'oui';
+  }
+  return vals[0];
+}
+
+function strictFiltersFromQuestion(table, question) {
+  const q = normalizeText(question || '');
+  const out = [];
+  const add = (col, value, op='eq') => { if (col && value !== undefined && value !== null) out.push({ col, value, op }); };
+
+  if (/pays basque|basque/.test(q)) {
+    const col = findColumnByConceptStrict(table, 'basque');
+    if (col) add(col, pickColumnValue(table, col, 'oui'), 'eq');
+  }
+
+  if (/non[ -]?boursier|sans boursier|hors boursier|exclu.*boursier|en excluant.*boursier/.test(q)) {
+    const col = findColumnByConceptStrict(table, 'boursier');
+    if (col) add(col, pickColumnValue(table, col, 'boursier_non'), 'eq');
+  } else if (/boursier|bourse/.test(q)) {
+    const col = findColumnByConceptStrict(table, 'boursier');
+    if (col) add(col, pickColumnValue(table, col, 'boursier_oui'), 'eq');
+  }
+
+  if (/hors.*bordeaux|sauf.*bordeaux|exclu.*bordeaux|diff[eé]rent.*bordeaux/.test(q)) {
+    const col = findColumnByConceptStrict(table, 'academie_accueil');
+    if (col) add(col, 'Bordeaux', 'neq');
+  }
+
+  return out;
+}
+
+function replaceConceptFiltersWithStrict(plan, question) {
+  if (!plan || !plan.table) return plan;
+  const q = normalizeText(question || '');
+  const strict = strictFiltersFromQuestion(plan.table, question);
+  if (!strict.length) return plan;
+
+  const onlyBoursier = /^(combien|nombre|effectif|total)\s+(de\s+)?(candidats\s+)?(non\s+)?boursiers?\s*\??$/.test(q);
+  if (onlyBoursier) {
+    plan.filters = strict.filter(f => /boursier/i.test(f.col));
+    plan.mentionedCols = Array.from(new Set([...(plan.mentionedCols || []), ...plan.filters.map(f => f.col)]));
+    return plan;
+  }
+
+  const strictCols = new Set(strict.map(f => f.col));
+  const base = (plan.filters || []).filter(f => !strictCols.has(f.col));
+  plan.filters = mergeFiltersUnique(base, strict);
+  plan.mentionedCols = Array.from(new Set([...(plan.mentionedCols || []), ...strict.map(f => f.col)]));
+  return plan;
+}
+
 function inheritConversationContext(plan, question) {
   if (!plan) return plan;
   const state = getDataEngineState();
   const prev = state.lastPlan;
   const q = normalizeText(question || '');
+
+  plan = replaceConceptFiltersWithStrict(plan, question);
+
   if (!prev) {
     if (isChartRequest(question)) plan.renderChart = true;
     return plan;
   }
 
-  // Demandes courtes de suivi : on conserve les filtres précédents et on ajoute les nouveaux.
-  // Important : les requêtes explicites de type "Top 10 des formations du Pays Basque"
-  // ne doivent PAS hériter de filtres précédents non mentionnés.
-  const explicitFreshQuery = /(top|classement|tableau crois[eé]|croise|pivot|moyenne|moyen|median|nombre moyen|repartition|r[eé]partition).{0,80}(pays basque|basque|boursier|hors|bordeaux|bac|but|dut|bts|formation|academie|acad[eé]mie)/.test(q);
-  const shortFollowUp = !explicitFreshQuery && (isFollowUpQuestion(question) || q.split(/\s+/).length <= 5);
-  if (shortFollowUp) {
-    plan.filters = mergeFiltersUnique(prev.filters || [], plan.filters || []);
+  const explicitFresh = isExplicitFreshDataQuestion(question) && !/^(et pour|et les|idem|m[eê]me|meme)/.test(q);
+  const dimensionFollowUp = isDimensionOnlyFollowUp(question);
+  const filterFollowUp = isFilterOnlyFollowUp(question);
+  const bareAction = isBareChartRequest(question) || isBareExportRequest(question);
 
-    // "Par académie" / "selon la série" = nouvelle répartition sur le périmètre courant.
-    if (isDimensionOnlyFollowUp(question)) {
+  if (explicitFresh && !dimensionFollowUp && !filterFollowUp && !bareAction) {
+    if (isChartRequest(question)) plan.renderChart = true;
+    return plan;
+  }
+
+  if (dimensionFollowUp || filterFollowUp || bareAction || isFollowUpQuestion(question)) {
+    const previousFilters = prev.filters || [];
+    const newStrictFilters = strictFiltersFromQuestion(plan.table || prev.table, question);
+    const newFilters = (filterFollowUp || dimensionFollowUp || bareAction)
+      ? newStrictFilters
+      : (plan.filters || []);
+    plan.filters = mergeFiltersUnique(previousFilters, newFilters);
+
+    if (dimensionFollowUp) {
       plan.tool = 'group_by';
-    }
-    // Si la demande n'indique pas explicitement un nouvel outil, conserver l'outil précédent.
-    else if (!/(combien|nombre|effectif|repartition|r[eé]partition|top|tableau crois[eé]|croise|moyenne|moyen|median|export|excel|csv|graphique|camembert|histogramme)/.test(q)) {
+      if (!plan.targetCol && prev.targetCol) plan.targetCol = prev.targetCol;
+    } else if (filterFollowUp) {
       plan.tool = prev.tool || plan.tool;
-    }
-
-    // Pour les demandes de suivi non dimensionnelles, conserver la dernière dimension si aucune nouvelle n'est détectée.
-    if (!isDimensionOnlyFollowUp(question) && (plan.tool === 'group_by' || plan.tool === 'top' || plan.tool === 'pivot') && !plan.targetCol && prev.targetCol) {
-      plan.targetCol = prev.targetCol;
+      if (prev.targetCol) plan.targetCol = prev.targetCol;
+      if (prev.targetCol2) plan.targetCol2 = prev.targetCol2;
+      if (prev.limit) plan.limit = prev.limit;
+      if (prev.mentionedCols && (!plan.mentionedCols || !plan.mentionedCols.length)) plan.mentionedCols = prev.mentionedCols;
     }
 
     if (isChartRequest(question)) plan.renderChart = true;
-
-    // "Excel" seul exporte le résultat courant quand possible ; le cas est traité avant planification.
-    if (isExportCurrentRequest(question) && !isBareExportRequest(question)) {
-      plan.tool = /\bcsv\b/.test(q) ? 'export_csv' : 'export_excel';
-      plan.filters = mergeFiltersUnique(prev.filters || [], plan.filters || []);
-    }
   } else if (isChartRequest(question)) {
     plan.renderChart = true;
   }
@@ -378,7 +476,76 @@ function renderCurrentChartExecution(plan) {
   return { kind: 'group_by', plan: clonedPlan, result, text: '', html: renderDataEngineResultHtml('group_by', clonedPlan, result) };
 }
 
+
+// V23.4 — garde-fou final anti-filtres parasites.
+// Cette fonction s'exécute juste avant le Data Engine. Elle empêche le planner
+// d'entraîner des filtres issus de colonnes détectées ou de valeurs exemples.
+function finalSanitizeAnalysisPlan(plan) {
+  if (!plan) return plan;
+  const q = normalizeText(plan.question || '');
+  const state = getDataEngineState();
+  const prev = state.lastPlan;
+  const table = plan.table || prev?.table;
+
+  const strict = strictFiltersFromQuestion(table, plan.question || '');
+  const explicitFresh = isExplicitFreshDataQuestion(plan.question || '') && !/^(et pour|et les|idem|m[eê]me|meme)/.test(q);
+  const dimensionFollowUp = isDimensionOnlyFollowUp(plan.question || '');
+  const filterFollowUp = isFilterOnlyFollowUp(plan.question || '');
+  const bareAction = isBareChartRequest(plan.question || '') || isBareExportRequest(plan.question || '');
+
+  const onlyBoursier = /^(combien|nombre|effectif|total)\s+(de\s+)?(candidats\s+)?(non\s+)?boursiers?\s*\??$/.test(q);
+
+  if (onlyBoursier) {
+    plan.filters = strict.filter(f => /boursier/i.test(f.col));
+    plan.tool = 'count_rows';
+    plan.targetCol = null;
+    plan.targetCol2 = null;
+    plan.mentionedCols = plan.filters.map(f => f.col);
+    return plan;
+  }
+
+  // Une question explicite repart de zéro : seuls les filtres explicitement
+  // compris dans la question sont conservés. Aucune mémoire n'est fusionnée.
+  if (explicitFresh && !dimensionFollowUp && !filterFollowUp && !bareAction) {
+    const strictCols = new Set(strict.map(f => f.col));
+    const kept = (plan.filters || []).filter(f => {
+      if (!f || !f.col) return false;
+      // Conserver les filtres stricts et les filtres explicitement portés par la question.
+      if (strictCols.has(f.col)) return false; // remplacés par strict ci-dessous
+      const cn = normalizeText(f.col);
+      if (/voeu|vœu/.test(cn) && !/voeu|vœu/.test(q)) return false;
+      if (/commune/.test(cn) && !/commune/.test(q)) return false;
+      if (/etablissement|établissement/.test(cn) && !/etablissement|établissement|iut|universit|lyc[eé]e|bts|but|dut|cpge|formation/.test(q)) return false;
+      if (/acad[eé]mie/.test(cn) && !/acad[eé]mie|bordeaux|toulouse|poitiers|limoges|paris|hors|sauf/.test(q)) return false;
+      return true;
+    });
+    plan.filters = mergeFiltersUnique(kept, strict);
+    return plan;
+  }
+
+  // Les commandes de suivi héritent du contexte précédent, mais uniquement
+  // des filtres réellement stockés dans le dernier plan + les nouveaux filtres stricts.
+  // On ignore totalement les filtres produits par le planner pour la commande courte.
+  if (prev && (dimensionFollowUp || filterFollowUp)) {
+    plan.filters = mergeFiltersUnique(prev.filters || [], strict);
+    if (dimensionFollowUp) {
+      plan.tool = 'group_by';
+    }
+    if (filterFollowUp) {
+      plan.tool = prev.tool || plan.tool;
+      if (prev.targetCol) plan.targetCol = prev.targetCol;
+      if (prev.targetCol2) plan.targetCol2 = prev.targetCol2;
+      if (prev.limit) plan.limit = prev.limit;
+      if (prev.mentionedCols) plan.mentionedCols = prev.mentionedCols;
+    }
+    return plan;
+  }
+
+  return plan;
+}
+
 function runDataEnginePlan(plan) {
+  plan = finalSanitizeAnalysisPlan(plan);
   if (!plan || !plan.table) return null;
   if (plan.tool === 'chart_current') {
     const exec = renderCurrentChartExecution(plan);
