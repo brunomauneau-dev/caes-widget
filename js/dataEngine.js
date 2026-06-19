@@ -614,19 +614,33 @@ function detectCompareGroups(table, question) {
   return groups;
 }
 
+function compareAxisColumns(groups) {
+  const cols = new Set();
+  (groups || []).forEach(g => (g.filters || []).forEach(f => {
+    if (f && f.col) cols.add(f.col);
+  }));
+  return cols;
+}
+
+function sanitizeCompareCommonFilters(plan, groups) {
+  const axisCols = compareAxisColumns(groups);
+  const state = getDataEngineState();
+  const prev = state.lastPlan;
+  const merged = mergeFiltersUnique(prev?.filters || [], plan.filters || []);
+  return merged.filter(f => f && f.col && !axisCols.has(f.col));
+}
+
 function compareGroupSummary(table, groups, baseFilters) {
   const all = table.objects || [];
   const commonFilters = baseFilters || [];
   const baseRows = applyLocalActionFilters(all, commonFilters);
   const totalBase = baseRows.length;
-  const summary = groups.map(g => {
+  return groups.map(g => {
     const filters = mergeFiltersUnique(commonFilters, g.filters || []);
     const rows = applyLocalActionFilters(all, filters);
     const pct = totalBase ? rows.length / totalBase * 100 : 0;
     return { label: g.label, count: rows.length, pct, filters, rows };
   });
-  summary.baseTotal = totalBase;
-  return summary;
 }
 
 function firstExistingCompareColumn(table, candidates) {
@@ -716,14 +730,14 @@ function renderCompareHtml(plan, result) {
     ? `<p><strong>Filtres communs</strong></p><ul>${plan.filters.map(f => `<li>${escapeHtml(f.col)} ${f.op === 'neq' ? '≠' : '='} <strong>${escapeHtml(f.value)}</strong></li>`).join('')}</ul>`
     : '<p><strong>Filtres communs</strong> : aucun.</p>';
   const rows = result.rows || [];
-  const baseTotal = result.baseTotal ?? rows.reduce((s, r) => s + (r.count || 0), 0);
+  const baseTotal = rows.reduce((s, r) => s + (r.count || 0), 0);
   const tableRows = rows.map(r => `<tr><td>${escapeHtml(r.label)}</td><td style="text-align:right"><strong>${r.count.toLocaleString('fr-FR')}</strong></td><td style="text-align:right">${r.pct.toFixed(1).replace('.', ',')} %</td></tr>`).join('');
   const cols = getCompareColumns(plan.table);
   const formationTable = renderCompareCategoryTable('Grands groupes de formation', cols.formation, compareCategoryRows(rows, cols.formation, 8), rows);
   const academieTable = renderCompareCategoryTable('Académie d’accueil', cols.academie, compareCategoryRows(rows, cols.academie, 8), rows);
   const serieTable = renderCompareCategoryTable('Série de bac', cols.serie, compareCategoryRows(rows, cols.serie, 8), rows);
   const statsTable = renderCompareStatsTable(cols.voeux, compareNumericStatsRows(rows, cols.voeux));
-  const debug = `<details class="msg-sources" open><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : compare<br><strong>Version</strong> : v24.5-compare-axis-isolated<br><strong>Source</strong> : ${escapeHtml(plan.table?.source || 'Données')} · ${escapeHtml(plan.table?.name || 'table')}<br><strong>Groupes</strong> : ${escapeHtml(rows.map(r => r.label).join(' / ') || '—')}</div></details>`;
+  const debug = `<details class="msg-sources" open><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : compare<br><strong>Version</strong> : v24.6-compare-axis-sanitized<br><strong>Source</strong> : ${escapeHtml(plan.table?.source || 'Données')} · ${escapeHtml(plan.table?.name || 'table')}<br><strong>Groupes</strong> : ${escapeHtml(rows.map(r => r.label).join(' / ') || '—')}</div></details>`;
   return `<h4>Comparaison calculée localement</h4><p>Base comparée : <strong>${baseTotal.toLocaleString('fr-FR')}</strong> lignes.</p><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px"><tbody><tr><th>Population</th><th>Nombre</th><th>Part</th></tr>${tableRows}</tbody></table></div>${filtersHtml}${formationTable}${academieTable}${serieTable}${statsTable}${debug}`;
 }
 
@@ -733,24 +747,10 @@ function runDataEnginePlan(plan) {
   if (plan.tool === 'compare') {
     const groups = plan.compareGroups || detectCompareGroups(plan.table, plan.question);
     if (!groups || groups.length < 2) return null;
-
-    // v24.5 — correction robuste : l'axe de comparaison ne doit jamais devenir
-    // un filtre commun. Exemple : "compare boursiers/non-boursiers" doit faire
-    // base + boursier=oui VS base + boursier=non, et non base filtrée sur non-boursier.
-    const compareCols = new Set();
-    groups.forEach(g => (g.filters || []).forEach(f => { if (f && f.col) compareCols.add(f.col); }));
-    const commonFilters = (plan.filters || []).filter(f => f && f.col && !compareCols.has(f.col));
-    const cleanPlan = { ...plan, filters: commonFilters, compareGroups: groups };
-
-    const rows = compareGroupSummary(cleanPlan.table, groups, commonFilters);
-    const result = { rows, baseTotal: rows.baseTotal };
-    const exec = {
-      kind: 'compare',
-      plan: cleanPlan,
-      result,
-      text: rows.map(r => `${r.label}: ${r.count}`).join('\n'),
-      html: renderCompareHtml(cleanPlan, result)
-    };
+    const commonFilters = sanitizeCompareCommonFilters(plan, groups);
+    const comparePlan = { ...plan, filters: commonFilters, compareGroups: groups };
+    const rows = compareGroupSummary(plan.table, groups, commonFilters);
+    const exec = { kind: 'compare', plan: comparePlan, result: { rows }, text: rows.map(r => `${r.label}: ${r.count}`).join('\n'), html: renderCompareHtml(comparePlan, { rows }) };
     rememberDataEngineExecution(exec);
     return exec;
   }
