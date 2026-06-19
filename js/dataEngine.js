@@ -842,3 +842,194 @@ function shouldAnswerLocallyWithoutAlbert(exec) {
   // sinon Albert risque de répondre à partir d'un résumé incomplet.
   return ['count','group_by','top','pivot','stats','export','compare'].includes(exec.kind);
 }
+
+/* ═══════════════════════ V25 · COMPARAISON LOCALE FORCÉE ET DÉTAILLÉE ═══════════════════════
+   Objectif : les demandes "Compare X et Y" ne doivent jamais partir vers Albert.
+   Le Data Engine force l'exécution locale et produit les tableaux croisés de base. */
+
+function isCompareQuestionV25(question) {
+  const q = normalizeText(question || '');
+  return /compare|comparaison|comparer|versus|\bvs\b|diff[eé]rence/.test(q);
+}
+
+const __detectDataEnginePlan_before_v25 = typeof detectDataEnginePlan === 'function' ? detectDataEnginePlan : null;
+function detectDataEnginePlan(question, filterContextText = question) {
+  const q = normalizeText(question || '');
+  if (isCompareQuestionV25(question)) {
+    const tables = getActiveQueryTables();
+    if (!tables.length) return null;
+    const table = tables[0];
+    const groups = detectCompareGroupsV25(table, question);
+    if (groups.length >= 2) {
+      const state = getDataEngineState();
+      const prevFilters = state?.lastPlan?.filters || [];
+      const groupCols = new Set(groups.flatMap(g => (g.filters || []).map(f => f.col)));
+      const strict = strictFiltersFromQuestion(table, question).filter(f => !groupCols.has(f.col));
+      // Si on compare la même dimension que le contexte précédent (ex. Basques vs non-Basques),
+      // on retire de la mémoire les filtres sur cette dimension pour éviter une comparaison vide.
+      const cleanPrev = prevFilters.filter(f => !groupCols.has(f.col));
+      const baseFilters = mergeFiltersUnique(cleanPrev, strict);
+      return {
+        tool: 'compare',
+        table,
+        filters: baseFilters,
+        compareGroups: groups,
+        mentionedCols: Array.from(groupCols),
+        question,
+        createdAt: new Date().toISOString(),
+        plannerVersion: 'v25-compare-local'
+      };
+    }
+  }
+  return __detectDataEnginePlan_before_v25 ? __detectDataEnginePlan_before_v25(question, filterContextText) : null;
+}
+
+function detectCompareGroupsV25(table, question) {
+  const q = normalizeText(question || '');
+  const groups = [];
+  const addGroup = (label, filters) => groups.push({ label, filters: (filters || []).filter(Boolean) });
+  const yesNoValue = (col, yes) => pickColumnValue(table, col, yes ? 'oui' : 'non');
+
+  if (/basque/.test(q)) {
+    const col = findColumnByConceptStrict(table, 'basque');
+    if (col) {
+      addGroup('Pays Basque', [{ col, op: 'eq', value: yesNoValue(col, true) }]);
+      addGroup('Hors Pays Basque', [{ col, op: 'neq', value: yesNoValue(col, true) }]);
+      return groups;
+    }
+  }
+
+  if (/boursier/.test(q)) {
+    const col = findColumnByConceptStrict(table, 'boursier');
+    if (col) {
+      addGroup('Boursiers', [{ col, op: 'eq', value: pickColumnValue(table, col, 'boursier_oui') }]);
+      addGroup('Non-boursiers', [{ col, op: 'eq', value: pickColumnValue(table, col, 'boursier_non') }]);
+      return groups;
+    }
+  }
+
+  if (/(but|dut)/.test(q) && /bts/.test(q)) {
+    const col = findColumnByConceptStrict(table, 'formation_groupe') || (table.headers || []).find(h => /formation/i.test(h));
+    if (col) {
+      const vals = Array.from(new Set((table.objects || []).map(r => String(r[col] ?? '').trim()).filter(Boolean)));
+      const dut = vals.find(v => /\bDUT\b/i.test(v)) || vals.find(v => /BUT/i.test(v)) || 'DUT';
+      const bts = vals.find(v => /\bBTS\b|BTSA|DTS/i.test(v)) || 'BTS - BTSA - DTS - DMA';
+      addGroup('BUT / DUT', [{ col, op: 'eq', value: dut }]);
+      addGroup('BTS', [{ col, op: 'eq', value: bts }]);
+      return groups;
+    }
+  }
+
+  return groups;
+}
+
+function compareRowsForGroupV25(table, baseFilters, group) {
+  return applyLocalActionFilters(table.objects || [], mergeFiltersUnique(baseFilters || [], group.filters || []));
+}
+
+function pctLocalV25(n, d) {
+  return d ? (n / d * 100) : 0;
+}
+
+function findCompareDimensionColumnsV25(table) {
+  const headers = table.headers || Object.keys(table.objects?.[0] || {});
+  const pick = (patterns) => headers.find(h => patterns.some(re => re.test(normalizeText(h))));
+  return [
+    { key: 'formation', title: 'Grands groupes de formation', col: findColumnByConceptStrict(table, 'formation_groupe') || pick([/grands?.*groupes?.*formation/, /groupe.*formation/]) },
+    { key: 'academie', title: 'Académie d’accueil', col: findColumnByConceptStrict(table, 'academie_accueil') || pick([/acad[eé]mie.*accueil/, /acad[eé]mie.*accept/]) },
+    { key: 'serie', title: 'Série de bac', col: findColumnByConceptStrict(table, 'serie') || pick([/s[eé]rie.*classe/, /s[eé]rie.*bac/]) }
+  ].filter(x => x.col);
+}
+
+function distributionMapV25(rows, col) {
+  const m = new Map();
+  let filled = 0;
+  rows.forEach(r => {
+    const v = r[col];
+    if (v === undefined || v === null || String(v).trim() === '') return;
+    filled++;
+    const key = String(v).trim();
+    m.set(key, (m.get(key) || 0) + 1);
+  });
+  return { filled, map: m };
+}
+
+function topUnionValuesV25(groupRows, col, max = 8) {
+  const total = new Map();
+  groupRows.forEach(g => {
+    const dist = distributionMapV25(g.rows, col);
+    dist.map.forEach((n, k) => total.set(k, (total.get(k) || 0) + n));
+  });
+  return [...total.entries()].sort((a,b)=>b[1]-a[1] || a[0].localeCompare(b[0], 'fr')).slice(0, max).map(x => x[0]);
+}
+
+function renderDistributionCompareTableV25(title, col, groupRows, max = 8) {
+  const values = topUnionValuesV25(groupRows, col, max);
+  if (!values.length) return '';
+  const dists = groupRows.map(g => ({ ...g, dist: distributionMapV25(g.rows, col) }));
+  const head = `<tr><th>${escapeHtml(title)}</th>${dists.map(g => `<th colspan="2">${escapeHtml(g.label)}</th>`).join('')}</tr><tr><th></th>${dists.map(() => '<th>n</th><th>%</th>').join('')}</tr>`;
+  const body = values.map(v => {
+    const cells = dists.map(g => {
+      const n = g.dist.map.get(v) || 0;
+      const pct = pctLocalV25(n, g.dist.filled || g.rows.length);
+      return `<td style="text-align:right">${n.toLocaleString('fr-FR')}</td><td style="text-align:right">${pct.toFixed(1).replace('.', ',')} %</td>`;
+    }).join('');
+    return `<tr><td>${escapeHtml(v)}</td>${cells}</tr>`;
+  }).join('');
+  return `<h4>${escapeHtml(title)}</h4><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px"><tbody>${head}${body}</tbody></table></div>`;
+}
+
+function compareNumericStatsV25(table, groupRows) {
+  const col = inferNumericStatsColumn(table, 'nombre moyen de voeux confirmes') || (table.headers || []).find(h => /voeu|vœu/i.test(h));
+  if (!col) return '';
+  const rows = groupRows.map(g => ({ label: g.label, stats: numericStats(g.rows, col) }));
+  const fmt = v => v === null || v === undefined ? '—' : Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 2 });
+  const body = rows.map(r => `<tr><td>${escapeHtml(r.label)}</td><td style="text-align:right">${r.stats.numericCount.toLocaleString('fr-FR')}</td><td style="text-align:right">${fmt(r.stats.avg)}</td><td style="text-align:right">${fmt(r.stats.median)}</td><td style="text-align:right">${fmt(r.stats.min)}</td><td style="text-align:right">${fmt(r.stats.max)}</td></tr>`).join('');
+  return `<h4>Vœux confirmés</h4><p>Colonne : <strong>${escapeHtml(col)}</strong></p><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px"><tbody><tr><th>Population</th><th>Valeurs num.</th><th>Moyenne</th><th>Médiane</th><th>Min</th><th>Max</th></tr>${body}</tbody></table></div>`;
+}
+
+function renderCompareHtmlV25(plan, result) {
+  const groupRows = result.groupRows || [];
+  const baseRows = result.baseRows || [];
+  const filtersHtml = (plan.filters || []).length
+    ? `<p><strong>Filtres communs</strong></p><ul>${plan.filters.map(f => `<li>${escapeHtml(f.col)} ${f.op === 'neq' ? '≠' : '='} <strong>${escapeHtml(f.value)}</strong></li>`).join('')}</ul>`
+    : '<p><strong>Filtres communs</strong> : aucun.</p>';
+  const countRows = groupRows.map(g => `<tr><td>${escapeHtml(g.label)}</td><td style="text-align:right"><strong>${g.rows.length.toLocaleString('fr-FR')}</strong></td><td style="text-align:right">${pctLocalV25(g.rows.length, baseRows.length).toFixed(1).replace('.', ',')} %</td></tr>`).join('');
+  const dimensions = findCompareDimensionColumnsV25(plan.table);
+  const dimHtml = dimensions.map(d => renderDistributionCompareTableV25(d.title, d.col, groupRows, 8)).join('');
+  const statsHtml = compareNumericStatsV25(plan.table, groupRows);
+  const debug = `<details class="msg-sources" open><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : compare<br><strong>Version</strong> : v25-compare-local<br><strong>Source</strong> : ${escapeHtml(plan.table?.source || 'Données')} · ${escapeHtml(plan.table?.name || 'table')}<br><strong>Groupes</strong> : ${escapeHtml(groupRows.map(r => r.label).join(' / ') || '—')}</div></details>`;
+  return `<h4>Comparaison calculée localement</h4><p>Base comparée : <strong>${baseRows.length.toLocaleString('fr-FR')}</strong> ligne${baseRows.length>1?'s':''}.</p><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px"><tbody><tr><th>Population</th><th>Nombre</th><th>Part de la base</th></tr>${countRows}</tbody></table></div>${filtersHtml}${dimHtml}${statsHtml}${debug}`;
+}
+
+const __runDataEnginePlan_before_v25 = typeof runDataEnginePlan === 'function' ? runDataEnginePlan : null;
+function runDataEnginePlan(plan) {
+  plan = finalSanitizeAnalysisPlan(plan);
+  if (plan && plan.table && plan.tool === 'compare') {
+    const groups = plan.compareGroups || detectCompareGroupsV25(plan.table, plan.question);
+    if (!groups || groups.length < 2) return null;
+    const baseRows = applyLocalActionFilters(plan.table.objects || [], plan.filters || []);
+    const groupRows = groups.map(g => ({ label: g.label, filters: mergeFiltersUnique(plan.filters || [], g.filters || []), rows: compareRowsForGroupV25(plan.table, plan.filters || [], g) }));
+    const result = { baseRows, groupRows };
+    const exec = {
+      kind: 'compare',
+      plan: { ...plan, compareGroups: groups },
+      result,
+      text: groupRows.map(g => `${g.label}: ${g.rows.length}`).join('\n'),
+      html: renderCompareHtmlV25({ ...plan, compareGroups: groups }, result)
+    };
+    rememberDataEngineExecution(exec);
+    return exec;
+  }
+  return __runDataEnginePlan_before_v25 ? __runDataEnginePlan_before_v25(plan) : null;
+}
+
+const __dataEngineResultToContext_before_v25 = typeof dataEngineResultToContext === 'function' ? dataEngineResultToContext : null;
+function dataEngineResultToContext(exec) {
+  if (exec && exec.kind === 'compare') {
+    const rows = exec.result?.groupRows || [];
+    return `=== DATA ENGINE V25 — COMPARAISON CALCULÉE LOCALEMENT ===\n${rows.map(g => `${g.label}: ${g.rows.length}`).join('\n')}`;
+  }
+  if (typeof __dataEngineResultToContext_before_v25 === 'function') return __dataEngineResultToContext_before_v25(exec);
+  return '';
+}
