@@ -271,6 +271,47 @@ function renderMiniBarChart(rows, total) {
   }).join('')}</div>`;
 }
 
+
+function renderComparePopulationChart(rows, baseTotal) {
+  if (!rows || !rows.length) return '';
+  const max = Math.max(...rows.map(r => r.count || 0), 1);
+  return `<div class="de-chart-card" style="margin:14px 0;padding:12px;border:1px solid var(--gris2,#e5e7eb);border-radius:10px;background:rgba(0,0,0,.02)"><div style="font-weight:700;margin-bottom:8px">Graphique · populations comparées</div><div style="display:grid;gap:7px;max-width:680px">${rows.map(r => {
+    const w = Math.max(2, Math.round((r.count || 0) / max * 100));
+    const pct = baseTotal ? (r.count || 0) / baseTotal * 100 : (r.pct || 0);
+    return `<div style="display:grid;grid-template-columns:minmax(120px,220px) 1fr auto;gap:8px;align-items:center"><div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(r.label)}">${escapeHtml(r.label)}</div><div style="height:14px;background:var(--gris1,#f3f4f6);border-radius:7px;overflow:hidden"><div style="height:14px;width:${w}%;background:var(--albert,#2563eb);border-radius:7px"></div></div><div style="font-size:12px;font-weight:700">${(r.count || 0).toLocaleString('fr-FR')} · ${fmtComparePct(pct)}</div></div>`;
+  }).join('')}</div></div>`;
+}
+
+function renderCompareDeltaChart(title, catRows, groupRows, limit = 8) {
+  if (!catRows || !catRows.length || !groupRows || groupRows.length < 2) return '';
+  const ref = groupRows[0]?.label || 'Groupe 1';
+  const other = groupRows[1]?.label || 'Groupe 2';
+  const deltas = catRows.map(r => {
+    const a = r.groups?.[0]?.pct || 0;
+    const b = r.groups?.[1]?.pct || 0;
+    return { value: r.value, delta: b - a, a, b };
+  }).filter(x => Number.isFinite(x.delta)).sort((a,b) => Math.abs(b.delta) - Math.abs(a.delta)).slice(0, limit);
+  if (!deltas.length) return '';
+  const maxAbs = Math.max(...deltas.map(x => Math.abs(x.delta)), 1);
+  return `<div class="de-chart-card" style="margin:14px 0;padding:12px;border:1px solid var(--gris2,#e5e7eb);border-radius:10px;background:rgba(0,0,0,.02)"><div style="font-weight:700;margin-bottom:4px">Graphique · écarts ${escapeHtml(title)}</div><div style="font-size:11px;color:var(--gris6,#6b7280);margin-bottom:8px">Écart en points de % : ${escapeHtml(other)} vs ${escapeHtml(ref)}</div><div style="display:grid;gap:7px;max-width:760px">${deltas.map(x => {
+    const w = Math.max(2, Math.round(Math.abs(x.delta) / maxAbs * 100));
+    const sign = x.delta >= 0 ? '+' : '−';
+    const bg = x.delta >= 0 ? 'var(--albert,#2563eb)' : 'var(--orange,#d97706)';
+    return `<div style="display:grid;grid-template-columns:minmax(160px,260px) 1fr auto;gap:8px;align-items:center"><div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(x.value)}">${escapeHtml(x.value)}</div><div style="height:14px;background:var(--gris1,#f3f4f6);border-radius:7px;overflow:hidden"><div style="height:14px;width:${w}%;background:${bg};border-radius:7px"></div></div><div style="font-size:12px;font-weight:700">${sign}${Math.abs(x.delta).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} pt</div></div>`;
+  }).join('')}</div></div>`;
+}
+
+function renderCompareCharts(plan, result) {
+  const rows = result?.rows || [];
+  if (!rows.length) return '';
+  const cols = getCompareColumns(plan.table);
+  const formationRows = compareCategoryRows(rows, cols.formation, 8);
+  const academieRows = compareCategoryRows(rows, cols.academie, 8);
+  const serieRows = compareCategoryRows(rows, cols.serie, 8);
+  const baseTotal = result.baseTotal || rows.reduce((s, r) => s + (r.count || 0), 0);
+  return `${renderComparePopulationChart(rows, baseTotal)}${renderCompareDeltaChart('formations', formationRows, rows)}${renderCompareDeltaChart('académies', academieRows, rows)}${renderCompareDeltaChart('séries de bac', serieRows, rows)}`;
+}
+
 function isDataEngineQuestion(question) {
   const q = normalizeText(question || '');
   if (!q) return false;
@@ -458,6 +499,15 @@ function currentExecutionToRows(exec) {
     const table = p.table;
     return applyLocalActionFilters(table?.objects || [], p.filters || []);
   }
+  if (exec.kind === 'compare') {
+    const rows = exec.result?.rows || [];
+    const baseTotal = exec.result?.baseTotal || rows.reduce((s, r) => s + (r.count || 0), 0);
+    return rows.map(r => ({
+      Population: r.label,
+      Nombre: r.count,
+      'Part de la base (%)': Number((baseTotal ? (r.count || 0) / baseTotal * 100 : (r.pct || 0)).toFixed(2))
+    }));
+  }
   return [];
 }
 
@@ -486,6 +536,11 @@ function downloadRowsAsFile(rows, filename, format) {
 function renderCurrentChartExecution(plan) {
   const prev = plan.sourceExecution;
   if (!prev) return null;
+  if (prev.kind === 'compare') {
+    const comparePlan = { ...(prev.plan || {}), renderChart: true };
+    const html = `<h4>Graphiques de comparaison</h4>${renderCompareCharts(comparePlan, prev.result || {})}`;
+    return { kind: 'compare', plan: comparePlan, result: prev.result, text: prev.text, html };
+  }
   if (prev.kind === 'group_by' || prev.kind === 'top') {
     const rows = prev.result?.rows || [];
     const clonedPlan = { ...(prev.plan || {}), renderChart: true };
@@ -825,8 +880,9 @@ function renderCompareHtml(plan, result) {
   const academieTable = renderCompareCategoryTable('Académie d’accueil', cols.academie, academieRows, rows);
   const serieTable = renderCompareCategoryTable('Série de bac', cols.serie, serieRows, rows);
   const statsTable = renderCompareStatsTable(cols.voeux, statsRows);
-  const debug = `<details class="msg-sources" open><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : compare<br><strong>Version</strong> : v25.1-memory-sealed<br><strong>Source</strong> : ${escapeHtml(plan.table?.source || 'Données')} · ${escapeHtml(plan.table?.name || 'table')}<br><strong>Groupes</strong> : ${escapeHtml(rows.map(r => r.label).join(' / ') || '—')}</div></details>`;
-  return `<h4>Comparaison calculée localement</h4><p>Base comparée : <strong>${baseTotal.toLocaleString('fr-FR')}</strong> lignes.</p><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px"><tbody><tr><th>Population</th><th>Nombre</th><th>Part</th></tr>${tableRows}</tbody></table></div>${filtersHtml}${insights}${formationTable}${academieTable}${serieTable}${statsTable}${debug}`;
+  const charts = plan.renderChart ? renderCompareCharts(plan, result) : '';
+  const debug = `<details class="msg-sources" open><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : compare<br><strong>Version</strong> : v25.2-compare-charts-export<br><strong>Source</strong> : ${escapeHtml(plan.table?.source || 'Données')} · ${escapeHtml(plan.table?.name || 'table')}<br><strong>Groupes</strong> : ${escapeHtml(rows.map(r => r.label).join(' / ') || '—')}</div></details>`;
+  return `<h4>Comparaison calculée localement</h4><p>Base comparée : <strong>${baseTotal.toLocaleString('fr-FR')}</strong> lignes.</p><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px"><tbody><tr><th>Population</th><th>Nombre</th><th>Part</th></tr>${tableRows}</tbody></table></div>${filtersHtml}${insights}${charts}${formationTable}${academieTable}${serieTable}${statsTable}${debug}`;
 }
 
 function runDataEnginePlan(plan) {
