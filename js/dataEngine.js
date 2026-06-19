@@ -13,7 +13,8 @@ const DATA_ENGINE_TOOLS = [
   { name: 'stats', description: 'Calculer moyenne, médiane, min, max sur une colonne numérique' },
   { name: 'export_excel', description: 'Exporter les lignes filtrées en Excel' },
   { name: 'export_csv', description: 'Exporter les lignes filtrées en CSV' },
-  { name: 'chart', description: 'Afficher un graphique local à partir du dernier résultat ou d’un group_by' }
+  { name: 'chart', description: 'Afficher un graphique local à partir du dernier résultat ou d’un group_by' },
+  { name: 'compare', description: 'Comparer deux populations ou deux modalités' }
 ];
 
 // V22 — mémoire d'analyse locale.
@@ -273,11 +274,12 @@ function renderMiniBarChart(rows, total) {
 function isDataEngineQuestion(question) {
   const q = normalizeText(question || '');
   if (!q) return false;
-  return /combien|nombre|effectif|compte|compter|repartition|r[eé]partition|ventilation|par |groupe|group[eé]|top|classement|principa|plus frequen|plus fréquent|croise|crois[eé]|tableau crois[eé]|pivot|moyen|moyenne|median|m[eé]diane|minimum|maximum|min|max|export|excel|csv|liste|filtre|graphique|graphe|diagramme|histogramme|camembert|barres?|boursier|basque|hors|sauf|seulement|uniquement/.test(q) || isFollowUpQuestion(question);
+  return /compare|comparaison|comparer|versus| vs |combien|nombre|effectif|compte|compter|repartition|r[eé]partition|ventilation|par |groupe|group[eé]|top|classement|principa|plus frequen|plus fréquent|croise|crois[eé]|tableau crois[eé]|pivot|moyen|moyenne|median|m[eé]diane|minimum|maximum|min|max|export|excel|csv|liste|filtre|graphique|graphe|diagramme|histogramme|camembert|barres?|boursier|basque|hors|sauf|seulement|uniquement/.test(q) || isFollowUpQuestion(question);
 }
 
 function inferMeasureIntent(question) {
   const q = normalizeText(question || '');
+  if (/compare|comparaison|comparer|versus| vs /.test(q)) return 'compare';
   if (/graphique|graphe|diagramme|histogramme|camembert|barres?|chart/.test(q)) return 'group_by';
   if (/export|excel|xlsx|csv|telecharg|t[eé]l[eé]charg|sors moi|sort moi|extraire|extrait|liste/.test(q)) {
     return /\bcsv\b/.test(q) ? 'export_csv' : 'export_excel';
@@ -371,6 +373,22 @@ function detectDataEnginePlan(question, filterContextText = question) {
 
   const tool = inferMeasureIntent(question);
   if (!tool) return null;
+
+  if (tool === 'compare') {
+    const groups = detectCompareGroups(table, question);
+    if (groups.length >= 2) {
+      const baseFilters = strictFiltersFromQuestion(table, question).filter(f => !groups.some(g => (g.filters || []).some(gf => gf.col === f.col)));
+      return inheritConversationContext({
+        tool: 'compare',
+        table,
+        filters: baseFilters,
+        compareGroups: groups,
+        mentionedCols: Array.from(new Set(groups.flatMap(g => (g.filters || []).map(f => f.col)))),
+        question,
+        createdAt: new Date().toISOString()
+      }, question);
+    }
+  }
 
   // V17 : le Planner construit d'abord un plan structuré à partir du schéma
   // réel de la table (colonnes + valeurs). Cela évite les oublis du type
@@ -544,9 +562,91 @@ function finalSanitizeAnalysisPlan(plan) {
   return plan;
 }
 
+
+// V24 — comparaison de deux populations simples.
+function detectCompareGroups(table, question) {
+  const q = normalizeText(question || '');
+  const groups = [];
+  const addGroup = (label, filters) => groups.push({ label, filters: filters.filter(Boolean) });
+  const yesNoValue = (col, yes) => pickColumnValue(table, col, yes ? 'oui' : 'non');
+
+  // Basques vs non-Basques
+  if (/basque/.test(q) && /(non[- ]?basque|autres?|reste|hors)/.test(q)) {
+    const col = findColumnByConceptStrict(table, 'basque');
+    if (col) {
+      addGroup('Pays Basque', [{ col, op: 'eq', value: yesNoValue(col, true) }]);
+      addGroup('Hors Pays Basque', [{ col, op: 'neq', value: yesNoValue(col, true) }]);
+      return groups;
+    }
+  }
+  if (/compare.*basque|basque.*compare/.test(q)) {
+    const col = findColumnByConceptStrict(table, 'basque');
+    if (col) {
+      addGroup('Pays Basque', [{ col, op: 'eq', value: yesNoValue(col, true) }]);
+      addGroup('Hors Pays Basque', [{ col, op: 'neq', value: yesNoValue(col, true) }]);
+      return groups;
+    }
+  }
+
+  // Boursiers vs non-boursiers
+  if (/boursier/.test(q)) {
+    const col = findColumnByConceptStrict(table, 'boursier');
+    if (col && (/non[- ]?boursier|compare|comparaison|versus| vs /.test(q))) {
+      addGroup('Boursiers', [{ col, op: 'eq', value: pickColumnValue(table, col, 'boursier_oui') }]);
+      addGroup('Non-boursiers', [{ col, op: 'eq', value: pickColumnValue(table, col, 'boursier_non') }]);
+      return groups;
+    }
+  }
+
+  // BUT/DUT vs BTS
+  if (/(but|dut)/.test(q) && /bts/.test(q)) {
+    const col = findColumnByConceptStrict(table, 'formation_groupe') || (table.headers || []).find(h => /formation/i.test(h));
+    if (col) {
+      const vals = Array.from(new Set((table.objects || []).map(r => String(r[col] ?? '').trim()).filter(Boolean)));
+      const dut = vals.find(v => /\bDUT\b/i.test(v)) || 'DUT';
+      const bts = vals.find(v => /\bBTS\b|BTSA|DTS/i.test(v)) || 'BTS - BTSA - DTS - DMA';
+      addGroup('BUT / DUT', [{ col, op: 'eq', value: dut }]);
+      addGroup('BTS', [{ col, op: 'eq', value: bts }]);
+      return groups;
+    }
+  }
+
+  return groups;
+}
+
+function compareGroupSummary(table, groups, baseFilters) {
+  const all = table.objects || [];
+  const totalBaseRows = applyLocalActionFilters(all, baseFilters || []);
+  const totalBase = totalBaseRows.length || all.length;
+  return groups.map(g => {
+    const filters = mergeFiltersUnique(baseFilters || [], g.filters || []);
+    const rows = applyLocalActionFilters(all, filters);
+    const pct = totalBase ? rows.length / totalBase * 100 : 0;
+    return { label: g.label, count: rows.length, pct, filters };
+  });
+}
+
+function renderCompareHtml(plan, result) {
+  const filtersHtml = (plan.filters || []).length
+    ? `<p><strong>Filtres communs</strong></p><ul>${plan.filters.map(f => `<li>${escapeHtml(f.col)} ${f.op === 'neq' ? '≠' : '='} <strong>${escapeHtml(f.value)}</strong></li>`).join('')}</ul>`
+    : '<p><strong>Filtres communs</strong> : aucun.</p>';
+  const rows = result.rows || [];
+  const tableRows = rows.map(r => `<tr><td>${escapeHtml(r.label)}</td><td style="text-align:right"><strong>${r.count.toLocaleString('fr-FR')}</strong></td><td style="text-align:right">${r.pct.toFixed(1).replace('.', ',')} %</td></tr>`).join('');
+  const debug = `<details class="msg-sources" open><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : compare<br><strong>Source</strong> : ${escapeHtml(plan.table?.source || 'Données')} · ${escapeHtml(plan.table?.name || 'table')}<br><strong>Groupes</strong> : ${escapeHtml(rows.map(r => r.label).join(' / ') || '—')}</div></details>`;
+  return `<h4>Comparaison calculée localement</h4><p>Comparaison de <strong>${rows.length}</strong> population${rows.length>1?'s':''}.</p><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px"><tbody><tr><th>Population</th><th>Nombre</th><th>Part</th></tr>${tableRows}</tbody></table></div>${filtersHtml}${debug}`;
+}
+
 function runDataEnginePlan(plan) {
   plan = finalSanitizeAnalysisPlan(plan);
   if (!plan || !plan.table) return null;
+  if (plan.tool === 'compare') {
+    const groups = plan.compareGroups || detectCompareGroups(plan.table, plan.question);
+    if (!groups || groups.length < 2) return null;
+    const rows = compareGroupSummary(plan.table, groups, plan.filters || []);
+    const exec = { kind: 'compare', plan: { ...plan, compareGroups: groups }, result: { rows }, text: rows.map(r => `${r.label}: ${r.count}`).join('\n'), html: renderCompareHtml({ ...plan, compareGroups: groups }, { rows }) };
+    rememberDataEngineExecution(exec);
+    return exec;
+  }
   if (plan.tool === 'chart_current') {
     const exec = renderCurrentChartExecution(plan);
     if (exec) rememberDataEngineExecution(exec);
@@ -740,5 +840,5 @@ function shouldAnswerLocallyWithoutAlbert(exec) {
   if (!exec) return false;
   // Les requêtes de comptage/répartition simples doivent être résolues par le moteur,
   // sinon Albert risque de répondre à partir d'un résumé incomplet.
-  return ['count','group_by','top','pivot','stats','export'].includes(exec.kind);
+  return ['count','group_by','top','pivot','stats','export','compare'].includes(exec.kind);
 }
