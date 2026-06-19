@@ -3514,7 +3514,10 @@ async function sendMessage() {
   const dataExecution = dataPlan ? runDataEnginePlan(dataPlan) : null;
   const localAnalysis = executeLocalDataQuery(question, filterContextText);
 
-  if (dataExecution && shouldAnswerLocallyWithoutAlbert(dataExecution) && !isInfographicRequest(question)) {
+  // V27.5 — les actions sur un résultat existant (Graphique, Excel, CSV, etc.)
+  // doivent rester 100 % locales. Albert ne doit jamais reprendre la main
+  // lorsqu'un plan Data Engine a été détecté et exécuté.
+  if (dataExecution && shouldAnswerLocallyWithoutAlbert(dataExecution)) {
     removeLoadingMessage(loadingId);
     addMessage('assistant', dataExecution.html);
     chatHistory.push({ role: 'user', content: question });
