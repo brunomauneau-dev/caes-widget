@@ -1033,3 +1033,100 @@ function dataEngineResultToContext(exec) {
   if (typeof __dataEngineResultToContext_before_v25 === 'function') return __dataEngineResultToContext_before_v25(exec);
   return '';
 }
+
+/* ═══════════════════════ V26 · NON-RÉGRESSION COUNT + CONTEXTE COMPARE ═══════════════════════
+   Correctifs :
+   1) Les requêtes explicites de comptage simples ne doivent jamais partir vers Albert.
+   2) Une comparaison après un résultat filtré réutilise le contexte courant, sauf si la comparaison porte
+      sur la même colonne que le filtre déjà présent.
+*/
+
+function isSimpleLocalCountV26(question) {
+  const q = normalizeText(question || '').trim();
+  return /^(combien|nombre|effectif|total)/.test(q) && /(basque|boursier|non[ -]?boursier|but|dut|bts|bac|g[eé]n[eé]ral|technologique|professionnel|hors|bordeaux)/.test(q);
+}
+
+function buildSimpleCountPlanV26(table, question) {
+  const filters = strictFiltersFromQuestion(table, question || '');
+  const q = normalizeText(question || '');
+
+  // Ajout minimal des synonymes formation quand la question est un comptage direct.
+  if (/(but|dut|bts)/.test(q)) {
+    const col = findColumnByConceptStrict(table, 'formation_groupe');
+    if (col) {
+      const vals = Array.from(new Set((table.objects || []).map(r => String(r[col] ?? '').trim()).filter(Boolean)));
+      if (/(but|dut)/.test(q)) {
+        const dut = vals.find(v => /\bDUT\b/i.test(v)) || vals.find(v => /BUT/i.test(v)) || 'DUT';
+        filters.push({ col, op: 'eq', value: dut });
+      }
+      if (/bts/.test(q)) {
+        const bts = vals.find(v => /\bBTS\b|BTSA|DTS/i.test(v)) || 'BTS - BTSA - DTS - DMA';
+        filters.push({ col, op: 'eq', value: bts });
+      }
+    }
+  }
+
+  // Bac général / techno / pro pour les comptages directs.
+  if (/bac|g[eé]n[eé]ral|technologique|professionnel/.test(q)) {
+    const col = findColumnByConceptStrict(table, 'serie');
+    if (col) {
+      const vals = Array.from(new Set((table.objects || []).map(r => String(r[col] ?? '').trim()).filter(Boolean)));
+      let val = null;
+      if (/g[eé]n[eé]ral/.test(q)) val = vals.find(v => /g[ée]n[ée]ral/i.test(v));
+      else if (/technologique/.test(q)) val = vals.find(v => /technolog/i.test(v));
+      else if (/professionnel/.test(q)) val = vals.find(v => /profession/i.test(v));
+      if (val) filters.push({ col, op: 'eq', value: val });
+    }
+  }
+
+  const clean = mergeFiltersUnique([], filters);
+  if (!clean.length) return null;
+  return {
+    tool: 'count_rows',
+    table,
+    filters: clean,
+    targetCol: null,
+    targetCol2: null,
+    mentionedCols: clean.map(f => f.col),
+    question,
+    createdAt: new Date().toISOString(),
+    plannerVersion: 'v26-nonreg-compare-context'
+  };
+}
+
+const __detectDataEnginePlan_before_v26 = typeof detectDataEnginePlan === 'function' ? detectDataEnginePlan : null;
+function detectDataEnginePlan(question, filterContextText = question) {
+  const tables = getActiveQueryTables();
+  const table = tables && tables.length ? tables[0] : null;
+  const q = normalizeText(question || '');
+
+  if (table && isCompareQuestionV25(question)) {
+    const groups = detectCompareGroupsV25(table, question);
+    if (groups.length >= 2) {
+      const state = getDataEngineState();
+      const prevFilters = state?.lastPlan?.filters || [];
+      const groupCols = new Set(groups.flatMap(g => (g.filters || []).map(f => f.col)));
+      const strict = strictFiltersFromQuestion(table, question).filter(f => !groupCols.has(f.col));
+      const cleanPrev = prevFilters.filter(f => !groupCols.has(f.col));
+      const baseFilters = mergeFiltersUnique(cleanPrev, strict);
+      return {
+        tool: 'compare',
+        table,
+        filters: baseFilters,
+        compareGroups: groups,
+        mentionedCols: Array.from(groupCols),
+        question,
+        createdAt: new Date().toISOString(),
+        plannerVersion: 'v26-nonreg-compare-context'
+      };
+    }
+  }
+
+  // Garde-fou : les comptages simples basés sur concepts connus sont traités localement avant tout fallback.
+  if (table && isSimpleLocalCountV26(question)) {
+    const direct = buildSimpleCountPlanV26(table, question);
+    if (direct) return direct;
+  }
+
+  return __detectDataEnginePlan_before_v26 ? __detectDataEnginePlan_before_v26(question, filterContextText) : null;
+}
