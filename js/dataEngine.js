@@ -513,32 +513,6 @@ function finalSanitizeAnalysisPlan(plan) {
 
   const onlyBoursier = /^(combien|nombre|effectif|total)\s+(de\s+)?(candidats\s+)?(non\s+)?boursiers?\s*\??$/.test(q);
 
-  // V24.2 — les comparaisons doivent respecter le périmètre courant,
-  // mais le critère comparé ne doit JAMAIS devenir un filtre commun.
-  // Exemple : après "Pays Basque", "compare boursiers / non-boursiers"
-  // doit faire (Pays Basque + Boursier) vs (Pays Basque + Non-boursier),
-  // et non pas appliquer "Non-boursier" aux deux groupes.
-  if (plan.tool === 'compare') {
-    const groups = plan.compareGroups || detectCompareGroups(table, plan.question || '');
-    const groupCols = new Set((groups || []).flatMap(g => (g.filters || []).map(f => f.col)).filter(Boolean));
-    const stripComparedDimension = (filters) => (filters || []).filter(f => f && f.col && !groupCols.has(f.col));
-
-    const inherited = prev ? stripComparedDimension(prev.filters || []) : [];
-    const explicit = stripComparedDimension(strict);
-    const alreadyPlanned = stripComparedDimension(plan.filters || []);
-
-    // Pour une comparaison, on conserve le contexte précédent + les filtres
-    // explicitement non liés à la dimension comparée.
-    plan.filters = mergeFiltersUnique(inherited, mergeFiltersUnique(alreadyPlanned, explicit));
-    plan.compareGroups = groups;
-    plan.mentionedCols = Array.from(new Set([
-      ...(plan.mentionedCols || []),
-      ...Array.from(groupCols),
-      ...plan.filters.map(f => f.col)
-    ]));
-    return plan;
-  }
-
   if (onlyBoursier) {
     plan.filters = strict.filter(f => /boursier/i.test(f.col));
     plan.tool = 'count_rows';
@@ -642,14 +616,97 @@ function detectCompareGroups(table, question) {
 
 function compareGroupSummary(table, groups, baseFilters) {
   const all = table.objects || [];
-  const totalBaseRows = applyLocalActionFilters(all, baseFilters || []);
-  const totalBase = totalBaseRows.length;
+  const commonFilters = baseFilters || [];
+  const baseRows = applyLocalActionFilters(all, commonFilters);
+  const totalBase = baseRows.length || all.length;
   return groups.map(g => {
-    const filters = mergeFiltersUnique(baseFilters || [], g.filters || []);
+    const filters = mergeFiltersUnique(commonFilters, g.filters || []);
     const rows = applyLocalActionFilters(all, filters);
     const pct = totalBase ? rows.length / totalBase * 100 : 0;
-    return { label: g.label, count: rows.length, pct, filters };
+    return { label: g.label, count: rows.length, pct, filters, rows };
   });
+}
+
+function firstExistingCompareColumn(table, candidates) {
+  const headers = table?.headers || Object.keys(table?.objects?.[0] || {});
+  for (const c of candidates) {
+    if (c && headers.includes(c)) return c;
+  }
+  return null;
+}
+
+function getCompareColumns(table) {
+  const headers = table?.headers || Object.keys(table?.objects?.[0] || {});
+  const byRegex = (...patterns) => headers.find(h => {
+    const n = normalizeText(h);
+    return patterns.every(p => p.test(n));
+  });
+  return {
+    formation: findColumnByConceptStrict(table, 'formation_groupe') || byRegex(/groupes?.*formation/) || byRegex(/formation.*accept/),
+    academie: findColumnByConceptStrict(table, 'academie_accueil') || byRegex(/acad[eé]mie/, /accueil|accept/),
+    serie: findColumnByConceptStrict(table, 'serie') || byRegex(/s[eé]rie/, /classe|bac/),
+    voeux: inferNumericStatsColumn(table, 'nombre moyen de voeux confirmés') || byRegex(/voeux|vœux/, /confirm/)
+  };
+}
+
+function topCountsForSpecificRows(rows, col, limit = 8) {
+  if (!col) return [];
+  const map = new Map();
+  let filled = 0;
+  (rows || []).forEach(r => {
+    const raw = r?.[col];
+    const v = raw === undefined || raw === null || String(raw).trim() === '' ? '' : String(raw).trim();
+    if (!v) return;
+    filled += 1;
+    map.set(v, (map.get(v) || 0) + 1);
+  });
+  return [...map.entries()]
+    .map(([value, count]) => ({ value, count, pct: filled ? count / filled * 100 : 0 }))
+    .sort((a,b) => b.count - a.count)
+    .slice(0, limit);
+}
+
+function compareCategoryRows(groupRows, col, limit = 8) {
+  if (!col || !groupRows?.length) return [];
+  const valueOrder = [];
+  const perGroup = groupRows.map(g => {
+    const top = topCountsForSpecificRows(g.rows || [], col, limit);
+    top.forEach(x => { if (!valueOrder.includes(x.value)) valueOrder.push(x.value); });
+    return { label: g.label, total: g.rows?.length || 0, top };
+  });
+  const values = valueOrder.slice(0, limit);
+  return values.map(value => {
+    const row = { value, groups: [] };
+    perGroup.forEach(g => {
+      const hit = g.top.find(x => x.value === value);
+      const count = hit ? hit.count : 0;
+      const pct = hit ? hit.pct : 0;
+      row.groups.push({ label: g.label, count, pct });
+    });
+    return row;
+  });
+}
+
+function compareNumericStatsRows(groupRows, col) {
+  if (!col || !groupRows?.length) return [];
+  return groupRows.map(g => {
+    const st = numericStats(g.rows || [], col);
+    return { label: g.label, ...st };
+  });
+}
+
+function renderCompareCategoryTable(title, col, catRows, groupRows) {
+  if (!col || !catRows?.length) return '';
+  const head = groupRows.map(g => `<th colspan="2" style="text-align:center">${escapeHtml(g.label)}</th>`).join('');
+  const sub = groupRows.map(() => '<th style="text-align:right">n</th><th style="text-align:right">%</th>').join('');
+  const body = catRows.map(r => `<tr><td>${escapeHtml(r.value)}</td>${r.groups.map(g => `<td style="text-align:right">${g.count.toLocaleString('fr-FR')}</td><td style="text-align:right">${g.pct.toFixed(1).replace('.', ',')} %</td>`).join('')}</tr>`).join('');
+  return `<h5 style="margin:14px 0 6px">${escapeHtml(title)}</h5><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px"><tbody><tr><th>${escapeHtml(title)}</th>${head}</tr><tr><th></th>${sub}</tr>${body}</tbody></table></div>`;
+}
+
+function renderCompareStatsTable(col, statsRows) {
+  if (!col || !statsRows?.length) return '';
+  const rows = statsRows.map(r => `<tr><td>${escapeHtml(r.label)}</td><td style="text-align:right">${(r.numericCount || 0).toLocaleString('fr-FR')}</td><td style="text-align:right">${r.avg ?? '—'}</td><td style="text-align:right">${r.median ?? '—'}</td><td style="text-align:right">${r.min ?? '—'}</td><td style="text-align:right">${r.max ?? '—'}</td></tr>`).join('');
+  return `<h5 style="margin:14px 0 6px">Vœux confirmés</h5><p style="font-size:12px;margin:0 0 6px">Colonne : ${escapeHtml(col)}</p><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px"><tbody><tr><th>Population</th><th style="text-align:right">Valeurs num.</th><th style="text-align:right">Moyenne</th><th style="text-align:right">Médiane</th><th style="text-align:right">Min</th><th style="text-align:right">Max</th></tr>${rows}</tbody></table></div>`;
 }
 
 function renderCompareHtml(plan, result) {
@@ -657,9 +714,15 @@ function renderCompareHtml(plan, result) {
     ? `<p><strong>Filtres communs</strong></p><ul>${plan.filters.map(f => `<li>${escapeHtml(f.col)} ${f.op === 'neq' ? '≠' : '='} <strong>${escapeHtml(f.value)}</strong></li>`).join('')}</ul>`
     : '<p><strong>Filtres communs</strong> : aucun.</p>';
   const rows = result.rows || [];
+  const baseTotal = rows.reduce((s, r) => s + (r.count || 0), 0);
   const tableRows = rows.map(r => `<tr><td>${escapeHtml(r.label)}</td><td style="text-align:right"><strong>${r.count.toLocaleString('fr-FR')}</strong></td><td style="text-align:right">${r.pct.toFixed(1).replace('.', ',')} %</td></tr>`).join('');
-  const debug = `<details class="msg-sources" open><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : compare<br><strong>Source</strong> : ${escapeHtml(plan.table?.source || 'Données')} · ${escapeHtml(plan.table?.name || 'table')}<br><strong>Groupes</strong> : ${escapeHtml(rows.map(r => r.label).join(' / ') || '—')}</div></details>`;
-  return `<h4>Comparaison calculée localement</h4><p>Comparaison de <strong>${rows.length}</strong> population${rows.length>1?'s':''}.</p><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px"><tbody><tr><th>Population</th><th>Nombre</th><th>Part</th></tr>${tableRows}</tbody></table></div>${filtersHtml}${debug}`;
+  const cols = getCompareColumns(plan.table);
+  const formationTable = renderCompareCategoryTable('Grands groupes de formation', cols.formation, compareCategoryRows(rows, cols.formation, 8), rows);
+  const academieTable = renderCompareCategoryTable('Académie d’accueil', cols.academie, compareCategoryRows(rows, cols.academie, 8), rows);
+  const serieTable = renderCompareCategoryTable('Série de bac', cols.serie, compareCategoryRows(rows, cols.serie, 8), rows);
+  const statsTable = renderCompareStatsTable(cols.voeux, compareNumericStatsRows(rows, cols.voeux));
+  const debug = `<details class="msg-sources" open><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : compare<br><strong>Version</strong> : v24.3-compare-rich-context<br><strong>Source</strong> : ${escapeHtml(plan.table?.source || 'Données')} · ${escapeHtml(plan.table?.name || 'table')}<br><strong>Groupes</strong> : ${escapeHtml(rows.map(r => r.label).join(' / ') || '—')}</div></details>`;
+  return `<h4>Comparaison calculée localement</h4><p>Base comparée : <strong>${baseTotal.toLocaleString('fr-FR')}</strong> lignes.</p><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px"><tbody><tr><th>Population</th><th>Nombre</th><th>Part</th></tr>${tableRows}</tbody></table></div>${filtersHtml}${formationTable}${academieTable}${serieTable}${statsTable}${debug}`;
 }
 
 function runDataEnginePlan(plan) {
