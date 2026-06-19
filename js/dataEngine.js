@@ -358,26 +358,6 @@ function buildCurrentResultPlan(question, table) {
   return null;
 }
 
-
-// V24.1 — contexte pour les comparaisons.
-// Une comparaison hérite du périmètre courant, sauf pour la colonne qui sert à définir
-// les deux groupes comparés. Exemple : après "Pays Basque", "Compare les boursiers et
-// les non-boursiers" compare uniquement les candidats basques. Après reset, elle compare
-// toute la base.
-function getContextualCompareBaseFilters(table, question, groups) {
-  const q = normalizeText(question || '');
-  const noContext = /toute\s+la\s+base|ensemble\s+du\s+jeu|global|globale|sans\s+filtre|aucun\s+filtre/.test(q);
-  const groupCols = new Set((groups || []).flatMap(g => (g.filters || []).map(f => f && f.col).filter(Boolean)));
-  const strict = strictFiltersFromQuestion(table, question).filter(f => f && f.col && !groupCols.has(f.col));
-  if (noContext) return strict;
-
-  const prev = getDataEngineState().lastPlan;
-  const prevFilters = (prev && prev.table === table)
-    ? (prev.filters || []).filter(f => f && f.col && !groupCols.has(f.col))
-    : [];
-  return mergeFiltersUnique(prevFilters, strict);
-}
-
 function detectDataEnginePlan(question, filterContextText = question) {
   if (!isDataEngineQuestion(question)) return null;
   const tables = getActiveQueryTables();
@@ -397,7 +377,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
   if (tool === 'compare') {
     const groups = detectCompareGroups(table, question);
     if (groups.length >= 2) {
-      const baseFilters = getContextualCompareBaseFilters(table, question, groups);
+      const baseFilters = strictFiltersFromQuestion(table, question).filter(f => !groups.some(g => (g.filters || []).some(gf => gf.col === f.col)));
       return inheritConversationContext({
         tool: 'compare',
         table,
@@ -533,6 +513,32 @@ function finalSanitizeAnalysisPlan(plan) {
 
   const onlyBoursier = /^(combien|nombre|effectif|total)\s+(de\s+)?(candidats\s+)?(non\s+)?boursiers?\s*\??$/.test(q);
 
+  // V24.2 — les comparaisons doivent respecter le périmètre courant,
+  // mais le critère comparé ne doit JAMAIS devenir un filtre commun.
+  // Exemple : après "Pays Basque", "compare boursiers / non-boursiers"
+  // doit faire (Pays Basque + Boursier) vs (Pays Basque + Non-boursier),
+  // et non pas appliquer "Non-boursier" aux deux groupes.
+  if (plan.tool === 'compare') {
+    const groups = plan.compareGroups || detectCompareGroups(table, plan.question || '');
+    const groupCols = new Set((groups || []).flatMap(g => (g.filters || []).map(f => f.col)).filter(Boolean));
+    const stripComparedDimension = (filters) => (filters || []).filter(f => f && f.col && !groupCols.has(f.col));
+
+    const inherited = prev ? stripComparedDimension(prev.filters || []) : [];
+    const explicit = stripComparedDimension(strict);
+    const alreadyPlanned = stripComparedDimension(plan.filters || []);
+
+    // Pour une comparaison, on conserve le contexte précédent + les filtres
+    // explicitement non liés à la dimension comparée.
+    plan.filters = mergeFiltersUnique(inherited, mergeFiltersUnique(alreadyPlanned, explicit));
+    plan.compareGroups = groups;
+    plan.mentionedCols = Array.from(new Set([
+      ...(plan.mentionedCols || []),
+      ...Array.from(groupCols),
+      ...plan.filters.map(f => f.col)
+    ]));
+    return plan;
+  }
+
   if (onlyBoursier) {
     plan.filters = strict.filter(f => /boursier/i.test(f.col));
     plan.tool = 'count_rows';
@@ -637,7 +643,7 @@ function detectCompareGroups(table, question) {
 function compareGroupSummary(table, groups, baseFilters) {
   const all = table.objects || [];
   const totalBaseRows = applyLocalActionFilters(all, baseFilters || []);
-  const totalBase = totalBaseRows.length || all.length;
+  const totalBase = totalBaseRows.length;
   return groups.map(g => {
     const filters = mergeFiltersUnique(baseFilters || [], g.filters || []);
     const rows = applyLocalActionFilters(all, filters);
