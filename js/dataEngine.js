@@ -70,12 +70,12 @@ window.resetCopilotDialogue = resetCopilotDialogue;
 
 function isFollowUpQuestion(question) {
   const q = normalizeText(question || '');
-  return !!getDataEngineState().lastPlan && /^(par|selon|uniquement|seulement|sauf|hors|avec|sans|graphique|camembert|histogramme|barres?|excel|csv|export|exporte|trie|tri|les boursiers|les non boursiers)/.test(q);
+  return !!getDataEngineState().lastPlan && /^(par|selon|uniquement|seulement|sauf|hors|avec|sans|graphique|camembert|histogramme|barres?|excel|csv|export|exporte|trie|tri|les boursiers|les non boursiers|visualis|repr[eé]sent|montre|dessine|trace)/.test(q);
 }
 
 function isChartRequest(question) {
   const q = normalizeText(question || '');
-  return /graphique|graphe|diagramme|histogramme|barres?|camembert|chart/.test(q);
+  return /graphique|graphe|diagramme|histogramme|barres?|camembert|chart|visualis|repr[eé]sent|montre-?moi|dessine|trace/.test(q);
 }
 
 function isExportCurrentRequest(question) {
@@ -86,7 +86,7 @@ function isExportCurrentRequest(question) {
 
 function isBareChartRequest(question) {
   const q = normalizeText(question || '');
-  return /^(graphique|graphe|diagramme|histogramme|camembert|barres?|chart|fais un graphique|affiche un graphique)$/.test(q);
+  return /^(graphique|graphe|diagramme|histogramme|camembert|barres?|chart|fais un graphique|affiche un graphique|visualise|visualise[- ]?moi|montre[- ]?moi [çca]a|dessine|trace un graphique)$/.test(q);
 }
 
 function isBareExportRequest(question) {
@@ -318,13 +318,13 @@ function renderCompareCharts(plan, result) {
 function isDataEngineQuestion(question) {
   const q = normalizeText(question || '');
   if (!q) return false;
-  return /compare|comparaison|comparer|versus| vs |combien|nombre|effectif|compte|compter|repartition|r[eé]partition|ventilation|par |groupe|group[eé]|top|classement|principa|plus frequen|plus fréquent|croise|crois[eé]|tableau crois[eé]|pivot|moyen|moyenne|median|m[eé]diane|minimum|maximum|min|max|export|excel|csv|liste|filtre|graphique|graphe|diagramme|histogramme|camembert|barres?|boursier|basque|hors|sauf|seulement|uniquement/.test(q) || isFollowUpQuestion(question);
+  return /compare|comparaison|comparer|versus| vs |combien|nombre|effectif|compte|compter|repartition|r[eé]partition|ventilation|par |groupe|group[eé]|top|classement|principa|plus frequen|plus fréquent|croise|crois[eé]|tableau crois[eé]|pivot|moyen|moyenne|median|m[eé]diane|minimum|maximum|min|max|export|excel|csv|liste|filtre|graphique|graphe|diagramme|histogramme|camembert|barres?|boursier|basque|hors|sauf|seulement|uniquement|visualis|repr[eé]sent|montre-?moi|dessine|trace/.test(q) || isFollowUpQuestion(question);
 }
 
 function inferMeasureIntent(question) {
   const q = normalizeText(question || '');
   if (/compare|comparaison|comparer|versus| vs /.test(q)) return 'compare';
-  if (/graphique|graphe|diagramme|histogramme|camembert|barres?|chart/.test(q)) return 'group_by';
+  if (/graphique|graphe|diagramme|histogramme|camembert|barres?|chart|visualis|repr[eé]sent|montre-?moi|dessine|trace/.test(q)) return 'group_by';
   if (/export|excel|xlsx|csv|telecharg|t[eé]l[eé]charg|sors moi|sort moi|extraire|extrait|liste/.test(q)) {
     return /\bcsv\b/.test(q) ? 'export_csv' : 'export_excel';
   }
