@@ -3355,6 +3355,7 @@ function renderAdaptiveInfographicHtml(spec, question) {
     ${sections}
   </main>
   <div class="foot">${escapeHtml(spec.footer)}</div>
+<script src="js/dataEngine.js?v=28-local-actions"></script>
 </body>
 </html>`;
 }
@@ -3496,6 +3497,15 @@ ${context || '(Aucun contexte disponible)'}`;
   return renderAdaptiveInfographicHtml(spec, question);
 }
 
+
+// V28 — garde-fou : les actions analytiques locales ne doivent jamais partir vers Albert.
+function isStrictLocalOnlyQuestion(question) {
+  const q = normalizeText(question || '');
+  if (!q) return false;
+  return /compare|comparaison|comparer|versus|\bvs\b|graphique|graphe|diagramme|histogramme|camembert|barres?|excel|xlsx|csv|export|copier|pdf|combien|nombre|effectif|repartition|r[eé]partition|pivot|tableau crois[eé]|moyenne|moyen|stats?/.test(q)
+    && !/explique|pourquoi|interpr[eé]t|analyse pourquoi|conclusion|commentaire|r[eé]dige|rapport narratif/.test(q);
+}
+
 async function sendMessage() {
   const input = document.getElementById('chat-input');
   const question = input.value.trim();
@@ -3513,6 +3523,15 @@ async function sendMessage() {
   const dataPlan = detectDataEnginePlan(question, filterContextText);
   const dataExecution = dataPlan ? runDataEnginePlan(dataPlan) : null;
   const localAnalysis = executeLocalDataQuery(question, filterContextText);
+
+  // V28 — si une requête analytique/action locale n'est pas prise en charge localement,
+  // on bloque explicitement l'appel Albert au lieu de produire une réponse approximative.
+  if (!dataExecution && isStrictLocalOnlyQuestion(question)) {
+    removeLoadingMessage(loadingId);
+    addMessage('assistant', `<h4>Action locale non exécutée</h4><p>Cette demande doit être traitée par le Data Engine local, pas par Albert. Vérifiez que <code>js/dataEngine.js</code> est bien chargé avec la version v28.</p><p style="font-size:11px;color:var(--gris3)">Question : ${escapeHtml(question)}</p>`);
+    chatHistory.push({ role: 'user', content: question });
+    return;
+  }
 
   // V27.5 — les actions sur un résultat existant (Graphique, Excel, CSV, etc.)
   // doivent rester 100 % locales. Albert ne doit jamais reprendre la main
@@ -3759,5 +3778,6 @@ renderDocs = function() {
   }
 };
 </script>
+<script src="js/dataEngine.js?v=28-local-actions"></script>
 </body>
 </html>
