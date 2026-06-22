@@ -183,7 +183,17 @@
   }
   .msg { max-width: 80%; }
   .msg.user { align-self: flex-end; }
-  .msg.assistant { align-self: flex-start; }
+  .msg.assistant { align-self: flex-start; position: relative; }
+  .msg-dismiss {
+    position: absolute; top: 6px; right: 6px;
+    background: none; border: none; cursor: pointer;
+    color: var(--gris3); font-size: 14px; line-height: 1;
+    padding: 2px 5px; border-radius: 4px; opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 2;
+  }
+  .msg.assistant:hover .msg-dismiss { opacity: 1; }
+  .msg-dismiss:hover { color: var(--rouge); background: var(--gris1); }
   .msg-bubble {
     padding: 11px 15px;
     border-radius: 12px;
@@ -3992,6 +4002,12 @@ function addInfographicMessage(html, title = 'Infographie adaptive générée', 
     <iframe src="${url}" title="${escapeAttr(title)}" style="width:100%;height:560px;border:1px solid var(--gris1);border-radius:8px;background:white"></iframe>
   `;
   msg.appendChild(bubble);
+  const infoDismissBtn = document.createElement('button');
+  infoDismissBtn.className = 'msg-dismiss';
+  infoDismissBtn.title = 'Fermer ce bloc';
+  infoDismissBtn.textContent = '✕';
+  infoDismissBtn.onclick = (e) => { e.stopPropagation(); msg.remove(); };
+  msg.appendChild(infoDismissBtn);
   wrap.appendChild(msg);
   wrap.scrollTop = wrap.scrollHeight;
   if (opts.record !== false) {
@@ -4297,7 +4313,15 @@ function addMessage(role, content, opts = {}) {
     bubble.innerHTML = content;
   }
   msg.appendChild(bubble);
-  if (role === 'assistant') msg.appendChild(buildCopilotActionBar(bubble));
+  if (role === 'assistant') {
+    const dismissBtn = document.createElement('button');
+    dismissBtn.className = 'msg-dismiss';
+    dismissBtn.title = 'Fermer ce bloc';
+    dismissBtn.textContent = '✕';
+    dismissBtn.onclick = (e) => { e.stopPropagation(); msg.remove(); };
+    msg.appendChild(dismissBtn);
+    msg.appendChild(buildCopilotActionBar(bubble));
+  }
   wrap.appendChild(msg);
   wrap.scrollTop = wrap.scrollHeight;
   if (opts.record !== false) {
