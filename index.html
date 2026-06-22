@@ -11,7 +11,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="js/planner.js?v=27.5.2"></script>
-<script src="js/dataEngine.js?v=27.5.3"></script>
+<script src="js/dataEngine.js?v=27.5.4"></script>
 <style>
   :root {
     --bleu:    #1a3a5c;
@@ -398,6 +398,88 @@
     .msg, .msg.user { max-width: 100%; }
   }
 
+  /* ═══════════════ V27.5.4 · SESSIONS (panneau repliable, même mécanique que docs-panel) ═══════════════ */
+  .sessions-panel {
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    width: 300px;
+    max-width: min(88vw, 340px);
+    z-index: 2600;
+    transform: translateX(-105%);
+    transition: transform .18s ease;
+    box-shadow: 18px 0 38px rgba(15, 23, 42, .18);
+    background: var(--blanc);
+    border-right: 1px solid var(--gris1);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  body.sessions-open .sessions-panel { transform: translateX(0); }
+  .sessions-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(15, 23, 42, .28);
+    z-index: 2500;
+    display: none;
+  }
+  body.sessions-open .sessions-backdrop { display: block; }
+  body.presentation-mode .sessions-backdrop { display:none !important; }
+  .sessions-header {
+    background: var(--bleu);
+    color: var(--blanc);
+    padding: 12px 16px;
+    display:flex; justify-content:space-between; align-items:flex-start; gap:10px;
+  }
+  .sessions-header .title { font-size: 13px; font-weight: 700; }
+  .sessions-header .sub { font-size: 10px; opacity: 0.6; margin-top: 2px; }
+  .session-new-btn {
+    margin: 12px;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--albert);
+    background: var(--albert2);
+    color: var(--albert);
+    font-weight: 700;
+    font-size: 12px;
+    cursor: pointer;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .session-new-btn:hover { background: var(--albert); color: #fff; }
+  .session-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .session-item {
+    background: var(--gris0);
+    border: 1px solid var(--gris1);
+    border-radius: 8px;
+    padding: 10px 12px;
+    cursor: pointer;
+    transition: all 0.1s;
+    position: relative;
+  }
+  .session-item:hover { border-color: var(--gris2); }
+  .session-item.active { background: var(--albert2); border-color: var(--albert); }
+  .session-item .session-title {
+    font-size: 12px; font-weight: 600; color: var(--texte);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    padding-right: 20px;
+  }
+  .session-item .session-meta {
+    font-size: 10px; color: var(--gris3); margin-top: 3px;
+  }
+  .session-delete {
+    position: absolute; top: 8px; right: 8px;
+    background: none; border: none; cursor: pointer;
+    color: var(--gris3); font-size: 13px; padding: 2px;
+    line-height: 1;
+  }
+  .session-delete:hover { color: var(--rouge); }
+
   /* ── Viewer de document ── */
   .doc-name-clickable {
     cursor: pointer;
@@ -654,6 +736,7 @@
         <div class="ch-sub" id="chat-sub">Aucun document chargé</div>
       </div>
       <div class="chat-header-actions">
+        <button class="header-action" onclick="openSessionsPanel()">🗂 <span class="label">Sessions</span></button>
         <button class="header-action primary" onclick="openSourcesPanel()">📂 <span class="label">Sources</span></button>
         <button class="header-action" onclick="resetCopilotDialogue()">↻ <span class="label">Reset</span></button>
         <button class="header-action" onclick="togglePresentationMode()">🎥 <span class="label">Présentation</span></button>
@@ -683,6 +766,20 @@
 
 </div>
 <div class="source-backdrop" onclick="closeSourcesPanel()"></div>
+
+<!-- ═══════════════ PANNEAU SESSIONS (repliable) ═══════════════ -->
+<div class="sessions-panel" id="sessions-panel">
+  <div class="sessions-header">
+    <div>
+      <div class="title">🗂 Sessions</div>
+      <div class="sub">Vos conversations précédentes</div>
+    </div>
+    <button class="docs-close" onclick="closeSessionsPanel()" title="Fermer">×</button>
+  </div>
+  <div class="session-new-btn" onclick="createNewSession()">+ Nouvelle session</div>
+  <div class="session-list" id="session-list"></div>
+</div>
+<div class="sessions-backdrop" id="sessions-backdrop" onclick="closeSessionsPanel()"></div>
 
 <!-- ═══════════════ VIEWER DOCUMENT ═══════════════ -->
 <div class="viewer-overlay" id="viewer-overlay" onclick="if(event.target===this) closeViewer()">
@@ -885,6 +982,251 @@ const Storage = {
     return { key, deleted: true, shared: false };
   }
 };
+
+/* ═══════════════════════ V27.5.4 · SESSIONS ═══════════════════════
+   Permet de garder plusieurs fils de conversation en parallèle, navigables
+   depuis le panneau gauche repliable, sans perdre le contexte d'analyse
+   (filtres, dernier résultat Data Engine) en changeant de session.
+   Stockage : navigateur uniquement (localStorage via Storage), ne suit donc
+   pas l'utilisateur d'un appareil à l'autre. Les lignes brutes Grist/Excel ne
+   sont JAMAIS persistées ici — seuls les filtres et résultats déjà agrégés
+   (12 à 30 lignes max) le sont, pour éviter de saturer le quota du navigateur. */
+const SESSIONS_STORAGE_KEY = 'caes-copilot-sessions-v1';
+let sessions = [];
+let currentSessionId = null;
+let sessionsSaveTimer = null;
+
+function newSessionId() {
+  return 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+}
+
+function createEmptySession(title) {
+  const now = new Date().toISOString();
+  return {
+    id: newSessionId(),
+    title: title || 'Nouvelle session',
+    createdAt: now,
+    updatedAt: now,
+    messages: [],            // {type:'text'|'html'|'infographic', role?, text?, html?, title?}
+    chatHistoryData: [],     // copie de chatHistory (contexte texte envoyé à Albert)
+    dataEngineState: { lastPlan: null, lastExecution: null }
+  };
+}
+
+function getCurrentSession() {
+  return sessions.find(s => s.id === currentSessionId) || null;
+}
+
+// Retire les références volumineuses (table complète, exécution source) avant
+// stockage — uniquement les filtres/paramètres du plan sont conservés.
+function sanitizePlanForStorage(plan) {
+  if (!plan) return null;
+  const { table, sourceExecution, ...rest } = plan;
+  return rest;
+}
+function sanitizeExecutionForStorage(exec) {
+  if (!exec) return null;
+  return {
+    kind: exec.kind,
+    plan: sanitizePlanForStorage(exec.plan),
+    result: exec.result,
+    text: exec.text,
+    html: exec.html
+  };
+}
+function captureDataEngineStateForSession() {
+  const state = (typeof getDataEngineState === 'function') ? getDataEngineState() : null;
+  if (!state) return { lastPlan: null, lastExecution: null };
+  return {
+    lastPlan: sanitizePlanForStorage(state.lastPlan),
+    lastExecution: sanitizeExecutionForStorage(state.lastExecution)
+  };
+}
+// Au moment de réactiver une session, on raccroche la table de données
+// actuellement connectée (toujours rechargée en direct depuis Grist/Excel,
+// jamais depuis le stockage de session).
+function reattachTableToPlan(plan) {
+  if (!plan) return null;
+  const tables = (typeof getActiveQueryTables === 'function') ? getActiveQueryTables() : [];
+  return { ...plan, table: tables[0] || null };
+}
+function reattachTableToExecution(exec) {
+  if (!exec) return null;
+  return { ...exec, plan: reattachTableToPlan(exec.plan) };
+}
+
+function recordSessionMessage(entry) {
+  const s = getCurrentSession();
+  if (!s) return;
+  s.messages.push(entry);
+  if ((!s.title || s.title === 'Nouvelle session') && entry.type === 'text' && entry.role === 'user') {
+    s.title = entry.text.length > 48 ? entry.text.slice(0, 47) + '…' : entry.text;
+  }
+  s.updatedAt = new Date().toISOString();
+  scheduleSessionsSave();
+}
+
+function scheduleSessionsSave() {
+  if (sessionsSaveTimer) clearTimeout(sessionsSaveTimer);
+  sessionsSaveTimer = setTimeout(persistSessions, 400);
+}
+
+async function loadSessionsFromStorage() {
+  try {
+    const res = await Storage.get(SESSIONS_STORAGE_KEY);
+    const parsed = JSON.parse(res.value);
+    if (Array.isArray(parsed)) sessions = parsed;
+  } catch (e) {
+    sessions = [];
+  }
+}
+
+async function persistSessions() {
+  const current = getCurrentSession();
+  if (current) current.chatHistoryData = (typeof chatHistory !== 'undefined') ? chatHistory.slice() : current.chatHistoryData;
+  if (current) current.dataEngineState = captureDataEngineStateForSession();
+
+  let payload;
+  try {
+    payload = JSON.stringify(sessions);
+  } catch (e) {
+    console.warn('Sérialisation des sessions impossible :', e);
+    return;
+  }
+  // Garde-fou anti-saturation : si le volume dépasse ~4 Mo, on retire le
+  // contexte Data Engine des sessions les plus anciennes (jamais la session
+  // active) plutôt que de risquer de bloquer toute la sauvegarde.
+  if (payload.length > 4 * 1024 * 1024) {
+    const oldestFirst = [...sessions].sort((a, b) => new Date(a.updatedAt) - new Date(b.updatedAt));
+    for (const s of oldestFirst) {
+      if (s.id === currentSessionId) continue;
+      s.dataEngineState = { lastPlan: null, lastExecution: null };
+      payload = JSON.stringify(sessions);
+      if (payload.length <= 4 * 1024 * 1024) break;
+    }
+  }
+  try {
+    await Storage.set(SESSIONS_STORAGE_KEY, payload);
+  } catch (e) {
+    console.warn('Sauvegarde des sessions impossible (quota navigateur dépassé ?) :', e);
+  }
+}
+
+function renderSessionList() {
+  const list = document.getElementById('session-list');
+  if (!list) return;
+  const sorted = [...sessions].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+  list.innerHTML = sorted.map(s => {
+    const active = s.id === currentSessionId ? ' active' : '';
+    const date = new Date(s.updatedAt).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const n = s.messages.length;
+    return `<div class="session-item${active}" onclick="switchToSession('${s.id}')">
+      <div class="session-title">${escapeHtml(s.title || 'Session sans titre')}</div>
+      <div class="session-meta">${date} · ${n} message${n > 1 ? 's' : ''}</div>
+      <button class="session-delete" onclick="deleteSession('${s.id}', event)" title="Supprimer">×</button>
+    </div>`;
+  }).join('');
+}
+
+// Rend dans #chat-messages l'intégralité de la session active (utilisé à
+// l'initialisation et après un changement de session) sans rejouer les
+// effets de bord (pas de doublons dans chatHistory / generatedInfographics).
+function renderActiveSession() {
+  const session = getCurrentSession();
+  if (!session) return;
+
+  window.__DATA_ENGINE_STATE = {
+    lastPlan: reattachTableToPlan(session.dataEngineState?.lastPlan),
+    lastExecution: reattachTableToExecution(session.dataEngineState?.lastExecution),
+    history: []
+  };
+
+  if (typeof chatHistory !== 'undefined') {
+    chatHistory.length = 0;
+    (session.chatHistoryData || []).forEach(m => chatHistory.push(m));
+  }
+
+  const wrap = document.getElementById('chat-messages');
+  if (wrap) wrap.innerHTML = '';
+
+  if (!session.messages.length) {
+    if (wrap) {
+      wrap.innerHTML = `
+        <div class="empty-state" id="empty-state">
+          <div class="es-icon">💬</div>
+          <div class="es-title">Posez une question sur vos documents</div>
+          <div class="es-sub">Nouvelle session : le contexte d'analyse est vide. Les sources chargées et la connexion Grist restent disponibles.</div>
+          <div class="suggestions" id="suggestions"></div>
+        </div>`;
+    }
+    if (typeof renderSuggestions === 'function') renderSuggestions();
+  } else {
+    session.messages.forEach(entry => {
+      if (entry.type === 'text') addMessage(entry.role, entry.text, { record: false });
+      else if (entry.type === 'html') addMessage(entry.role, entry.html, { record: false });
+      else if (entry.type === 'infographic') addInfographicMessage(entry.html, entry.title, { record: false });
+    });
+  }
+
+  const input = document.getElementById('chat-input');
+  if (input) { input.value = ''; input.style.height = 'auto'; }
+  const pills = document.getElementById('context-pills');
+  if (pills) pills.innerHTML = '';
+
+  renderSessionList();
+  if (typeof updateChatSub === 'function') updateChatSub();
+}
+
+function switchToSession(id) {
+  if (id === currentSessionId) { closeSessionsPanel(); return; }
+  persistSessions();
+  currentSessionId = id;
+  renderActiveSession();
+  closeSessionsPanel();
+}
+window.switchToSession = switchToSession;
+
+function createNewSession() {
+  persistSessions();
+  const s = createEmptySession();
+  sessions.unshift(s);
+  currentSessionId = s.id;
+  renderActiveSession();
+  closeSessionsPanel();
+  persistSessions();
+}
+window.createNewSession = createNewSession;
+
+function deleteSession(id, evt) {
+  if (evt) evt.stopPropagation();
+  if (!confirm('Supprimer définitivement cette session ?\n\nCette action est irréversible.')) return;
+  const idx = sessions.findIndex(s => s.id === id);
+  if (idx === -1) return;
+  sessions.splice(idx, 1);
+  if (id === currentSessionId) {
+    if (!sessions.length) sessions.push(createEmptySession('Session 1'));
+    sessions.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+    currentSessionId = sessions[0].id;
+    renderActiveSession();
+  } else {
+    renderSessionList();
+  }
+  persistSessions();
+}
+window.deleteSession = deleteSession;
+
+function openSessionsPanel() { renderSessionList(); document.body.classList.add('sessions-open'); }
+function closeSessionsPanel() { document.body.classList.remove('sessions-open'); }
+window.openSessionsPanel = openSessionsPanel;
+window.closeSessionsPanel = closeSessionsPanel;
+
+async function initSessions() {
+  await loadSessionsFromStorage();
+  if (!sessions.length) sessions.push(createEmptySession('Session 1'));
+  sessions.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+  currentSessionId = sessions[0].id;
+  renderActiveSession();
+}
 
 const SUGGESTIONS = [
   "Résume ce jeu de données en 5 points",
@@ -2819,6 +3161,7 @@ function renderSuggestions() {
 }
 renderSuggestions();
 updateSourceHub();
+initSessions();
 
 /* ═══════════════════════ CHAT ═══════════════════════ */
 function handleKeydown(e) {
@@ -3259,9 +3602,8 @@ function buildFallbackInfographicSpec(question, localAnalysis) {
   return { title: question || 'Infographie adaptive', subtitle: source, eyebrow: 'Infographie adaptive · Albert', metrics, sections };
 }
 
-function addInfographicMessage(html, title = 'Infographie adaptive générée') {
+function addInfographicMessage(html, title = 'Infographie adaptive générée', opts = {}) {
   const safeHtml = html || renderAdaptiveInfographicHtml(buildFallbackInfographicSpec(title), title);
-  generatedInfographics.push(safeHtml);
   const blob = new Blob([safeHtml], { type: 'text/html;charset=utf-8' });
   const url = URL.createObjectURL(blob);
 
@@ -3283,7 +3625,11 @@ function addInfographicMessage(html, title = 'Infographie adaptive générée') 
   msg.appendChild(bubble);
   wrap.appendChild(msg);
   wrap.scrollTop = wrap.scrollHeight;
-  chatHistory.push({ role: 'assistant', content: `[Infographie adaptive générée : ${title}]` });
+  if (opts.record !== false) {
+    generatedInfographics.push(safeHtml);
+    chatHistory.push({ role: 'assistant', content: `[Infographie adaptive générée : ${title}]` });
+    recordSessionMessage({ type: 'infographic', title, html: safeHtml });
+  }
 }
 
 async function generateInfographicWithAlbert(question, localAnalysis) {
@@ -3477,7 +3823,7 @@ ${context || "(Aucun document chargé)"}`;
   }
 }
 
-function addMessage(role, content) {
+function addMessage(role, content, opts = {}) {
   const wrap = document.getElementById('chat-messages');
   const msg = document.createElement('div');
   msg.className = 'msg ' + role;
@@ -3492,6 +3838,9 @@ function addMessage(role, content) {
   if (role === 'assistant') msg.appendChild(buildCopilotActionBar(bubble));
   wrap.appendChild(msg);
   wrap.scrollTop = wrap.scrollHeight;
+  if (opts.record !== false) {
+    recordSessionMessage(role === 'user' ? { type: 'text', role, text: content } : { type: 'html', role, html: content });
+  }
 }
 
 function buildCopilotActionBar(bubble) {
