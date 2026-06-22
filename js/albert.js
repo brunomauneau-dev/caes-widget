@@ -595,7 +595,16 @@ async function sendMessage() {
   addLoadingMessage(loadingId);
 
   const filterContextText = [...chatHistory.slice(-4).map(m => m.content), question].join('\n');
-  const dataPlan = detectDataEnginePlan(question, filterContextText);
+  let dataPlan = detectDataEnginePlan(question, filterContextText);
+  // Injection des filtres persistants (inline, sans dépendance cross-fichier)
+  if (dataPlan && persistentFilters.length &&
+      dataPlan.tool !== 'chart_current' &&
+      dataPlan.tool !== 'export_current_excel' &&
+      dataPlan.tool !== 'export_current_csv') {
+    const pfExisting = new Set((dataPlan.filters || []).map(f => `${f.col}||${f.op||'eq'}||${String(f.value)}`));
+    const pfToAdd = persistentFilters.filter(f => !pfExisting.has(`${f.col}||${f.op||'eq'}||${String(f.value)}`));
+    if (pfToAdd.length) dataPlan.filters = [...(dataPlan.filters || []), ...pfToAdd];
+  }
   const dataExecution = dataPlan ? runDataEnginePlan(dataPlan) : null;
   const localAnalysis = executeLocalDataQuery(question, filterContextText);
 
@@ -603,7 +612,16 @@ async function sendMessage() {
     removeLoadingMessage(loadingId);
     addMessage('assistant', dataExecution.html);
     chatHistory.push({ role: 'user', content: question });
-    chatHistory.push({ role: 'assistant', content: dataEngineResultToContext(dataExecution) });
+    const deCtx = dataEngineResultToContext(dataExecution);
+    chatHistory.push({ role: 'assistant', content: deCtx });
+    // Enregistre le bloc pour le compositeur d'infographie
+    const _skipTools = ['chart_current', 'export_excel', 'export_csv'];
+    const sDE = getCurrentSession();
+    if (sDE && deCtx && deCtx.length > 20 && !_skipTools.includes(dataExecution.plan?.tool)) {
+      sDE.dataBlocks = sDE.dataBlocks || [];
+      sDE.dataBlocks.push({ id: 'blk_' + Date.now(), title: extractBlockTitle(dataExecution, question), question, dataContext: deCtx });
+      scheduleSessionsSave();
+    }
     return;
   }
 
@@ -674,6 +692,16 @@ ${context || "(Aucun document chargé)"}`;
 
     chatHistory.push({ role: 'user', content: question });
     chatHistory.push({ role: 'assistant', content: answer });
+
+    // Enregistre la réponse Albert comme bloc composable
+    const sAlbert = getCurrentSession();
+    if (sAlbert && answer && answer.length > 80) {
+      sAlbert.dataBlocks = sAlbert.dataBlocks || [];
+      const plainCtx = answer.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      const blkTitle = question.length > 64 ? question.slice(0, 63) + '…' : question;
+      sAlbert.dataBlocks.push({ id: 'blk_' + Date.now(), title: blkTitle, question, dataContext: plainCtx });
+      scheduleSessionsSave();
+    }
 
   } catch (e) {
     removeLoadingMessage(loadingId);
