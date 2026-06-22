@@ -596,13 +596,14 @@ async function sendMessage() {
 
   const filterContextText = [...chatHistory.slice(-4).map(m => m.content), question].join('\n');
   let dataPlan = detectDataEnginePlan(question, filterContextText);
-  // Injection des filtres persistants (inline, sans dépendance cross-fichier)
+  // Injection des filtres persistants : skip les colonnes déjà traitées par la question
+  // (ex: "non basques" → ne pas écraser le neq avec le persistent eq)
   if (dataPlan && persistentFilters.length &&
       dataPlan.tool !== 'chart_current' &&
       dataPlan.tool !== 'export_current_excel' &&
       dataPlan.tool !== 'export_current_csv') {
-    const pfExisting = new Set((dataPlan.filters || []).map(f => `${f.col}||${f.op||'eq'}||${String(f.value)}`));
-    const pfToAdd = persistentFilters.filter(f => !pfExisting.has(`${f.col}||${f.op||'eq'}||${String(f.value)}`));
+    const pfColumnsAlready = new Set((dataPlan.filters || []).map(f => f.col));
+    const pfToAdd = persistentFilters.filter(f => !pfColumnsAlready.has(f.col));
     if (pfToAdd.length) dataPlan.filters = [...(dataPlan.filters || []), ...pfToAdd];
   }
   const dataExecution = dataPlan ? runDataEnginePlan(dataPlan) : null;
@@ -618,9 +619,16 @@ async function sendMessage() {
     const _skipTools = ['chart_current', 'export_excel', 'export_csv'];
     const sDE = getCurrentSession();
     if (sDE && deCtx && deCtx.length > 20 && !_skipTools.includes(dataExecution.plan?.tool)) {
-      sDE.dataBlocks = sDE.dataBlocks || [];
-      sDE.dataBlocks.push({ id: 'blk_' + Date.now(), title: extractBlockTitle(dataExecution, question), question, dataContext: deCtx });
-      scheduleSessionsSave();
+      try {
+        sDE.dataBlocks = sDE.dataBlocks || [];
+        const blkTitle = (typeof extractBlockTitle === 'function')
+          ? extractBlockTitle(dataExecution, question)
+          : (question.length > 64 ? question.slice(0, 63) + '…' : question);
+        sDE.dataBlocks.push({ id: 'blk_' + Date.now(), title: blkTitle, question, dataContext: deCtx });
+        scheduleSessionsSave();
+      } catch(e) {
+        console.warn('[dataBlocks] Erreur lors de l\'enregistrement du bloc:', e);
+      }
     }
     return;
   }
@@ -696,11 +704,15 @@ ${context || "(Aucun document chargé)"}`;
     // Enregistre la réponse Albert comme bloc composable
     const sAlbert = getCurrentSession();
     if (sAlbert && answer && answer.length > 80) {
-      sAlbert.dataBlocks = sAlbert.dataBlocks || [];
-      const plainCtx = answer.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-      const blkTitle = question.length > 64 ? question.slice(0, 63) + '…' : question;
-      sAlbert.dataBlocks.push({ id: 'blk_' + Date.now(), title: blkTitle, question, dataContext: plainCtx });
-      scheduleSessionsSave();
+      try {
+        sAlbert.dataBlocks = sAlbert.dataBlocks || [];
+        const plainCtx = answer.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        const blkTitle = question.length > 64 ? question.slice(0, 63) + '…' : question;
+        sAlbert.dataBlocks.push({ id: 'blk_' + Date.now(), title: blkTitle, question, dataContext: plainCtx });
+        scheduleSessionsSave();
+      } catch(e) {
+        console.warn('[dataBlocks] Erreur lors de l\'enregistrement du bloc Albert:', e);
+      }
     }
 
   } catch (e) {
