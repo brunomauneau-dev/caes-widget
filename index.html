@@ -1231,7 +1231,18 @@ function deleteSession(id, evt) {
 window.deleteSession = deleteSession;
 
 function openSessionsPanel() { renderSessionList(); document.body.classList.add('sessions-open'); }
-function closeSessionsPanel() { document.body.classList.remove('sessions-open'); }
+function closeSessionsPanel() {
+  document.body.classList.remove('sessions-open');
+  // Force-reset : garantit que l'input et le bouton d'envoi sont toujours
+  // fonctionnels après fermeture du panneau, quelle qu'en soit la cause.
+  const btnSend = document.getElementById('btn-send');
+  if (btnSend) btnSend.disabled = false;
+  const chatInput = document.getElementById('chat-input');
+  if (chatInput) {
+    chatInput.removeAttribute('disabled');
+    setTimeout(() => { try { chatInput.focus(); } catch(e) {} }, 100);
+  }
+}
 window.openSessionsPanel = openSessionsPanel;
 window.closeSessionsPanel = closeSessionsPanel;
 
