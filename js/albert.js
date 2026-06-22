@@ -685,7 +685,7 @@ ${context || "(Aucun document chargé)"}`;
   }
 }
 
-function addMessage(role, content) {
+function addMessage(role, content, opts = {}) {
   const wrap = document.getElementById('chat-messages');
   const msg = document.createElement('div');
   msg.className = 'msg ' + role;
@@ -697,8 +697,14 @@ function addMessage(role, content) {
     bubble.innerHTML = content;
   }
   msg.appendChild(bubble);
+  if (role === 'assistant') msg.appendChild(buildCopilotActionBar(bubble));
   wrap.appendChild(msg);
   wrap.scrollTop = wrap.scrollHeight;
+  if (opts.record !== false) {
+    recordSessionMessage(role === 'user'
+      ? { type: 'text', role, text: content }
+      : { type: 'html', role, html: content });
+  }
 }
 
 function addLoadingMessage(id) {
