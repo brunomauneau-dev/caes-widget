@@ -973,9 +973,20 @@ function renderCompareHtml(plan, result) {
   return `<h4>Comparaison calculée localement</h4><p>Base comparée : <strong>${baseTotal.toLocaleString('fr-FR')}</strong> lignes.</p><section class="de-section de-population" style="margin:12px 0;padding:12px;border:1px solid var(--gris2,#e5e7eb);border-radius:10px;background:#fff"><div style="overflow:auto"><table style="border-collapse:separate;border-spacing:0;width:100%;font-size:12px;min-width:360px"><tbody><tr><th style="text-align:left;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Population</th><th style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Nombre</th><th style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Part</th></tr>${tableRows}</tbody></table></div>${missingNote}</section>${filtersHtml}${insights}${charts}${statsTable}${detailsTables}${debug}`;
 }
 
-function runDataEnginePlan(plan) {
+function runDataEnginePlan(plan, persistentFiltersOverride) {
   plan = finalSanitizeAnalysisPlan(plan);
   if (!plan || !plan.table) return null;
+  // Re-injection des filtres persistants APRES le sanitize qui les efface
+  // car il ne reconnait pas leur concept dans la question courante.
+  const _pf = persistentFiltersOverride || (typeof persistentFilters !== 'undefined' ? persistentFilters : []);
+  if (_pf && _pf.length &&
+      plan.tool !== 'chart_current' &&
+      plan.tool !== 'export_current_excel' &&
+      plan.tool !== 'export_current_csv') {
+    const existing = new Set((plan.filters || []).map(f => f.col + '||' + (f.op||'eq') + '||' + String(f.value)));
+    const toAdd = _pf.filter(f => !existing.has(f.col + '||' + (f.op||'eq') + '||' + String(f.value)));
+    if (toAdd.length) plan.filters = [...(plan.filters || []), ...toAdd];
+  }
   if (plan.tool === 'compare') {
     const groups = plan.compareGroups || detectCompareGroups(plan.table, plan.question);
     if (!groups || groups.length < 2) return null;
