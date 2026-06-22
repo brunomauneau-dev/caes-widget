@@ -280,13 +280,85 @@ function rememberDataEngineExecution(exec) {
   state.history = state.history.slice(-12);
 }
 
+// v27.5.3 — export PNG des graphiques (camembert + barres), JS natif, sans
+// dépendance externe. Le SVG exporté est mis en cache en mémoire (jamais inséré
+// dans le DOM visible), donc zéro impact sur le rendu HTML existant.
+window.__deChartSvgCache = window.__deChartSvgCache || {};
+
+function nextChartExportId() {
+  return 'de_chart_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+}
+
+function downloadDataEngineChartPng(chartId) {
+  const svgString = window.__deChartSvgCache[chartId];
+  if (!svgString) return;
+  const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(svgBlob);
+  const img = new Image();
+  img.onload = function () {
+    const scale = 2; // sur-échantillonnage pour une image nette
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width * scale;
+    canvas.height = img.height * scale;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    URL.revokeObjectURL(url);
+    canvas.toBlob(function (blob) {
+      if (!blob) return;
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'graphique.png';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }, 'image/png');
+  };
+  img.onerror = function () { URL.revokeObjectURL(url); };
+  img.src = url;
+}
+window.downloadDataEngineChartPng = downloadDataEngineChartPng;
+
+function deChartDownloadButtonHtml(chartId) {
+  return `<div style="margin-top:8px"><button type="button" onclick="downloadDataEngineChartPng('${chartId}')" style="font-size:11px;padding:4px 10px;border:1px solid var(--gris2,#e5e7eb);border-radius:6px;background:#fff;cursor:pointer;color:var(--gris6,#6b7280)">⬇️ Télécharger en image</button></div>`;
+}
+
+// v27.5.3 — SVG équivalent du graphique en barres, utilisé UNIQUEMENT pour
+// l'export PNG (couleurs en hexadécimal, pas de var(--xxx) : un SVG exporté via
+// blob n'a pas accès aux variables CSS de la page). Le rendu visuel HTML du
+// graphique en barres, lui, ne change pas.
+function buildBarChartSvgForExport(rows) {
+  const top = rows.slice(0, 12);
+  const max = Math.max(...top.map(r => r.count || 0), 1);
+  const padding = 14, rowHeight = 28, labelW = 210, countW = 80, barAreaW = 260;
+  const width = padding * 2 + labelW + barAreaW + countW;
+  const height = padding * 2 + top.length * rowHeight;
+  const rowsSvg = top.map((r, i) => {
+    const y = padding + i * rowHeight;
+    const barH = 14;
+    const barY = y + (rowHeight - barH) / 2;
+    const barW = Math.max(3, (r.count || 0) / max * barAreaW);
+    const label = String(r.value ?? '').length > 34 ? String(r.value).slice(0, 33) + '…' : String(r.value ?? '');
+    const countText = `${(r.count || 0).toLocaleString('fr-FR')}`;
+    return `<text x="${padding}" y="${y + rowHeight / 2 + 4}" font-size="12" font-family="Arial, sans-serif" fill="#111827">${escapeHtml(label)}</text>` +
+      `<rect x="${padding + labelW}" y="${barY}" width="${barAreaW}" height="${barH}" rx="6" fill="#f3f4f6"></rect>` +
+      `<rect x="${padding + labelW}" y="${barY}" width="${barW.toFixed(1)}" height="${barH}" rx="6" fill="#6d28d9"></rect>` +
+      `<text x="${padding + labelW + barAreaW + 10}" y="${y + rowHeight / 2 + 4}" font-size="12" font-weight="700" font-family="Arial, sans-serif" fill="#111827">${escapeHtml(countText)}</text>`;
+  }).join('');
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect x="0" y="0" width="${width}" height="${height}" fill="#ffffff"></rect>${rowsSvg}</svg>`;
+}
+
 function renderMiniBarChart(rows, total) {
   if (!rows || !rows.length) return '';
   const max = Math.max(...rows.map(r => r.count || 0), 1);
-  return `<div style="margin:10px 0;display:grid;gap:6px;max-width:560px">${rows.slice(0,12).map(r => {
+  const chartId = nextChartExportId();
+  window.__deChartSvgCache[chartId] = buildBarChartSvgForExport(rows);
+  const bars = `<div style="margin:10px 0;display:grid;gap:6px;max-width:100%">${rows.slice(0,12).map(r => {
     const w = Math.max(2, Math.round((r.count || 0) / max * 100));
-    return `<div style="display:grid;grid-template-columns:minmax(120px,220px) 1fr auto;gap:8px;align-items:center"><div style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(r.value)}">${escapeHtml(r.value)}</div><div style="height:12px;background:var(--gris1);border-radius:6px;overflow:hidden"><div style="height:12px;width:${w}%;background:var(--albert);border-radius:6px"></div></div><div style="font-size:11px;font-weight:700">${(r.count || 0).toLocaleString('fr-FR')}</div></div>`;
+    return `<div style="display:grid;grid-template-columns:minmax(90px,180px) minmax(60px,1fr) auto;gap:8px;align-items:center"><div style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(r.value)}">${escapeHtml(r.value)}</div><div style="height:12px;background:var(--gris1);border-radius:6px;overflow:hidden"><div style="height:12px;width:${w}%;background:var(--albert);border-radius:6px"></div></div><div style="font-size:11px;font-weight:700">${(r.count || 0).toLocaleString('fr-FR')}</div></div>`;
   }).join('')}</div>`;
+  return bars + deChartDownloadButtonHtml(chartId);
 }
 
 // v27.5.2 — rendu camembert en SVG inline (aucune dépendance externe).
@@ -319,13 +391,16 @@ function renderMiniPieChart(rows, total) {
     return { path, color, row, fraction };
   });
 
-  const svg = `<svg viewBox="0 0 180 180" width="180" height="180" style="flex:0 0 auto">${slices.map(s => s.path).join('')}</svg>`;
-  const legend = `<div style="display:grid;gap:5px;align-content:center">${slices.map(s => {
+  const svg = `<svg viewBox="0 0 180 180" width="180" height="180" style="flex:0 0 auto;width:100%;max-width:160px;height:auto;min-width:110px">${slices.map(s => s.path).join('')}</svg>`;
+  const legend = `<div style="display:grid;gap:5px;align-content:center;flex:1 1 160px;min-width:0">${slices.map(s => {
     const pct = (s.fraction * 100).toFixed(1).replace('.', ',');
-    return `<div style="display:flex;align-items:center;gap:7px;font-size:11px"><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${s.color};flex:0 0 auto"></i><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px" title="${escapeHtml(s.row.value)}">${escapeHtml(s.row.value)}</span><strong style="margin-left:auto">${(s.row.count || 0).toLocaleString('fr-FR')} · ${pct} %</strong></div>`;
+    return `<div style="display:flex;align-items:center;gap:7px;font-size:11px;flex-wrap:wrap"><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${s.color};flex:0 0 auto"></i><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1 1 auto;min-width:40px" title="${escapeHtml(s.row.value)}">${escapeHtml(s.row.value)}</span><strong style="flex:0 0 auto">${(s.row.count || 0).toLocaleString('fr-FR')} · ${pct} %</strong></div>`;
   }).join('')}</div>`;
 
-  return `<div style="margin:10px 0;display:flex;gap:18px;flex-wrap:wrap;align-items:center">${svg}${legend}</div>`;
+  const chartId = nextChartExportId();
+  window.__deChartSvgCache[chartId] = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" width="180" height="180"><rect x="0" y="0" width="180" height="180" fill="#ffffff"></rect>${slices.map(s => s.path).join('')}</svg>`;
+
+  return `<div style="margin:10px 0;max-width:100%"><div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;max-width:100%">${svg}${legend}</div>${deChartDownloadButtonHtml(chartId)}</div>`;
 }
 
 
