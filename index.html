@@ -677,6 +677,33 @@
   .brief-summary { font-size:11px; color:var(--gris3); }
   @media(max-width:760px){ .brief-row{grid-template-columns:1fr}.brief-modal-box{width:94vw} }
 
+  /* ── Compositeur d'infographie ── */
+  .ic-box { background:var(--blanc); border-radius:14px; width:640px; max-width:94vw; max-height:88vh; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 24px 80px rgba(0,0,0,.28); }
+  .ic-head { background:var(--bleu); color:var(--blanc); padding:16px 20px; display:flex; justify-content:space-between; align-items:flex-start; gap:14px; flex-shrink:0; }
+  .ic-head h3 { font-size:15px; margin:0 0 4px; }
+  .ic-head p { font-size:11px; opacity:.68; margin:0; line-height:1.45; }
+  .ic-body { padding:18px 20px; overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:12px; }
+  .ic-section-title { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.8px; color:var(--gris3); }
+  .ic-blocks { display:flex; flex-direction:column; gap:8px; }
+  .ic-block { display:flex; align-items:center; gap:10px; background:var(--gris0); border:2px solid var(--gris1); border-radius:8px; padding:10px 12px; transition:border-color .1s; user-select:none; }
+  .ic-block:hover { border-color:var(--gris2); }
+  .ic-block.ic-drag-over { border-color:var(--albert); background:var(--albert2); }
+  .ic-block.ic-dragging { opacity:.35; }
+  .ic-block-handle { color:var(--gris3); font-size:15px; cursor:grab; flex-shrink:0; line-height:1; }
+  .ic-block-check { width:16px; height:16px; flex-shrink:0; cursor:pointer; }
+  .ic-block-label { flex:1; min-width:0; }
+  .ic-block-title { font-size:12px; font-weight:700; color:var(--texte); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ic-block-sub { font-size:10px; color:var(--gris3); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ic-empty { font-size:12px; color:var(--gris3); text-align:center; padding:24px; border:1px dashed var(--gris2); border-radius:8px; }
+  .ic-themes { display:flex; gap:8px; flex-wrap:wrap; }
+  .ic-theme-swatch { display:flex; align-items:center; gap:7px; padding:7px 12px; border-radius:8px; border:2px solid var(--gris1); cursor:pointer; font-size:12px; font-weight:700; color:var(--gris4); transition:all .1s; }
+  .ic-theme-swatch:hover { border-color:var(--gris3); }
+  .ic-theme-swatch.ic-active { border-color:var(--albert); background:var(--albert2); color:var(--albert); }
+  .ic-theme-dot { width:13px; height:13px; border-radius:50%; flex-shrink:0; }
+  .ic-retheme { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+  .ic-retheme-btn { display:inline-flex; align-items:center; gap:5px; padding:4px 9px; border-radius:6px; border:1px solid var(--gris2); background:var(--blanc); font-size:11px; font-weight:700; cursor:pointer; color:var(--gris4); transition:all .1s; }
+  .ic-retheme-btn:hover { border-color:var(--albert); color:var(--albert); }
+
 </style>
 </head>
 <body>
@@ -703,7 +730,6 @@
         <div class="sc-detail" id="grist-source-detail">Aucune table connectée. Idéal pour les gros fichiers et les analyses récurrentes.</div>
         <div class="sc-actions" id="grist-source-actions" style="display:none">
           <button class="source-action primary" onclick="quickAsk('Résume ce jeu de données en 5 points')">Synthèse</button>
-          <button class="source-action" onclick="openInfographicBrief()">Infographie</button>
         </div>
       </div>
       <div class="source-card" id="upload-source-card">
@@ -940,6 +966,32 @@
   </div>
 </div>
 
+<!-- ═══════════════ MODAL COMPOSITEUR D'INFOGRAPHIE ═══════════════ -->
+<div class="modal-overlay" id="modal-ic" style="display:none">
+  <div class="ic-box">
+    <div class="ic-head">
+      <div>
+        <h3>🖼 Composer une infographie</h3>
+        <p>Sélectionnez et ordonnez les blocs de données · glissez pour réordonner</p>
+      </div>
+      <button class="brief-close" onclick="closeInfographicComposer()">✕</button>
+    </div>
+    <div class="ic-body">
+      <div class="ic-section-title">Blocs de données disponibles</div>
+      <div class="ic-blocks" id="ic-blocks"></div>
+      <div class="ic-section-title">Thème graphique</div>
+      <div class="ic-themes" id="ic-themes"></div>
+    </div>
+    <div class="brief-modal-foot">
+      <span class="brief-summary" id="ic-summary">Aucun bloc sélectionné</span>
+      <div style="display:flex;gap:8px">
+        <button class="brief-btn secondary" onclick="closeInfographicComposer()">Annuler</button>
+        <button class="brief-btn primary" id="ic-submit" onclick="submitInfographicComposer()" disabled>🖼 Générer</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 
 <script>
 /* ═══════════════════════ ÉTAT GLOBAL ═══════════════════════ */
@@ -1008,9 +1060,10 @@ function createEmptySession(title) {
     title: title || 'Nouvelle session',
     createdAt: now,
     updatedAt: now,
-    messages: [],            // {type:'text'|'html'|'infographic', role?, text?, html?, title?}
+    messages: [],            // {type:'text'|'html'|'infographic', role?, text?, html?, title?, spec?, themeId?}
     chatHistoryData: [],     // copie de chatHistory (contexte texte envoyé à Albert)
-    dataEngineState: { lastPlan: null, lastExecution: null }
+    dataEngineState: { lastPlan: null, lastExecution: null },
+    dataBlocks: []           // [{id, title, question, dataContext}] — blocs réutilisables dans le compositeur
   };
 }
 
@@ -3244,6 +3297,170 @@ ${localAnalysis.text}
    calculs locaux Grist/Excel et une identité graphique cohérente. */
 let generatedInfographics = [];
 
+/* ── Thèmes d'infographie ── */
+const INFOGRAPH_THEMES = [
+  { id: 'bordeaux', label: 'Bordeaux', accent: '#c1440e', secondary: '#1a3a5c' },
+  { id: 'ocean',    label: 'Océan',    accent: '#0369a1', secondary: '#164e63' },
+  { id: 'foret',    label: 'Forêt',    accent: '#16a34a', secondary: '#14532d' },
+  { id: 'nuit',     label: 'Nuit',     accent: '#7c3aed', secondary: '#1e1b4b' },
+];
+
+/* ── État du compositeur ── */
+let _icState = { blocks: [], theme: 'bordeaux', dragSrcIdx: null };
+
+function extractBlockTitle(exec, question) {
+  if (!exec) return question || 'Résultat';
+  const tool = exec.plan?.tool || '';
+  const col = exec.plan?.targetCol || '';
+  const total = exec.result?.total ?? exec.result?.count ?? '';
+  const filt = (exec.plan?.filters?.length || exec.plan?.groupFilters?.length) ? ' · filtré' : '';
+  if (tool === 'count_rows') return `Comptage${filt} · ${Number(total).toLocaleString('fr-FR')} ligne${total > 1 ? 's' : ''}`;
+  if (tool === 'compare') return `Comparaison${filt}`;
+  if (col) return `Répartition par ${col}${filt}`;
+  return question || 'Résultat Data Engine';
+}
+
+function openInfographicComposer() {
+  const session = getCurrentSession();
+  const blocks = (session?.dataBlocks || []).map(b => ({ ...b, checked: true }));
+  if (!blocks.length) {
+    alert('Aucun résultat Data Engine dans cette session.\nPosez d\'abord des questions d\'analyse (répartitions, comptages, comparaisons...).');
+    return;
+  }
+  _icState.blocks = blocks;
+  _icState.dragSrcIdx = null;
+  _icRenderBlocks();
+  _icRenderThemes();
+  document.getElementById('modal-ic').style.display = 'flex';
+}
+window.openInfographicComposer = openInfographicComposer;
+
+function closeInfographicComposer() {
+  document.getElementById('modal-ic').style.display = 'none';
+}
+window.closeInfographicComposer = closeInfographicComposer;
+
+function _icRenderBlocks() {
+  const container = document.getElementById('ic-blocks');
+  if (!container) return;
+  container.innerHTML = '';
+  if (!_icState.blocks.length) {
+    container.innerHTML = '<div class="ic-empty">Aucun résultat Data Engine disponible dans cette session.</div>';
+    return;
+  }
+  _icState.blocks.forEach((b, i) => {
+    const el = document.createElement('div');
+    el.className = 'ic-block';
+    el.draggable = true;
+    el.dataset.idx = String(i);
+    el.innerHTML = `<span class="ic-block-handle" title="Glisser pour réordonner">⠿</span>
+      <input class="ic-block-check" type="checkbox" ${b.checked ? 'checked' : ''} onchange="icToggleBlock(${i},this.checked)">
+      <div class="ic-block-label">
+        <div class="ic-block-title">${escapeHtml(b.title)}</div>
+        <div class="ic-block-sub">${escapeHtml(b.question || '')}</div>
+      </div>`;
+    el.addEventListener('dragstart', e => { _icState.dragSrcIdx = i; el.classList.add('ic-dragging'); e.dataTransfer.effectAllowed = 'move'; });
+    el.addEventListener('dragend', () => { el.classList.remove('ic-dragging'); container.querySelectorAll('.ic-block').forEach(x => x.classList.remove('ic-drag-over')); });
+    el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('ic-drag-over'); });
+    el.addEventListener('dragleave', () => el.classList.remove('ic-drag-over'));
+    el.addEventListener('drop', e => { e.preventDefault(); el.classList.remove('ic-drag-over'); _icMoveBlock(_icState.dragSrcIdx, i); });
+    container.appendChild(el);
+  });
+  _icUpdateSummary();
+}
+
+function _icRenderThemes() {
+  const container = document.getElementById('ic-themes');
+  if (!container) return;
+  container.innerHTML = INFOGRAPH_THEMES.map(t =>
+    `<div class="ic-theme-swatch ${_icState.theme === t.id ? 'ic-active' : ''}" onclick="icSelectTheme('${t.id}')">
+      <span class="ic-theme-dot" style="background:${t.accent}"></span>${escapeHtml(t.label)}
+    </div>`
+  ).join('');
+}
+
+function icToggleBlock(idx, checked) { if (_icState.blocks[idx]) { _icState.blocks[idx].checked = checked; _icUpdateSummary(); } }
+window.icToggleBlock = icToggleBlock;
+
+function icSelectTheme(id) { _icState.theme = id; _icRenderThemes(); }
+window.icSelectTheme = icSelectTheme;
+
+function _icMoveBlock(from, to) {
+  if (from === null || from === to) return;
+  const [moved] = _icState.blocks.splice(from, 1);
+  _icState.blocks.splice(to, 0, moved);
+  _icState.dragSrcIdx = null;
+  _icRenderBlocks();
+}
+
+function _icUpdateSummary() {
+  const n = _icState.blocks.filter(b => b.checked).length;
+  const el = document.getElementById('ic-summary');
+  if (el) el.textContent = n === 0 ? 'Aucun bloc sélectionné' : `${n} bloc${n > 1 ? 's' : ''} sélectionné${n > 1 ? 's' : ''}`;
+  const btn = document.getElementById('ic-submit');
+  if (btn) btn.disabled = n === 0;
+}
+
+async function submitInfographicComposer() {
+  const selected = _icState.blocks.filter(b => b.checked);
+  if (!selected.length) return;
+  const theme = INFOGRAPH_THEMES.find(t => t.id === _icState.theme) || INFOGRAPH_THEMES[0];
+  closeInfographicComposer();
+  const composerCtx = selected.map((b, i) => `[Analyse ${i + 1} — ${b.title}]\n${b.dataContext}`).join('\n\n---\n\n');
+  const question = selected.map(b => b.title).join(', ');
+  const loadingId = 'loading_' + Date.now();
+  addLoadingMessage(loadingId);
+  try {
+    const { spec, html } = await _generateInfographicFromComposer(question, composerCtx, theme);
+    removeLoadingMessage(loadingId);
+    addInfographicMessage(html, 'Infographie composée', { spec, themeId: theme.id });
+  } catch(e) {
+    removeLoadingMessage(loadingId);
+    addMessage('assistant', `<p style="color:var(--rouge)"><strong>Erreur pendant la génération</strong><br>${escapeHtml(e.message)}</p>`);
+  }
+}
+window.submitInfographicComposer = submitInfographicComposer;
+
+async function _generateInfographicFromComposer(question, composerCtx, theme) {
+  const prompt = `Tu es un directeur artistique, data analyst et rédacteur institutionnel Parcoursup.
+Produis une SPECIFICATION JSON pour une infographie adaptive. Ne produis PAS de HTML. Réponds UNIQUEMENT par du JSON valide.
+Les couleurs DOIVENT être exactement : "accent":"${theme.accent}", "secondary":"${theme.secondary}".
+Schéma :
+{"title":"...","subtitle":"...","eyebrow":"...","accent":"${theme.accent}","secondary":"${theme.secondary}","metrics":[{"label":"...","value":"...","detail":"..."}],"narrative":["..."],"sections":[{"type":"ranking|bars|comparison|kpi_grid|insights|stacked","title":"...",...}],"footer":"..."}
+Règles : infographie narrative (fil conducteur clair), max 7 sections non redondantes, n'invente aucun chiffre, utilise seulement les données ci-dessous.
+DONNÉES :\n${composerCtx}`;
+  const resp = await fetch(albertConfig.endpoint, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ model: albertConfig.model, messages:[{role:'system',content:prompt},{role:'user',content:`Génère l'infographie : ${question}`}], temperature:0.2 })
+  });
+  if (!resp.ok) throw new Error(`Erreur ${resp.status}`);
+  const data = await resp.json();
+  let spec;
+  try { spec = parseJsonLoose(data.choices?.[0]?.message?.content || ''); } catch(e) { spec = buildFallbackInfographicSpec(question); }
+  spec.accent = theme.accent; spec.secondary = theme.secondary;
+  return { spec, html: renderAdaptiveInfographicHtml(spec, question) };
+}
+
+function rethemeInfographic(btn, specJson, themeId) {
+  const theme = INFOGRAPH_THEMES.find(t => t.id === themeId);
+  if (!theme) return;
+  try {
+    const spec = JSON.parse(specJson);
+    spec.accent = theme.accent; spec.secondary = theme.secondary;
+    const html = renderAdaptiveInfographicHtml(spec, spec.title || '');
+    const msg = btn.closest('.msg');
+    const iframe = msg?.querySelector('iframe');
+    if (!iframe) return;
+    const url = URL.createObjectURL(new Blob([html], { type:'text/html;charset=utf-8' }));
+    iframe.src = url;
+    msg.querySelectorAll('a[data-infobtn]').forEach(a => a.href = url);
+    // Update stored spec theme in all sibling buttons
+    msg.querySelectorAll('.ic-retheme-btn').forEach(b => b.classList.remove('ic-active'));
+    btn.classList.add('ic-active');
+  } catch(e) { console.warn('Retheme error:', e); }
+}
+window.rethemeInfographic = rethemeInfographic;
+
 function isInfographicRequest(question) {
   const q = normalizeText(question);
   return /infographie|dataviz|visualisation|page html|rapport visuel|dashboard|tableau de bord|mise en forme visuelle|comme claude|artifact|visuel/.test(q);
@@ -3632,6 +3849,15 @@ function addInfographicMessage(html, title = 'Infographie adaptive générée', 
   const safeHtml = html || renderAdaptiveInfographicHtml(buildFallbackInfographicSpec(title), title);
   const blob = new Blob([safeHtml], { type: 'text/html;charset=utf-8' });
   const url = URL.createObjectURL(blob);
+  const specJson = opts.spec ? JSON.stringify(opts.spec) : null;
+  const activeTheme = opts.themeId || 'bordeaux';
+
+  const rethemeHtml = specJson ? `<div class="ic-retheme">${INFOGRAPH_THEMES.map(t =>
+    `<button class="ic-retheme-btn${t.id === activeTheme ? ' ic-active' : ''}" onclick="rethemeInfographic(this,${escapeHtml(JSON.stringify(specJson))},'${t.id}')">
+      <span class="ic-theme-dot" style="background:${t.accent};width:9px;height:9px;border-radius:50%;display:inline-block"></span>${escapeHtml(t.label)}
+    </button>`).join('')}
+    <button class="ic-retheme-btn" onclick="openInfographicComposer()" title="Recomposer">✏️ Recomposer</button>
+  </div>` : '';
 
   const wrap = document.getElementById('chat-messages');
   const msg = document.createElement('div');
@@ -3641,10 +3867,10 @@ function addInfographicMessage(html, title = 'Infographie adaptive générée', 
   bubble.className = 'msg-bubble';
   bubble.innerHTML = `
     <h4>${escapeHtml(title)}</h4>
-    <p style="font-size:12px;color:var(--gris3);margin-bottom:10px">Infographie Parcoursup générée : le widget profile les colonnes Grist, Albert choisit la narration, puis le widget rend les composants HTML/CSS.</p>
-    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-      <a href="${url}" target="_blank" rel="noopener" style="background:var(--albert);color:white;text-decoration:none;padding:7px 10px;border-radius:6px;font-size:12px;font-weight:600">Ouvrir l'infographie</a>
-      <a href="${url}" download="infographie_adaptive_albert.html" style="background:var(--gris0);color:var(--texte);text-decoration:none;padding:7px 10px;border-radius:6px;border:1px solid var(--gris1);font-size:12px;font-weight:600">Télécharger le HTML</a>
+    ${rethemeHtml}
+    <div style="display:flex;gap:8px;margin:10px 0;flex-wrap:wrap">
+      <a data-infobtn href="${url}" target="_blank" rel="noopener" style="background:var(--albert);color:white;text-decoration:none;padding:7px 10px;border-radius:6px;font-size:12px;font-weight:600">Ouvrir l'infographie</a>
+      <a data-infobtn href="${url}" download="infographie_adaptive_albert.html" style="background:var(--gris0);color:var(--texte);text-decoration:none;padding:7px 10px;border-radius:6px;border:1px solid var(--gris1);font-size:12px;font-weight:600">Télécharger le HTML</a>
     </div>
     <iframe src="${url}" title="${escapeAttr(title)}" style="width:100%;height:560px;border:1px solid var(--gris1);border-radius:8px;background:white"></iframe>
   `;
@@ -3654,7 +3880,7 @@ function addInfographicMessage(html, title = 'Infographie adaptive générée', 
   if (opts.record !== false) {
     generatedInfographics.push(safeHtml);
     chatHistory.push({ role: 'assistant', content: `[Infographie adaptive générée : ${title}]` });
-    recordSessionMessage({ type: 'infographic', title, html: safeHtml });
+    recordSessionMessage({ type: 'infographic', title, html: safeHtml, spec: opts.spec, themeId: activeTheme });
   }
 }
 
@@ -3765,7 +3991,15 @@ async function sendMessage() {
     removeLoadingMessage(loadingId);
     addMessage('assistant', dataExecution.html);
     chatHistory.push({ role: 'user', content: question });
-    chatHistory.push({ role: 'assistant', content: dataEngineResultToContext(dataExecution) });
+    const deCtx = dataEngineResultToContext(dataExecution);
+    chatHistory.push({ role: 'assistant', content: deCtx });
+    // Enregistre le bloc pour le compositeur d'infographie
+    const s = getCurrentSession();
+    if (s && deCtx && deCtx.length > 20) {
+      s.dataBlocks = s.dataBlocks || [];
+      s.dataBlocks.push({ id: 'blk_' + Date.now(), title: extractBlockTitle(dataExecution, question), question, dataContext: deCtx });
+      scheduleSessionsSave();
+    }
     return;
   }
 
@@ -3882,6 +4116,7 @@ function buildCopilotActionBar(bubble) {
     return b;
   };
   bar.appendChild(mk('📊 Graphique', 'Afficher un graphique sur le résultat courant', () => quickAsk('Graphique')));
+  bar.appendChild(mk('🖼 Infographie', 'Composer une infographie depuis les résultats de la session', () => openInfographicComposer()));
   bar.appendChild(mk('📄 Excel', 'Exporter le résultat courant en Excel', () => quickAsk('Exporte en Excel')));
   bar.appendChild(mk('🖨 PDF', 'Imprimer / exporter en PDF', () => window.print()));
   bar.appendChild(mk('📋 Copier', 'Copier le rapport', async () => {
