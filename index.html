@@ -290,6 +290,28 @@
   }
   .context-pill.none { background: var(--gris0); color: var(--gris3); }
 
+  /* ── Filtres persistants ── */
+  .pf-bar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    padding: 6px max(22px, calc((100vw - 1040px)/2));
+    background: var(--gris0); border-bottom: 1px solid var(--gris1);
+    min-height: 36px;
+  }
+  .pf-bar.empty { display: none; }
+  .pf-label { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .7px; color: var(--gris3); flex-shrink: 0; }
+  .pf-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: #fef3c7; border: 1px solid #f59e0b; color: #92400e;
+    font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 20px;
+  }
+  .pf-chip button {
+    background: none; border: none; cursor: pointer; color: #92400e;
+    font-size: 13px; line-height: 1; padding: 0; margin-left: 2px; opacity: .7;
+  }
+  .pf-chip button:hover { opacity: 1; }
+  .pf-clear { font-size: 10px; color: var(--gris3); background: none; border: none; cursor: pointer; margin-left: 4px; }
+  .pf-clear:hover { color: var(--rouge); }
+
   /* Modal config Albert */
   .modal-overlay {
     display: none;
@@ -380,7 +402,6 @@
     cursor:pointer;
   }
   .copilot-action:hover { border-color: var(--albert); color:var(--albert); background:var(--albert2); }
-  .copilot-action.active { background:#fef3c7; border-color:#f59e0b; color:#92400e; }
   @media (max-width: 760px) {
     .chat-header { padding: 10px 12px; }
     .chat-header-actions .albert-badge { display:none; }
@@ -762,6 +783,13 @@
       </div>
     </div>
 
+    <!-- ─── Barre de filtres persistants ─── -->
+    <div class="pf-bar empty" id="pf-bar">
+      <span class="pf-label">🔒 Filtres actifs</span>
+      <div id="pf-chips"></div>
+      <button class="pf-clear" onclick="clearAllPersistentFilters()">Tout effacer</button>
+    </div>
+
     <div class="chat-messages" id="chat-messages">
       <div class="empty-state" id="empty-state">
         <div class="es-icon">💬</div>
@@ -989,6 +1017,7 @@ let documents = [];        // {id, name, type, content, status}
 let gristRecords = [];
 let gristTableName = '';
 let chatHistory = [];
+let persistentFilters = []; // [{col, value, op, label}] — filtres épinglés actifs
 let albertConfig = {
   key: '',
   endpoint: 'https://app-6fb1a617-d3e3-4989-9dcb-b396964f246e.cleverapps.io/v1/chat/completions',
@@ -1053,7 +1082,8 @@ function createEmptySession(title) {
     messages: [],            // {type:'text'|'html'|'infographic', role?, text?, html?, title?, spec?, themeId?}
     chatHistoryData: [],     // copie de chatHistory (contexte texte envoyé à Albert)
     dataEngineState: { lastPlan: null, lastExecution: null },
-    dataBlocks: []           // [{id, title, question, dataContext}] — blocs réutilisables dans le compositeur
+    dataBlocks: [],          // [{id, title, question, dataContext}] — blocs réutilisables dans le compositeur
+    persistentFilters: []    // [{col, value, op, label}] — filtres épinglés de la session
   };
 }
 
@@ -1129,6 +1159,7 @@ async function persistSessions() {
   const current = getCurrentSession();
   if (current) current.chatHistoryData = (typeof chatHistory !== 'undefined') ? chatHistory.slice() : current.chatHistoryData;
   if (current) current.dataEngineState = captureDataEngineStateForSession();
+  if (current) current.persistentFilters = persistentFilters.slice();
 
   let payload;
   try {
@@ -1189,6 +1220,10 @@ function renderActiveSession() {
     chatHistory.length = 0;
     (session.chatHistoryData || []).forEach(m => chatHistory.push(m));
   }
+
+  // Restaure les filtres persistants de la session
+  persistentFilters = (session.persistentFilters || []).slice();
+  renderPersistentFiltersBar();
 
   const wrap = document.getElementById('chat-messages');
   if (wrap) wrap.innerHTML = '';
@@ -3298,17 +3333,62 @@ const INFOGRAPH_THEMES = [
 /* ── État du compositeur ── */
 let _icState = { blocks: [], theme: 'bordeaux', dragSrcIdx: null };
 
+function _shortFilterValue(f) {
+  const col = normalizeText(f.col || '');
+  const v = String(f.value || '');
+  if (/basque/.test(col) && /oui/i.test(v)) return 'basques';
+  if (/boursier/.test(col) && /boursier des lyc/i.test(v)) return 'boursiers';
+  if (/boursier/.test(col) && /non/i.test(v)) return 'non-boursiers';
+  if (/boursier/.test(col)) return 'boursiers';
+  if (/cpge|cpes/i.test(v)) return 'CPGE';
+  if (/\bbts\b|\bbtsa\b/i.test(v)) return 'BTS';
+  if (/\bdut\b|\bbut\b/i.test(v)) return 'DUT';
+  if (/l1|cupge|deust/i.test(v)) return 'L1';
+  if (/ing[eé]nieur/i.test(v)) return 'Ingénieurs';
+  if (/sanitaire|social/i.test(v)) return 'Sanitaire-social';
+  if (/commerce/i.test(v)) return 'Commerce';
+  return v.length > 22 ? v.slice(0, 21) + '…' : v;
+}
+
+function _shortColName(col) {
+  return (col || '')
+    .replace(/grands?\s+groupes?\s+de\s+formation[^|]*/i, 'Grands groupes')
+    .replace(/acad[eé]mie.*accueil.*/i, 'Académies')
+    .replace(/s[eé]rie de la classe/i, 'Séries')
+    .replace(/sp[eé]cialit[eé]\s*\/\s*mention.*/i, 'Spécialité')
+    .replace(/\s+d['']accueil accept[eé]e?/i, '')
+    .replace(/\s+de l'[eé]tablissement[^|]*/i, '')
+    .trim();
+}
+
 function extractBlockTitle(exec, question) {
   if (!exec) return question || 'Résultat';
   const tool = exec.plan?.tool || '';
-  const col = exec.plan?.targetCol || '';
-  const filt = (exec.plan?.filters?.length || exec.plan?.groupFilters?.length) ? ' · filtré' : '';
+  const col  = exec.plan?.targetCol || '';
+  const col2 = exec.plan?.targetCol2 || '';
+  const filters = exec.plan?.filters || [];
+
+  // Résumé court des filtres (valeurs, pas noms de colonnes)
+  const fSummary = filters.slice(0, 3).map(_shortFilterValue).join(' · ');
+  const fPart = fSummary ? ` — ${fSummary}` : '';
+
   if (tool === 'count_rows') {
     const count = exec.result?.count ?? '';
-    return `Comptage${filt} · ${Number(count).toLocaleString('fr-FR')} ligne${count > 1 ? 's' : ''}`;
+    const n = Number(count).toLocaleString('fr-FR');
+    return `${n} candidat${count > 1 ? 's' : ''}${fPart}`;
   }
-  if (tool === 'compare') return `Comparaison${filt}`;
-  if (col) return `Répartition par ${col}${filt}`;
+  if (tool === 'compare') {
+    const groups = (exec.plan?.compareGroups || []).map(g => g.label || '').filter(Boolean).join(' vs ');
+    return groups ? `Comparaison : ${groups}` : `Comparaison${fPart}`;
+  }
+  if (tool === 'pivot') {
+    return `${_shortColName(col)} × ${_shortColName(col2)}${fPart}`;
+  }
+  if (col) {
+    const total = exec.result?.total;
+    const n = total ? ` (${Number(total).toLocaleString('fr-FR')})` : '';
+    return `${_shortColName(col)}${n}${fPart}`;
+  }
   return question || 'Résultat Data Engine';
 }
 
@@ -3557,6 +3637,32 @@ function improveInfographicSpec(spec, question) {
   }
 
   spec.sections = sections.slice(0, 8);
+
+  // 5) Filtre les métriques hero sans valeur réelle
+  spec.metrics = (Array.isArray(spec.metrics) ? spec.metrics : [])
+    .filter(m => String(m.value || '').trim().length > 0 && String(m.label || '').trim().length > 0)
+    .slice(0, 6);
+
+  // 6) Filtre les sections structurellement vides (items vides, texte vide, etc.)
+  spec.sections = spec.sections.filter(sec => {
+    const type = sec.type || 'text';
+    const items = sec.items || sec.data || sec.insights || sec.metrics || [];
+    if (type === 'kpi_grid') return Array.isArray(items) && items.length > 0;
+    if (type === 'ranking' || type === 'bars') return Array.isArray(items) && items.some(it => String(it.label || it.name || '').trim());
+    if (type === 'comparison') return Array.isArray(items) && items.some(it => String(it.label || '').trim());
+    if (type === 'stacked') {
+      const groups = sec.groups || items;
+      return Array.isArray(groups) && groups.some(g => Array.isArray(g.segments) && g.segments.length > 0);
+    }
+    if (type === 'insights') {
+      return Array.isArray(items) && items.some(it => String(it.text || it.detail || '').trim().length > 5 || String(it.title || '').trim().length > 3);
+    }
+    if (type === 'table') return Array.isArray(sec.headers) && sec.headers.length > 0 && Array.isArray(sec.rows) && sec.rows.length > 0;
+    if (type === 'cascade') return Array.isArray(sec.nodes || sec.items || []) && (sec.nodes || sec.items || []).length > 0;
+    // text / other
+    return String(sec.text || sec.description || '').trim().length > 5;
+  });
+
   return spec;
 }
 
@@ -3721,6 +3827,8 @@ function renderSection(section, idx) {
   else if (type === 'cascade') body = renderCascade(section);
   else if (type === 'table') body = renderTable(section.headers, section.rows);
   else body = `<p class="section-text">${escapeHtml(section.text || section.description || '')}</p>`;
+  if (!body && type !== 'text') return '';
+  if (!body.trim()) return '';
   const note = section.note ? `<p class="section-note">${escapeHtml(section.note)}</p>` : '';
   return `<section class="info-section type-${escapeHtml(type)}">
     <div class="section-headline"><div><div class="section-kicker">${escapeHtml(kicker)}</div><h2>${escapeHtml(title)}</h2></div>${scope ? `<div class="scope-badge">${escapeHtml(scope)}</div>` : ''}</div>
@@ -3989,7 +4097,8 @@ async function sendMessage() {
   addLoadingMessage(loadingId);
 
   const filterContextText = [...chatHistory.slice(-4).map(m => m.content), question].join('\n');
-  const dataPlan = detectDataEnginePlan(question, filterContextText);
+  let dataPlan = detectDataEnginePlan(question, filterContextText);
+  if (dataPlan) dataPlan = injectPersistentFilters(dataPlan);
   const dataExecution = dataPlan ? runDataEnginePlan(dataPlan) : null;
   const localAnalysis = executeLocalDataQuery(question, filterContextText);
 
@@ -4149,11 +4258,74 @@ function buildCopilotActionBar(bubble) {
     input.value = 'Compare les boursiers et les non-boursiers';
     input.focus();
   }));
-  bar.appendChild(mk('📌 Épingler', 'Épingler localement cette réponse', (btn) => {
-    btn.classList.toggle('active');
-    btn.textContent = btn.classList.contains('active') ? '📌 Épinglé' : '📌 Épingler';
+  // Bouton épingler les filtres du résultat courant
+  bar.appendChild(mk('📌 Filtres', 'Épingler les filtres de ce résultat pour toutes les prochaines questions', () => {
+    const state = (typeof getDataEngineState === 'function') ? getDataEngineState() : null;
+    const filters = state?.lastExecution?.plan?.filters || state?.lastPlan?.filters || [];
+    if (!filters.length) { alert('Aucun filtre à épingler sur ce résultat.'); return; }
+    filters.forEach(f => {
+      const label = `${f.col.replace(/ d[''].*$/i,'').replace(/Grands groupes.*/i,'Grands groupes').trim()} = ${f.value}`;
+      addPersistentFilter(f.col, f.value, f.op || 'eq', label);
+    });
   }));
   return bar;
+}
+
+/* ══════════════════ FILTRES PERSISTANTS ══════════════════
+   Un filtre persistant est un {col, value, op, label} épinglé par
+   l'utilisateur. Il est injecté dans chaque plan Data Engine (via
+   mergeFiltersUnique) et affiché dans la barre sous le header.
+   Il ne modifie pas le texte de la question et ne touche pas à
+   l'historique de conversation — uniquement le plan structuré.   */
+
+function renderPersistentFiltersBar() {
+  const bar = document.getElementById('pf-bar');
+  const chips = document.getElementById('pf-chips');
+  if (!bar || !chips) return;
+  if (!persistentFilters.length) { bar.classList.add('empty'); chips.innerHTML = ''; return; }
+  bar.classList.remove('empty');
+  chips.innerHTML = persistentFilters.map((f, i) =>
+    `<span class="pf-chip">🔒 ${escapeHtml(f.label || f.value)}
+      <button onclick="removePersistentFilter(${i})" title="Supprimer ce filtre">×</button>
+    </span>`
+  ).join('');
+}
+
+function addPersistentFilter(col, value, op = 'eq', label = null) {
+  const key = `${col}::${op}::${String(value)}`;
+  if (persistentFilters.some(f => `${f.col}::${f.op || 'eq'}::${String(f.value)}` === key)) return;
+  persistentFilters.push({ col, value, op: op || 'eq', label: label || value });
+  renderPersistentFiltersBar();
+  scheduleSessionsSave();
+}
+window.addPersistentFilter = addPersistentFilter;
+
+function removePersistentFilter(idx) {
+  persistentFilters.splice(idx, 1);
+  renderPersistentFiltersBar();
+  scheduleSessionsSave();
+}
+window.removePersistentFilter = removePersistentFilter;
+
+function clearAllPersistentFilters() {
+  persistentFilters = [];
+  renderPersistentFiltersBar();
+  scheduleSessionsSave();
+}
+window.clearAllPersistentFilters = clearAllPersistentFilters;
+
+// Injecte les filtres persistants dans un plan Data Engine après détection
+function injectPersistentFilters(plan) {
+  if (!plan || !persistentFilters.length) return plan;
+  if (plan.tool === 'chart_current' || plan.tool === 'export_current_excel' || plan.tool === 'export_current_csv') return plan;
+  if (typeof mergeFiltersUnique === 'function') {
+    plan.filters = mergeFiltersUnique(persistentFilters, plan.filters || []);
+  } else {
+    // fallback si mergeFiltersUnique non dispo
+    const existing = new Set((plan.filters || []).map(f => `${f.col}::${f.op||'eq'}::${f.value}`));
+    persistentFilters.forEach(f => { if (!existing.has(`${f.col}::${f.op||'eq'}::${f.value}`)) plan.filters.push(f); });
+  }
+  return plan;
 }
 
 function openSourcesPanel() { document.body.classList.add('sources-open'); }
