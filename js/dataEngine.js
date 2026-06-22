@@ -65,6 +65,22 @@ function resetCopilotDialogue() {
   if (typeof renderSuggestions === 'function') renderSuggestions();
   if (typeof updateChatSub === 'function') updateChatSub();
   if (typeof updateSourceHub === 'function') updateSourceHub();
+
+  // Reset des filtres persistants
+  if (typeof clearAllPersistentFilters === 'function') clearAllPersistentFilters();
+
+  // Vide la session courante en mémoire ET en stockage, pour qu'un
+  // changement de session puis retour ne restaure pas les anciens messages.
+  const _sess = (typeof getCurrentSession === 'function') ? getCurrentSession() : null;
+  if (_sess) {
+    _sess.messages = [];
+    _sess.chatHistoryData = [];
+    _sess.dataEngineState = { lastPlan: null, lastExecution: null };
+    _sess.dataBlocks = [];
+    _sess.persistentFilters = [];
+    _sess.title = 'Nouvelle session';
+    if (typeof scheduleSessionsSave === 'function') scheduleSessionsSave();
+  }
 }
 window.resetCopilotDialogue = resetCopilotDialogue;
 
