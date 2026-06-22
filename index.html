@@ -4165,16 +4165,10 @@ async function sendMessage() {
 
   const filterContextText = [...chatHistory.slice(-4).map(m => m.content), question].join('\n');
   let dataPlan = detectDataEnginePlan(question, filterContextText);
-  // Injection des filtres persistants directement dans le plan (inline, sans dépendance externe)
-  if (dataPlan && persistentFilters.length &&
-      dataPlan.tool !== 'chart_current' &&
-      dataPlan.tool !== 'export_current_excel' &&
-      dataPlan.tool !== 'export_current_csv') {
-    const existing = new Set((dataPlan.filters || []).map(f => `${f.col}||${f.op||'eq'}||${String(f.value)}`));
-    const toAdd = persistentFilters.filter(f => !existing.has(`${f.col}||${f.op||'eq'}||${String(f.value)}`));
-    if (toAdd.length) dataPlan.filters = [...(dataPlan.filters || []), ...toAdd];
-  }
-  const dataExecution = dataPlan ? runDataEnginePlan(dataPlan) : null;
+  // Les filtres persistants sont injectes dans runDataEnginePlan (dataEngine.js)
+  // APRES finalSanitizeAnalysisPlan, qui les efface sinon. On passe persistentFilters
+  // en second argument pour que runDataEnginePlan puisse les reappliquer.
+  const dataExecution = dataPlan ? runDataEnginePlan(dataPlan, persistentFilters) : null;
   // Injection des filtres persistants dans executeLocalDataQuery (branche Albert) :
   // on passe les filtres comme suffixe de filterContextText pour que detectFilters
   // ne les recalcule pas, et on les ajoute directement via un wrapper.
