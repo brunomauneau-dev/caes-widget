@@ -263,7 +263,7 @@
     if (k === 'bac_series' && /(bac|serie|série|voie|general|generale|professionnel|technologique|techno|stmg|sti2d|std2a)/.test(q)) s += 95;
     if (k === 'boursier' && /(boursier|boursiers|bourse|crous)/.test(q)) s += 140;
     if (k === 'formation' && /(formation|but|dut|bts|licence|cpge|prepa|iut|filiere|sp[eé]cialit[eé]|mention)/.test(q)) s += 85;
-    if (k === 'academie' && /(academie|académie|hors bordeaux|bordeaux|toulouse|poitiers|limoges)/.test(q)) s += 80;
+    if (k === 'academie' && /(academie|académie|academique|hors bordeaux|bordeaux|toulouse|poitiers|limoges)/.test(q)) s += 80;
     if (k === 'admission' && /(admis|admission|accept|favorable|proposition acceptee|réponse favorable|reponse favorable)/.test(q)) s += 80;
     if (k === 'apprentissage' && /(apprenti|apprentissage)/.test(q)) s += 80;
     if (k === 'sexe' && /(sexe|homme|femme|masculin|feminin|féminin)/.test(q)) s += 60;
@@ -299,7 +299,7 @@
     if (k === 'apprentissage') return /apprenti|apprentissage|alternance/.test(q);
     if (k === 'bac_series') return /(bac|serie|série|voie|general|generale|professionnel|technologique|techno|stmg|sti2d|std2a|stl|st2s|stav|s2tmd)/.test(q);
     if (k === 'formation') return /(formation|but|dut|bts|licence|cpge|prepa|pr[eé]pa|iut|filiere|filière|sp[eé]cialit[eé]|mention)/.test(q);
-    if (k === 'academie') return /academie|académie|bordeaux|toulouse|poitiers|limoges/.test(q);
+    if (k === 'academie') return /academie|académie|academique|bordeaux|toulouse|poitiers|limoges/.test(q);
     if (k === 'departement') return /departement|département|gironde|landes|pyrenees|pyrénées/.test(q);
     if (k === 'commune') return /commune|ville/.test(q);
     if (k === 'sexe') return /sexe|homme|femme|masculin|feminin|féminin|fille|garcon|garçon/.test(q);
@@ -547,7 +547,7 @@
         const ctoks = tokens(e.column);
         phraseTokens.forEach(t => { if (ctoks.includes(t) || e.norm.includes(t)) s += 28; });
 
-        if (/academie/.test(ph) && e.kind === 'academie') s += e.role.accueil ? 140 : 45;
+        if (/academie|academique/.test(ph) && e.kind === 'academie') s += e.role.accueil ? 140 : 45;
         if (/serie|bac/.test(ph) && e.kind === 'bac_series') s += 140;
         if (/formation|filiere|specialite|mention|groupe|but|dut|bts|licence|cpge/.test(ph) && e.kind === 'formation') s += 125;
         if (/etablissement|universite|lycee|cfa|iut/.test(ph) && e.kind === 'etablissement') s += e.role.accueil ? 180 : 105;

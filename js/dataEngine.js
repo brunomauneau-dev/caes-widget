@@ -403,9 +403,17 @@ function inferMeasureIntent(question) {
   }
   if (/croise|crois[eé]|tableau crois[eé]|pivot|par .* par /.test(q)) return 'pivot';
   // Détection naturelle du croisement : deux dimensions distinctes mentionnées
-  const _hasFormation = /formation|fili[eè]re|sp[eé]cialit[eé]|bts|but|licence|cpge|pr[eé]pa|dut|l1|grands?\s*groupe/.test(q);
-  const _hasAcademie = /acad[eé]mie/.test(q);
-  if (_hasFormation && _hasAcademie) return 'pivot';
+  // Détection croisement précise : seulement quand les deux dimensions sont explicitement
+  // des cibles d'analyse (pas quand l'une est un filtre type "parmi les CPGE").
+  // Pattern valide : "répartition des formations par académie", "croise académie et formation"
+  const _pivotByPar = q.match(/(?:r[eé]partition|distribution)\s+(?:des?|du|d[''´]|la|le)\s+(.+?)\s+par\s+([a-z\s]{3,40})(?:\s|$)/);
+  if (_pivotByPar) {
+    const _isF = s => /formation|fili[eè]re|sp[eé]cialit[eé]|bts|but|licence|cpge|pr[eé]pa|dut|l1|grands?\s*groupe/.test(s);
+    const _isA = s => /acad[eé]mi/.test(s);
+    const _isS = s => /s[eé]rie|bac|type\s+bac/.test(s);
+    const d1 = _pivotByPar[1], d2 = _pivotByPar[2];
+    if ((_isF(d1) && _isA(d2)) || (_isA(d1) && _isF(d2)) || (_isF(d1) && _isS(d2)) || (_isS(d1) && _isF(d2))) return 'pivot';
+  }
   if (/moyen|moyenne|median|m[eé]diane|minimum|maximum|\bmin\b|\bmax\b/.test(q)) return 'stats';
   if (/top|classement|principales?|plus frequentes?|plus fréquentes?|les plus/.test(q)) return 'top';
   if (/repartition|r[eé]partition|ventilation|par |groupe|group[eé]|pourcentage|proportion/.test(q)) return 'group_by';

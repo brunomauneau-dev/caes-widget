@@ -393,11 +393,20 @@ function buildFallbackInfographicSpec(question, localAnalysis) {
   return { title: question || 'Infographie adaptive', subtitle: source, eyebrow: 'Infographie adaptive · Albert', metrics, sections };
 }
 
-function addInfographicMessage(html, title = 'Infographie adaptive générée') {
+function addInfographicMessage(html, title = 'Infographie adaptive générée', opts = {}) {
   const safeHtml = html || renderAdaptiveInfographicHtml(buildFallbackInfographicSpec(title), title);
   generatedInfographics.push(safeHtml);
   const blob = new Blob([safeHtml], { type: 'text/html;charset=utf-8' });
   const url = URL.createObjectURL(blob);
+  const specJson = opts.spec ? JSON.stringify(opts.spec) : null;
+  const activeTheme = opts.themeId || 'bordeaux';
+
+  const rethemeHtml = specJson ? `<div class="ic-retheme">${(typeof INFOGRAPH_THEMES !== 'undefined' ? INFOGRAPH_THEMES : []).map(t =>
+    `<button class="ic-retheme-btn${t.id === activeTheme ? ' ic-active' : ''}" onclick="rethemeInfographic(this,${escapeHtml(JSON.stringify(specJson))},'${t.id}')">
+      <span class="ic-theme-dot" style="background:${t.accent};width:9px;height:9px;border-radius:50%;display:inline-block"></span>${escapeHtml(t.label)}
+    </button>`).join('')}
+    <button class="ic-retheme-btn" onclick="openInfographicComposer()" title="Recomposer">✏️ Recomposer</button>
+  </div>` : '';
 
   const wrap = document.getElementById('chat-messages');
   const msg = document.createElement('div');
@@ -407,10 +416,10 @@ function addInfographicMessage(html, title = 'Infographie adaptive générée') 
   bubble.className = 'msg-bubble';
   bubble.innerHTML = `
     <h4>${escapeHtml(title)}</h4>
-    <p style="font-size:12px;color:var(--gris3);margin-bottom:10px">Infographie Parcoursup générée : le widget profile les colonnes Grist, Albert choisit la narration, puis le widget rend les composants HTML/CSS.</p>
-    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-      <a href="${url}" target="_blank" rel="noopener" style="background:var(--albert);color:white;text-decoration:none;padding:7px 10px;border-radius:6px;font-size:12px;font-weight:600">Ouvrir l'infographie</a>
-      <a href="${url}" download="infographie_adaptive_albert.html" style="background:var(--gris0);color:var(--texte);text-decoration:none;padding:7px 10px;border-radius:6px;border:1px solid var(--gris1);font-size:12px;font-weight:600">Télécharger le HTML</a>
+    ${rethemeHtml}
+    <div style="display:flex;gap:8px;margin:10px 0;flex-wrap:wrap">
+      <a data-infobtn href="${url}" target="_blank" rel="noopener" style="background:var(--albert);color:white;text-decoration:none;padding:7px 10px;border-radius:6px;font-size:12px;font-weight:600">Ouvrir l'infographie</a>
+      <a data-infobtn href="${url}" download="infographie_adaptive_albert.html" style="background:var(--gris0);color:var(--texte);text-decoration:none;padding:7px 10px;border-radius:6px;border:1px solid var(--gris1);font-size:12px;font-weight:600">Télécharger le HTML</a>
     </div>
     <iframe src="${url}" title="${escapeAttr(title)}" style="width:100%;height:560px;border:1px solid var(--gris1);border-radius:8px;background:white"></iframe>
   `;
@@ -418,6 +427,9 @@ function addInfographicMessage(html, title = 'Infographie adaptive générée') 
   wrap.appendChild(msg);
   wrap.scrollTop = wrap.scrollHeight;
   chatHistory.push({ role: 'assistant', content: `[Infographie adaptive générée : ${title}]` });
+  if (opts.record !== false && typeof recordSessionMessage === 'function') {
+    recordSessionMessage({ type: 'infographic', title, html: safeHtml, spec: opts.spec, themeId: activeTheme });
+  }
 }
 
 async function generateInfographicWithAlbert(question, localAnalysis) {
