@@ -280,85 +280,13 @@ function rememberDataEngineExecution(exec) {
   state.history = state.history.slice(-12);
 }
 
-// v27.5.3 — export PNG des graphiques (camembert + barres), JS natif, sans
-// dépendance externe. Le SVG exporté est mis en cache en mémoire (jamais inséré
-// dans le DOM visible), donc zéro impact sur le rendu HTML existant.
-window.__deChartSvgCache = window.__deChartSvgCache || {};
-
-function nextChartExportId() {
-  return 'de_chart_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-}
-
-function downloadDataEngineChartPng(chartId) {
-  const svgString = window.__deChartSvgCache[chartId];
-  if (!svgString) return;
-  const svgBlob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
-  const url = URL.createObjectURL(svgBlob);
-  const img = new Image();
-  img.onload = function () {
-    const scale = 2; // sur-échantillonnage pour une image nette
-    const canvas = document.createElement('canvas');
-    canvas.width = img.width * scale;
-    canvas.height = img.height * scale;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    URL.revokeObjectURL(url);
-    canvas.toBlob(function (blob) {
-      if (!blob) return;
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'graphique.png';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    }, 'image/png');
-  };
-  img.onerror = function () { URL.revokeObjectURL(url); };
-  img.src = url;
-}
-window.downloadDataEngineChartPng = downloadDataEngineChartPng;
-
-function deChartDownloadButtonHtml(chartId) {
-  return `<div style="margin-top:8px"><button type="button" onclick="downloadDataEngineChartPng('${chartId}')" style="font-size:11px;padding:4px 10px;border:1px solid var(--gris2,#e5e7eb);border-radius:6px;background:#fff;cursor:pointer;color:var(--gris6,#6b7280)">⬇️ Télécharger en image</button></div>`;
-}
-
-// v27.5.3 — SVG équivalent du graphique en barres, utilisé UNIQUEMENT pour
-// l'export PNG (couleurs en hexadécimal, pas de var(--xxx) : un SVG exporté via
-// blob n'a pas accès aux variables CSS de la page). Le rendu visuel HTML du
-// graphique en barres, lui, ne change pas.
-function buildBarChartSvgForExport(rows) {
-  const top = rows.slice(0, 12);
-  const max = Math.max(...top.map(r => r.count || 0), 1);
-  const padding = 14, rowHeight = 28, labelW = 210, countW = 80, barAreaW = 260;
-  const width = padding * 2 + labelW + barAreaW + countW;
-  const height = padding * 2 + top.length * rowHeight;
-  const rowsSvg = top.map((r, i) => {
-    const y = padding + i * rowHeight;
-    const barH = 14;
-    const barY = y + (rowHeight - barH) / 2;
-    const barW = Math.max(3, (r.count || 0) / max * barAreaW);
-    const label = String(r.value ?? '').length > 34 ? String(r.value).slice(0, 33) + '…' : String(r.value ?? '');
-    const countText = `${(r.count || 0).toLocaleString('fr-FR')}`;
-    return `<text x="${padding}" y="${y + rowHeight / 2 + 4}" font-size="12" font-family="Arial, sans-serif" fill="#111827">${escapeHtml(label)}</text>` +
-      `<rect x="${padding + labelW}" y="${barY}" width="${barAreaW}" height="${barH}" rx="6" fill="#f3f4f6"></rect>` +
-      `<rect x="${padding + labelW}" y="${barY}" width="${barW.toFixed(1)}" height="${barH}" rx="6" fill="#6d28d9"></rect>` +
-      `<text x="${padding + labelW + barAreaW + 10}" y="${y + rowHeight / 2 + 4}" font-size="12" font-weight="700" font-family="Arial, sans-serif" fill="#111827">${escapeHtml(countText)}</text>`;
-  }).join('');
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect x="0" y="0" width="${width}" height="${height}" fill="#ffffff"></rect>${rowsSvg}</svg>`;
-}
-
 function renderMiniBarChart(rows, total) {
   if (!rows || !rows.length) return '';
   const max = Math.max(...rows.map(r => r.count || 0), 1);
-  const chartId = nextChartExportId();
-  window.__deChartSvgCache[chartId] = buildBarChartSvgForExport(rows);
-  const bars = `<div style="margin:10px 0;display:grid;gap:6px;max-width:100%">${rows.slice(0,12).map(r => {
+  return `<div style="margin:10px 0;display:grid;gap:6px;max-width:560px">${rows.slice(0,12).map(r => {
     const w = Math.max(2, Math.round((r.count || 0) / max * 100));
-    return `<div style="display:grid;grid-template-columns:minmax(90px,180px) minmax(60px,1fr) auto;gap:8px;align-items:center"><div style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(r.value)}">${escapeHtml(r.value)}</div><div style="height:12px;background:var(--gris1);border-radius:6px;overflow:hidden"><div style="height:12px;width:${w}%;background:var(--albert);border-radius:6px"></div></div><div style="font-size:11px;font-weight:700">${(r.count || 0).toLocaleString('fr-FR')}</div></div>`;
+    return `<div style="display:grid;grid-template-columns:minmax(120px,220px) 1fr auto;gap:8px;align-items:center"><div style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(r.value)}">${escapeHtml(r.value)}</div><div style="height:12px;background:var(--gris1);border-radius:6px;overflow:hidden"><div style="height:12px;width:${w}%;background:var(--albert);border-radius:6px"></div></div><div style="font-size:11px;font-weight:700">${(r.count || 0).toLocaleString('fr-FR')}</div></div>`;
   }).join('')}</div>`;
-  return bars + deChartDownloadButtonHtml(chartId);
 }
 
 // v27.5.2 — rendu camembert en SVG inline (aucune dépendance externe).
@@ -391,16 +319,13 @@ function renderMiniPieChart(rows, total) {
     return { path, color, row, fraction };
   });
 
-  const svg = `<svg viewBox="0 0 180 180" width="180" height="180" style="flex:0 0 auto;width:100%;max-width:160px;height:auto;min-width:110px">${slices.map(s => s.path).join('')}</svg>`;
-  const legend = `<div style="display:grid;gap:5px;align-content:center;flex:1 1 160px;min-width:0">${slices.map(s => {
+  const svg = `<svg viewBox="0 0 180 180" width="180" height="180" style="flex:0 0 auto">${slices.map(s => s.path).join('')}</svg>`;
+  const legend = `<div style="display:grid;gap:5px;align-content:center">${slices.map(s => {
     const pct = (s.fraction * 100).toFixed(1).replace('.', ',');
-    return `<div style="display:flex;align-items:center;gap:7px;font-size:11px;flex-wrap:wrap"><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${s.color};flex:0 0 auto"></i><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1 1 auto;min-width:40px" title="${escapeHtml(s.row.value)}">${escapeHtml(s.row.value)}</span><strong style="flex:0 0 auto">${(s.row.count || 0).toLocaleString('fr-FR')} · ${pct} %</strong></div>`;
+    return `<div style="display:flex;align-items:center;gap:7px;font-size:11px"><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${s.color};flex:0 0 auto"></i><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px" title="${escapeHtml(s.row.value)}">${escapeHtml(s.row.value)}</span><strong style="margin-left:auto">${(s.row.count || 0).toLocaleString('fr-FR')} · ${pct} %</strong></div>`;
   }).join('')}</div>`;
 
-  const chartId = nextChartExportId();
-  window.__deChartSvgCache[chartId] = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" width="180" height="180"><rect x="0" y="0" width="180" height="180" fill="#ffffff"></rect>${slices.map(s => s.path).join('')}</svg>`;
-
-  return `<div style="margin:10px 0;max-width:100%"><div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;max-width:100%">${svg}${legend}</div>${deChartDownloadButtonHtml(chartId)}</div>`;
+  return `<div style="margin:10px 0;display:flex;gap:18px;flex-wrap:wrap;align-items:center">${svg}${legend}</div>`;
 }
 
 
@@ -461,6 +386,10 @@ function inferMeasureIntent(question) {
     return /\bcsv\b/.test(q) ? 'export_csv' : 'export_excel';
   }
   if (/croise|crois[eé]|tableau crois[eé]|pivot|par .* par /.test(q)) return 'pivot';
+  // Détection naturelle du croisement : deux dimensions distinctes mentionnées
+  const _hasFormation = /formation|fili[eè]re|sp[eé]cialit[eé]|bts|but|licence|cpge|pr[eé]pa|dut|l1|grands?\s*groupe/.test(q);
+  const _hasAcademie = /acad[eé]mie/.test(q);
+  if (_hasFormation && _hasAcademie) return 'pivot';
   if (/moyen|moyenne|median|m[eé]diane|minimum|maximum|\bmin\b|\bmax\b/.test(q)) return 'stats';
   if (/top|classement|principales?|plus frequentes?|plus fréquentes?|les plus/.test(q)) return 'top';
   if (/repartition|r[eé]partition|ventilation|par |groupe|group[eé]|pourcentage|proportion/.test(q)) return 'group_by';
@@ -738,14 +667,16 @@ function finalSanitizeAnalysisPlan(plan) {
         if (/^\d+(?:[,.]\d+)?$/.test(val) && !new RegExp(`(^|\\D)${String(f.value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\D|$)`).test(plan.question || '')) return false;
         return true;
       }
-      if (/commune/.test(cn) && !/commune|ville/.test(q)) return false;
-      if (/etablissement|établissement/.test(cn) && !/etablissement|établissement|iut|universit|lyc[eé]e|cfa/.test(q)) return false;
-      if (/acad[eé]mie/.test(cn) && !/acad[eé]mie|bordeaux|toulouse|poitiers|limoges|paris|hors|sauf/.test(q)) return false;
-      if (/boursier/.test(cn) && !/boursier|bourse/.test(q)) return false;
-      if (/pays.*basque|zone.*basque/.test(cn) && !/basque|pays basque/.test(q)) return false;
-      if (/s[eé]rie|classe|bac/.test(cn) && !/bac|s[eé]rie|general|professionnel|technologique|stmg|sti2d|st2s|stl|std2a|stav/.test(q)) return false;
-      if (/formation|groupe|sp[eé]cialit[eé]|mention/.test(cn) && !/formation|but|dut|bts|licence|cpge|prepa|fili[eè]re|sp[eé]cialit[eé]/.test(q)) return false;
-      return false;
+      // Pour chaque type de colonne : retourner true si le concept est dans la question,
+      // false sinon (fix v27.5.5 — le return false final supprimait les filtres valides)
+      if (/commune/.test(cn)) return /commune|ville/.test(q);
+      if (/etablissement|[eé]tablissement/.test(cn)) return /etablissement|[eé]tablissement|iut|universit|lyc[eé]e|cfa/.test(q);
+      if (/acad[eé]mie/.test(cn)) return /acad[eé]mie|bordeaux|toulouse|poitiers|limoges|paris|hors|sauf/.test(q);
+      if (/boursier/.test(cn)) return /boursier|bourse/.test(q);
+      if (/pays.*basque|zone.*basque/.test(cn)) return /basque|pays basque/.test(q);
+      if (/s[eé]rie|classe|bac/.test(cn)) return /bac|s[eé]rie|general|professionnel|technologique|stmg|sti2d|st2s|stl|std2a|stav/.test(q);
+      if (/formation|groupe|sp[eé]cialit[eé]|mention/.test(cn)) return /formation|but|dut|bts|licence|cpge|prepa|fili[eè]re|sp[eé]cialit[eé]/.test(q);
+      return false; // type de colonne non reconnu : exclure par défaut
     });
     plan.filters = mergeFiltersUnique(kept, strict);
     return plan;
@@ -1209,7 +1140,15 @@ function dataEngineResultToContext(exec) {
     out += `Répartition :\n${exec.result.rows.map(r => `- ${r.value}: ${r.count} (${r.pct.toFixed(1).replace('.', ',')} %)`).join('\n')}\n`;
   }
   if (exec.kind === 'pivot') {
-    out += `Tableau croisé : ${p.targetCol} × ${p.targetCol2}\nLignes retenues : ${exec.result.total}\n`;
+    out += `Tableau croisé : ${p.targetCol} (lignes) × ${p.targetCol2} (colonnes)\nLignes retenues : ${exec.result.total}\n`;
+    const r = exec.result;
+    if (r && r.colValues && r.matrix) {
+      out += `Colonnes : ${r.colValues.join(' | ')}\n`;
+      (r.matrix || []).slice(0, 12).forEach(row => {
+        const cells = row.cells.map((c, i) => `${r.colValues[i]}: ${c} (${r.total ? (c/r.total*100).toFixed(1) : '?'}%)`).filter((_,i) => row.cells[i] > 0).join(', ');
+        out += `- ${row.value} (total: ${row.total}) — ${cells}\n`;
+      });
+    }
   }
   if (exec.kind === 'stats') {
     out += `Colonne statistique : ${p.targetCol}\nValeurs numériques : ${exec.result.numericCount}/${exec.result.total}\nMoyenne : ${exec.result.avg} · Médiane : ${exec.result.median} · Min : ${exec.result.min} · Max : ${exec.result.max}\n`;
@@ -1234,9 +1173,15 @@ function renderDataEngineResultHtml(tool, plan, result) {
   }
   if (tool === 'pivot') {
     const cols = result.colValues || [];
-    const header = `<tr><th>${escapeHtml(plan.targetCol)}</th>${cols.map(c => `<th>${escapeHtml(c)}</th>`).join('')}<th>Total</th></tr>`;
-    const body = (result.matrix || []).map(r => `<tr><td>${escapeHtml(r.value)}</td>${r.cells.map(c => `<td style="text-align:right">${c.toLocaleString('fr-FR')}</td>`).join('')}<td style="text-align:right"><strong>${r.total.toLocaleString('fr-FR')}</strong></td></tr>`).join('');
-    return `<h4>Tableau croisé calculé localement</h4><p><strong>${result.total.toLocaleString('fr-FR')}</strong> lignes retenues. Croisement <strong>${escapeHtml(plan.targetCol)}</strong> × <strong>${escapeHtml(plan.targetCol2)}</strong>.</p><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px"><tbody>${header}${body}</tbody></table></div>${filtersHtml}${debug}`;
+    const total = result.total || 0;
+    const header = `<tr><th style="text-align:left">${escapeHtml(plan.targetCol)}</th>${cols.map(c => `<th style="text-align:right">${escapeHtml(c)}</th>`).join('')}<th style="text-align:right">Total</th><th style="text-align:right">% total</th></tr>`;
+    const body = (result.matrix || []).map(r => {
+      const pct = total ? (r.total / total * 100).toFixed(1).replace('.', ',') : '—';
+      return `<tr><td>${escapeHtml(r.value)}</td>${r.cells.map(c => `<td style="text-align:right">${c > 0 ? c.toLocaleString('fr-FR') : '<span style="color:var(--gris2)">—</span>'}</td>`).join('')}<td style="text-align:right"><strong>${r.total.toLocaleString('fr-FR')}</strong></td><td style="text-align:right">${pct} %</td></tr>`;
+    }).join('');
+    const colTotals = cols.map((_, i) => (result.matrix || []).reduce((s, r) => s + (r.cells[i] || 0), 0));
+    const foot = `<tr style="background:var(--gris0,#f8fafc);font-weight:700"><td>Total</td>${colTotals.map(t => `<td style="text-align:right">${t.toLocaleString('fr-FR')}</td>`).join('')}<td style="text-align:right">${total.toLocaleString('fr-FR')}</td><td></td></tr>`;
+    return `<h4>Tableau croisé calculé localement</h4><p><strong>${total.toLocaleString('fr-FR')}</strong> lignes retenues. Croisement <strong>${escapeHtml(plan.targetCol)}</strong> × <strong>${escapeHtml(plan.targetCol2)}</strong>.</p><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%"><thead>${header}</thead><tbody>${body}${foot}</tbody></table></div>${filtersHtml}${debug}`;
   }
   if (tool === 'stats') {
     const fmt = v => v === null || v === undefined ? '—' : Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 2 });
