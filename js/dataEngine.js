@@ -188,7 +188,11 @@ function strictFiltersFromQuestion(table, question) {
 
   if (/pays basque|basque/.test(q)) {
     const col = findColumnByConceptStrict(table, 'basque');
-    if (col) add(col, pickColumnValue(table, col, 'oui'), 'eq');
+    if (col) {
+      // "non basques", "hors pays basque", "hors zone basque", "sans les basques" → neq
+      const isNeg = /(non[- ]?basque|hors.*basque|hors zone|sauf.*basque|exclu.*basque|sans.*basque|autre.*basque)/.test(q);
+      add(col, pickColumnValue(table, col, 'oui'), isNeg ? 'neq' : 'eq');
+    }
   }
 
   if (/non[ -]?boursier|sans boursier|hors boursier|exclu.*boursier|en excluant.*boursier/.test(q)) {
