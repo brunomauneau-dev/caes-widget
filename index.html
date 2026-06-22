@@ -11,7 +11,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="js/planner.js?v=27.5.2"></script>
-<script src="js/dataEngine.js?v=27.5.4"></script>
+<script src="js/dataEngine.js?v=27.5.3"></script>
 <style>
   :root {
     --bleu:    #1a3a5c;
@@ -1181,8 +1181,15 @@ function switchToSession(id) {
   if (id === currentSessionId) { closeSessionsPanel(); return; }
   persistSessions();
   currentSessionId = id;
-  renderActiveSession();
-  closeSessionsPanel();
+  try {
+    renderActiveSession();
+  } catch(e) {
+    console.error('switchToSession: erreur pendant renderActiveSession', e);
+  } finally {
+    closeSessionsPanel();
+    const input = document.getElementById('chat-input');
+    if (input) setTimeout(() => input.focus(), 80);
+  }
 }
 window.switchToSession = switchToSession;
 
@@ -1191,9 +1198,16 @@ function createNewSession() {
   const s = createEmptySession();
   sessions.unshift(s);
   currentSessionId = s.id;
-  renderActiveSession();
-  closeSessionsPanel();
-  persistSessions();
+  try {
+    renderActiveSession();
+  } catch(e) {
+    console.error('createNewSession: erreur pendant renderActiveSession', e);
+  } finally {
+    closeSessionsPanel();
+    persistSessions();
+    const input = document.getElementById('chat-input');
+    if (input) setTimeout(() => input.focus(), 80);
+  }
 }
 window.createNewSession = createNewSession;
 
