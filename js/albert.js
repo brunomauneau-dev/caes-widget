@@ -685,87 +685,17 @@ ${context || "(Aucun document chargé)"}`;
   }
 }
 
-// Dernière question utilisateur — utilisée pour proposer des actions contextuelles
-// sur les réponses assistant, même quand le flux passe par une réponse locale.
-let lastUserQuestionForActions = '';
-
-function shouldShowAssistantActions(content) {
-  const text = String(content || '');
-  // Pas de barre d'action sur les erreurs techniques ni sur les messages vides.
-  if (!text.trim()) return false;
-  if (/Erreur de connexion|Erreur pendant la génération|Erreur API|color:var\(--rouge\)/i.test(text)) return false;
-  return true;
-}
-
-function buildAssistantActionBar(question) {
-  const q = escapeAttr(question || lastUserQuestionForActions || '');
-  return `
-    <div class="copilot-action-bar" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;padding-top:8px;border-top:1px solid rgba(0,0,0,.08)">
-      <button type="button" class="copilot-action-btn" style="font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid var(--gris2,#ddd);background:white;cursor:pointer" onclick="rerunAsInfographic(this)" data-question="${q}">🪄 Infographie</button>
-      <button type="button" class="copilot-action-btn" style="font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid var(--gris2,#ddd);background:white;cursor:pointer" onclick="copyAssistantMessage(this)">📋 Copier</button>
-      <button type="button" class="copilot-action-btn" style="font-size:12px;padding:5px 8px;border-radius:8px;border:1px solid var(--gris2,#ddd);background:white;cursor:pointer" onclick="downloadAssistantHtml(this)">💾 HTML</button>
-    </div>`;
-}
-
-function rerunAsInfographic(btn) {
-  const question = btn?.dataset?.question || lastUserQuestionForActions || '';
-  if (typeof openInfographicBrief === 'function') {
-    openInfographicBrief(question || 'Fais-moi une infographie adaptive sur ce jeu de données');
-    return;
-  }
-  const input = document.getElementById('chat-input');
-  if (!input) return;
-  input.value = question
-    ? `Fais-moi une infographie sur : ${question}`
-    : 'Fais-moi une infographie adaptive sur ce jeu de données';
-  sendMessage();
-}
-
-function copyAssistantMessage(btn) {
-  const bubble = btn?.closest('.msg-bubble');
-  if (!bubble) return;
-  const clone = bubble.cloneNode(true);
-  clone.querySelectorAll('.copilot-action-bar').forEach(el => el.remove());
-  const text = clone.innerText || clone.textContent || '';
-  navigator.clipboard.writeText(text).then(() => {
-    const old = btn.textContent;
-    btn.textContent = '✓ Copié';
-    setTimeout(() => btn.textContent = old, 1200);
-  });
-}
-
-function downloadAssistantHtml(btn) {
-  const bubble = btn?.closest('.msg-bubble');
-  if (!bubble) return;
-  const clone = bubble.cloneNode(true);
-  clone.querySelectorAll('.copilot-action-bar').forEach(el => el.remove());
-  const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>Réponse Albert</title></head><body>${clone.innerHTML}</body></html>`;
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `reponse-albert-${new Date().toISOString().slice(0,10)}.html`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
 function addMessage(role, content) {
   const wrap = document.getElementById('chat-messages');
   const msg = document.createElement('div');
   msg.className = 'msg ' + role;
   const bubble = document.createElement('div');
   bubble.className = 'msg-bubble';
-
   if (role === 'user') {
-    lastUserQuestionForActions = String(content || '');
     bubble.textContent = content;
   } else {
-    const actionBar = shouldShowAssistantActions(content) ? buildAssistantActionBar(lastUserQuestionForActions) : '';
-    bubble.innerHTML = String(content || '') + actionBar;
+    bubble.innerHTML = content;
   }
-
   msg.appendChild(bubble);
   wrap.appendChild(msg);
   wrap.scrollTop = wrap.scrollHeight;
