@@ -381,14 +381,6 @@
   }
   .copilot-action:hover { border-color: var(--albert); color:var(--albert); background:var(--albert2); }
   .copilot-action.active { background:#fef3c7; border-color:#f59e0b; color:#92400e; }
-  body.presentation-mode .chat-header,
-  body.presentation-mode .chat-input-zone,
-  body.presentation-mode .copilot-actions,
-  body.presentation-mode .source-backdrop { display:none !important; }
-  body.presentation-mode .chat-messages { padding: 28px max(28px, calc((100vw - 1120px)/2)); }
-  body.presentation-mode .msg.user { display:none; }
-  body.presentation-mode .msg.assistant { max-width: 1120px; }
-  body.presentation-mode .msg.assistant:not(:last-child) { display:none; }
   @media (max-width: 760px) {
     .chat-header { padding: 10px 12px; }
     .chat-header-actions .albert-badge { display:none; }
@@ -423,7 +415,6 @@
     display: none;
   }
   body.sessions-open .sessions-backdrop { display: block; }
-  body.presentation-mode .sessions-backdrop { display:none !important; }
   .sessions-header {
     background: var(--bleu);
     color: var(--blanc);
@@ -766,7 +757,6 @@
         <button class="header-action" onclick="openSessionsPanel()">🗂 <span class="label">Sessions</span></button>
         <button class="header-action primary" onclick="openSourcesPanel()">📂 <span class="label">Sources</span></button>
         <button class="header-action" onclick="resetCopilotDialogue()">↻ <span class="label">Reset</span></button>
-        <button class="header-action" onclick="togglePresentationMode()">🎥 <span class="label">Présentation</span></button>
         <div class="albert-badge"><div class="dot"></div>Albert API</div>
         <button class="gear-btn" onclick="openConfig()">⚙️</button>
       </div>
@@ -3312,9 +3302,11 @@ function extractBlockTitle(exec, question) {
   if (!exec) return question || 'Résultat';
   const tool = exec.plan?.tool || '';
   const col = exec.plan?.targetCol || '';
-  const total = exec.result?.total ?? exec.result?.count ?? '';
   const filt = (exec.plan?.filters?.length || exec.plan?.groupFilters?.length) ? ' · filtré' : '';
-  if (tool === 'count_rows') return `Comptage${filt} · ${Number(total).toLocaleString('fr-FR')} ligne${total > 1 ? 's' : ''}`;
+  if (tool === 'count_rows') {
+    const count = exec.result?.count ?? '';
+    return `Comptage${filt} · ${Number(count).toLocaleString('fr-FR')} ligne${count > 1 ? 's' : ''}`;
+  }
   if (tool === 'compare') return `Comparaison${filt}`;
   if (col) return `Répartition par ${col}${filt}`;
   return question || 'Résultat Data Engine';
@@ -3994,8 +3986,10 @@ async function sendMessage() {
     const deCtx = dataEngineResultToContext(dataExecution);
     chatHistory.push({ role: 'assistant', content: deCtx });
     // Enregistre le bloc pour le compositeur d'infographie
+    // (hors chart_current/export qui sont des vues d'un bloc existant)
+    const _skipTools = ['chart_current','export_excel','export_csv'];
     const s = getCurrentSession();
-    if (s && deCtx && deCtx.length > 20) {
+    if (s && deCtx && deCtx.length > 20 && !_skipTools.includes(dataExecution.plan?.tool)) {
       s.dataBlocks = s.dataBlocks || [];
       s.dataBlocks.push({ id: 'blk_' + Date.now(), title: extractBlockTitle(dataExecution, question), question, dataContext: deCtx });
       scheduleSessionsSave();
@@ -4073,6 +4067,16 @@ ${context || "(Aucun document chargé)"}`;
     chatHistory.push({ role: 'user', content: question });
     chatHistory.push({ role: 'assistant', content: answer });
 
+    // Enregistre la réponse Albert comme bloc composable (texte brut, HTML strippé)
+    const sAlbert = getCurrentSession();
+    if (sAlbert && answer && answer.length > 80) {
+      sAlbert.dataBlocks = sAlbert.dataBlocks || [];
+      const plainCtx = answer.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      const blkTitle = question.length > 64 ? question.slice(0, 63) + '…' : question;
+      sAlbert.dataBlocks.push({ id: 'blk_' + Date.now(), title: blkTitle, question, dataContext: plainCtx });
+      scheduleSessionsSave();
+    }
+
   } catch (e) {
     removeLoadingMessage(loadingId);
     const isNetworkError = /NetworkError|Failed to fetch|TypeError/i.test(e.message);
@@ -4137,10 +4141,8 @@ function buildCopilotActionBar(bubble) {
 
 function openSourcesPanel() { document.body.classList.add('sources-open'); }
 function closeSourcesPanel() { document.body.classList.remove('sources-open'); }
-function togglePresentationMode() { document.body.classList.toggle('presentation-mode'); }
 window.openSourcesPanel = openSourcesPanel;
 window.closeSourcesPanel = closeSourcesPanel;
-window.togglePresentationMode = togglePresentationMode;
 
 function addLoadingMessage(id) {
   const wrap = document.getElementById('chat-messages');
