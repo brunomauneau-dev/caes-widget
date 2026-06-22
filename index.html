@@ -11,7 +11,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="js/planner.js?v=27.5.2"></script>
-<script src="js/dataEngine.js?v=27.5.3"></script>
+<script src="js/dataEngine.js?v=27.5.5"></script>
 <style>
   :root {
     --bleu:    #1a3a5c;
@@ -3419,7 +3419,13 @@ Produis une SPECIFICATION JSON pour une infographie adaptive. Ne produis PAS de 
 Les couleurs DOIVENT être exactement : "accent":"${theme.accent}", "secondary":"${theme.secondary}".
 Schéma :
 {"title":"...","subtitle":"...","eyebrow":"...","accent":"${theme.accent}","secondary":"${theme.secondary}","metrics":[{"label":"...","value":"...","detail":"..."}],"narrative":["..."],"sections":[{"type":"ranking|bars|comparison|kpi_grid|insights|stacked","title":"...",...}],"footer":"..."}
-Règles : infographie narrative (fil conducteur clair), max 7 sections non redondantes, n'invente aucun chiffre, utilise seulement les données ci-dessous.
+Règles ABSOLUES :
+- Infographie narrative avec fil conducteur clair, max 7 sections non redondantes.
+- N'invente aucun chiffre. Utilise SEULEMENT les données fournies ci-dessous.
+- INTERDIT : champs vides (""), valeurs "...", titres génériques comme "À retenir" sans texte, cards insights sans contenu réel.
+- Chaque card insights DOIT avoir un champ "text" non vide (minimum 15 mots) avec une vraie analyse ou interprétation issue des données.
+- Si tu n'as pas assez de données pour remplir une section complètement, réduis le nombre d'items plutôt que de laisser des champs vides.
+- Toutes les sections doivent avoir uniquement des items avec titre ET texte/valeur réels.
 DONNÉES :\n${composerCtx}`;
   const resp = await fetch(albertConfig.endpoint, {
     method:'POST', headers:{'Content-Type':'application/json'},
@@ -3653,6 +3659,17 @@ function renderStacked(groups) {
 
 function renderInsights(items) {
   items = Array.isArray(items) ? items.slice(0, 8) : [];
+  // Filtre les cartes sans contenu réel (titre générique seul + texte vide)
+  items = items.filter(it => {
+    const hasText = String(it.text || it.detail || it.description || '').trim().length > 5;
+    const hasTitle = String(it.title || it.label || '').trim().length > 3;
+    return hasText || hasTitle;
+  }).filter(it => {
+    const text = String(it.text || it.detail || it.description || '').trim();
+    const title = String(it.title || it.label || '').trim().toLowerCase();
+    // Exclut les cartes purement génériques sans texte
+    return !(text.length === 0 && (title === 'à retenir' || title === 'insight' || title === ''));
+  });
   if (!items.length) return '';
   return `<div class="insight-grid">${items.map((it, i) => `
     <div class="insight-card">
