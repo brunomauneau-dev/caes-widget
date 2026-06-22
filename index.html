@@ -4083,6 +4083,73 @@ ${context || '(Aucun contexte disponible)'}`;
   return renderAdaptiveInfographicHtml(spec, question);
 }
 
+/* Wrapper autour de executeLocalDataQuery qui injecte les filtres persistants
+   dans le résultat brut. Cela garantit que la branche Albert reçoit un contexte
+   déjà filtré, même quand le Data Engine n'a pas détecté de plan valide. */
+function executeLocalDataQueryWithPersistentFilters(question, filterContextText) {
+  const base = executeLocalDataQuery(question, filterContextText);
+  if (!persistentFilters.length) return base;
+
+  // Ré-exécute la requête en forçant les filtres persistants en plus des filtres
+  // détectés naturellement par detectFilters.
+  const tablesToUse = getActiveQueryTables();
+  if (!tablesToUse.length) return base;
+
+  const questionNorm = normalizeText(question);
+  const filterContextNorm = normalizeText(filterContextText);
+
+  let best = null;
+  tablesToUse.forEach(table => {
+    if (!table.objects || !table.objects.length) return;
+    const targetCol = detectTargetColumn(table.headers, questionNorm);
+    if (!targetCol) return;
+    // Filtres naturels (depuis la question) + filtres persistants (épinglés)
+    const naturalFilters = detectFilters(table, filterContextNorm, targetCol);
+    const naturalKeys = new Set(naturalFilters.map(f => `${f.col}||${f.op||'eq'}||${String(f.value)}`));
+    const extraFilters = persistentFilters.filter(f => !naturalKeys.has(`${f.col}||${f.op||'eq'}||${String(f.value)}`));
+    const allFilters = [...naturalFilters, ...extraFilters];
+    const sourceBoost = table.source === 'Grist' ? 1000 : 0;
+    const score = sourceBoost + allFilters.length * 10 + (normalizeText(targetCol).includes('accueil') ? 4 : 0) + table.objects.length / 100000;
+    if (!best || score > best.score) best = { table, targetCol, filters: allFilters, score };
+  });
+
+  if (!best) return base;
+
+  // Si les filtres persistants n'ajoutent rien (déjà couverts), retourner le résultat de base
+  const baseFilterKeys = new Set((base?.filters || []).map(f => `${f.col}||${f.op||'eq'}||${String(f.value)}`));
+  const persistentAdded = persistentFilters.some(f => !baseFilterKeys.has(`${f.col}||${f.op||'eq'}||${String(f.value)}`));
+  if (!persistentAdded) return base;
+
+  const filteredRows = best.table.objects.filter(row =>
+    best.filters.every(f => rowMatchesFilter(row, f))
+  );
+  if (!filteredRows.length) return {
+    title: 'Requête locale Excel exécutée — aucun résultat',
+    text: `Aucune ligne ne correspond aux filtres détectés.\nFiltres : ${best.filters.map(f => `${f.col} ${f.op === 'neq' ? '≠' : '='} "${f.value}"`).join(' ; ') || '(aucun)'}`,
+    html: `<h4>Calcul local Excel</h4><p>Aucune ligne ne correspond aux filtres détectés.</p>`
+  };
+
+  const counts = new Map();
+  let filled = 0;
+  filteredRows.forEach(row => {
+    const raw = row[best.targetCol];
+    if (raw === undefined || raw === null || String(raw).trim() === '') return;
+    filled++;
+    const key = String(raw).trim();
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  const rows = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'fr'))
+    .map(([value, count]) => ({ value, count, pct: filled ? count / filled * 100 : 0 }));
+
+  const lines = rows.map(r => `- ${r.value}: ${r.count} (${r.pct.toFixed(1).replace('.', ',')} %)`);
+  const filterLines = best.filters.map(f => `- ${f.col} ${f.op === 'neq' ? '≠' : '='} "${f.value}"`).join('\n') || '- Aucun filtre détecté';
+  const sourceLabel = best.table.source || 'Données';
+  const docLabel = best.table.docName ? `\nDocument : ${best.table.docName}` : '';
+  const text = `=== RÉSULTAT CALCULÉ LOCALEMENT SUR LES LIGNES ${sourceLabel.toUpperCase()} ===\nSource : ${sourceLabel}${docLabel}\nTable/feuille : ${best.table.name}\nFiltres appliqués :\n${filterLines}\nColonne de répartition : ${best.targetCol}\nLignes retenues : ${filteredRows.length}\nValeurs renseignées dans la colonne de répartition : ${filled}\n\nRépartition :\n${lines.join('\n')}`;
+  return { title: `Requête locale ${sourceLabel} exécutée`, text, rows, total: filteredRows.length, filled, filters: best.filters, targetCol: best.targetCol, question };
+}
+
 async function sendMessage() {
   const input = document.getElementById('chat-input');
   const question = input.value.trim();
@@ -4098,9 +4165,20 @@ async function sendMessage() {
 
   const filterContextText = [...chatHistory.slice(-4).map(m => m.content), question].join('\n');
   let dataPlan = detectDataEnginePlan(question, filterContextText);
-  if (dataPlan) dataPlan = injectPersistentFilters(dataPlan);
+  // Injection des filtres persistants directement dans le plan (inline, sans dépendance externe)
+  if (dataPlan && persistentFilters.length &&
+      dataPlan.tool !== 'chart_current' &&
+      dataPlan.tool !== 'export_current_excel' &&
+      dataPlan.tool !== 'export_current_csv') {
+    const existing = new Set((dataPlan.filters || []).map(f => `${f.col}||${f.op||'eq'}||${String(f.value)}`));
+    const toAdd = persistentFilters.filter(f => !existing.has(`${f.col}||${f.op||'eq'}||${String(f.value)}`));
+    if (toAdd.length) dataPlan.filters = [...(dataPlan.filters || []), ...toAdd];
+  }
   const dataExecution = dataPlan ? runDataEnginePlan(dataPlan) : null;
-  const localAnalysis = executeLocalDataQuery(question, filterContextText);
+  // Injection des filtres persistants dans executeLocalDataQuery (branche Albert) :
+  // on passe les filtres comme suffixe de filterContextText pour que detectFilters
+  // ne les recalcule pas, et on les ajoute directement via un wrapper.
+  const localAnalysis = executeLocalDataQueryWithPersistentFilters(question, filterContextText);
 
   // V27.5 — les actions sur un résultat existant (Graphique, Excel, CSV, etc.)
   // doivent rester 100 % locales. Albert ne doit jamais reprendre la main
