@@ -1004,15 +1004,16 @@ function renderCompareHtml(plan, result) {
 function runDataEnginePlan(plan, persistentFiltersOverride) {
   plan = finalSanitizeAnalysisPlan(plan);
   if (!plan || !plan.table) return null;
-  // Re-injection des filtres persistants APRES le sanitize qui les efface
-  // car il ne reconnait pas leur concept dans la question courante.
+  // Re-injection des filtres persistants APRES le sanitize.
+  // Comparaison par COLONNE uniquement (pas par {col,op,value}) pour éviter
+  // d'ajouter "Zone = oui" quand la question a explicitement posé "Zone ≠ oui".
   const _pf = persistentFiltersOverride || (typeof persistentFilters !== 'undefined' ? persistentFilters : []);
   if (_pf && _pf.length &&
       plan.tool !== 'chart_current' &&
       plan.tool !== 'export_current_excel' &&
       plan.tool !== 'export_current_csv') {
-    const existing = new Set((plan.filters || []).map(f => f.col + '||' + (f.op||'eq') + '||' + String(f.value)));
-    const toAdd = _pf.filter(f => !existing.has(f.col + '||' + (f.op||'eq') + '||' + String(f.value)));
+    const existingCols = new Set((plan.filters || []).map(f => f.col));
+    const toAdd = _pf.filter(f => !existingCols.has(f.col));
     if (toAdd.length) plan.filters = [...(plan.filters || []), ...toAdd];
   }
   if (plan.tool === 'compare') {

@@ -596,16 +596,6 @@ async function sendMessage() {
 
   const filterContextText = [...chatHistory.slice(-4).map(m => m.content), question].join('\n');
   let dataPlan = detectDataEnginePlan(question, filterContextText);
-  // Injection des filtres persistants : skip les colonnes déjà traitées par la question
-  // (ex: "non basques" → ne pas écraser le neq avec le persistent eq)
-  if (dataPlan && persistentFilters.length &&
-      dataPlan.tool !== 'chart_current' &&
-      dataPlan.tool !== 'export_current_excel' &&
-      dataPlan.tool !== 'export_current_csv') {
-    const pfColumnsAlready = new Set((dataPlan.filters || []).map(f => f.col));
-    const pfToAdd = persistentFilters.filter(f => !pfColumnsAlready.has(f.col));
-    if (pfToAdd.length) dataPlan.filters = [...(dataPlan.filters || []), ...pfToAdd];
-  }
   const dataExecution = dataPlan ? runDataEnginePlan(dataPlan) : null;
   const localAnalysis = executeLocalDataQuery(question, filterContextText);
 
