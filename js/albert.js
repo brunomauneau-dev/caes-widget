@@ -532,6 +532,7 @@ function renderSuggestions() {
 }
 renderSuggestions();
 updateSourceHub();
+if (typeof initSessions === 'function') initSessions();
 
 /* ═══════════════════════ CHAT ═══════════════════════ */
 function handleKeydown(e) {
