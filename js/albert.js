@@ -597,7 +597,7 @@ async function sendMessage() {
 
   const filterContextText = [...chatHistory.slice(-4).map(m => m.content), question].join('\n');
   let dataPlan = detectDataEnginePlan(question, filterContextText);
-  const dataExecution = dataPlan ? runDataEnginePlan(dataPlan) : null;
+  const dataExecution = dataPlan ? runDataEnginePlan(dataPlan, (typeof persistentFilters !== 'undefined' ? persistentFilters : [])) : null;
   const localAnalysis = executeLocalDataQuery(question, filterContextText);
 
   if (dataExecution && shouldAnswerLocallyWithoutAlbert(dataExecution) && !isInfographicRequest(question)) {
