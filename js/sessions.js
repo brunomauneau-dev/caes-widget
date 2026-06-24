@@ -426,7 +426,10 @@ function icToggleBlock(idx, checked) { if (_icState.blocks[idx]) { _icState.bloc
 // ── initSessions ──
 async function initSessions() {
   await loadSessionsFromStorage();
-  if (!sessions.length) sessions.push(createEmptySession('Session 1'));
+  if (!sessions.length) {
+    sessions.push(createEmptySession('Session 1'));
+    persistSessions(); // sauvegarde immédiate pour qu'elle survive un rechargement
+  }
   sessions.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
   currentSessionId = sessions[0].id;
   renderActiveSession();
