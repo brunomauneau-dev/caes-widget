@@ -548,8 +548,14 @@
         phraseTokens.forEach(t => { if (ctoks.includes(t) || e.norm.includes(t)) s += 28; });
 
         if (/academie|academique/.test(ph) && e.kind === 'academie') s += e.role.accueil ? 140 : 45;
-        if (/serie|bac/.test(ph) && e.kind === 'bac_series') s += 140;
-        if (/formation|filiere|specialite|mention|groupe|but|dut|bts|licence|cpge/.test(ph) && e.kind === 'formation') s += 125;
+        if (/serie|bac/.test(ph) && e.kind === 'bac_series') {
+          // Si "cpge/prépa" est dans la question, "série" désigne les mentions CPGE, pas la série de bac
+          s += /cpge|prepa|pr[eé]pa/.test(q) ? 30 : 140;
+        }
+        if (/formation|filiere|specialite|mention|groupe|but|dut|bts|licence|cpge/.test(ph) && e.kind === 'formation') {
+          // Boost supplémentaire si "série" est dans la phrase mais dans un contexte CPGE
+          s += (/serie/.test(ph) && /cpge|prepa|pr[eé]pa/.test(q)) ? 160 : 125;
+        }
         if (/etablissement|universite|lycee|cfa|iut/.test(ph) && e.kind === 'etablissement') s += e.role.accueil ? 180 : 105;
         if (/etablissement/.test(ph) && e.kind === 'academie') s -= 120;
         if (/departement/.test(ph) && e.kind === 'departement') s += 125;
@@ -574,7 +580,10 @@
     if (m) parts = [m[1], m[2]];
     else {
       // Fallback : utilise les deux concepts les plus explicitement nommés.
-      if (/serie|bac/.test(q)) parts.push('série de bac');
+      if (/serie|bac/.test(q)) {
+        // "séries cpge/prépa" = mentions de formation, pas série de baccalauréat
+        parts.push(/cpge|prepa|pr[eé]pa/.test(q) ? 'mention formation cpge' : 'série de bac');
+      }
       if (/academie/.test(q)) parts.push('académie accueil');
       if (/formation/.test(q)) parts.push('formation');
       if (/boursier/.test(q)) parts.push('boursier');
