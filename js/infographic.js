@@ -117,12 +117,25 @@ function improveInfographicSpec(spec, question) {
     }
     return sec;
   }).filter(sec => {
-    // Re-vérifie les sections ranking/bars/comparison après nettoyage
-    if (sec.type === 'ranking' || sec.type === 'bars')
-      return (sec.items || []).length > 0;
-    if (sec.type === 'comparison')
-      return (sec.items || []).some(it => it.label || it.left || it.right);
-    return true;
+    const type = sec.type || 'text';
+    const items = sec.items || sec.data || sec.insights || sec.metrics || [];
+    if (type === 'ranking' || type === 'bars')
+      return Array.isArray(items) && items.length > 0;
+    if (type === 'comparison')
+      // Un item comparison doit avoir des valeurs gauche ET droite, pas juste un label
+      return Array.isArray(items) && items.some(it => (it.left || it.right) && (it.left !== '/' && it.right !== '/'));
+    if (type === 'kpi_grid')
+      return Array.isArray(items) && items.length > 0;
+    if (type === 'stacked')
+      return Array.isArray(sec.groups || items) && (sec.groups || items).some(g => Array.isArray(g.segments) && g.segments.length > 0);
+    if (type === 'insights')
+      return Array.isArray(items) && items.some(it => String(it.text || it.detail || '').trim().length > 10);
+    if (type === 'text')
+      return String(sec.text || sec.description || '').trim().length > 10;
+    if (type === 'table')
+      return Array.isArray(sec.headers) && sec.headers.length > 0 && Array.isArray(sec.rows) && sec.rows.length > 0;
+    // cascade et autres : garder uniquement si title + données
+    return String(sec.title || '').trim().length > 2;
   });
   return spec;
 }
