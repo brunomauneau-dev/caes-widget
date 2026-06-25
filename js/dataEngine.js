@@ -222,7 +222,7 @@ function strictFiltersFromQuestion(table, question) {
 
   // Détection : établissement d'origine (venant de / provenant de / lycée X)
   // "venant du lycée Maine du Biran" → filtre sur colonne etablissement d'origine
-  const etablOriginePattern = /(?:venant\s+(?:du|de(?:\s+l[ae']?)?)|provenant\s+(?:du|de)|scolaris[eé][e]?\s+(?:au|[àa]))\s*(?:lyc[eé]e|[eé]tablissement)?\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']{2,45}?)(?:\s*[?!.]|$)/i;
+  const etablOriginePattern = /(?:venant\s+(?:du|de(?:\s+l[ae']?)?)|provenant\s+(?:du|de)|originaires?\s+(?:du|de)|issus?\s+(?:du|de)|qui\s+viennent\s+(?:du|de)|scolaris[eé]e?s?\s+(?:au|[àa]|en))\s*(?:lyc[eé]e|[eé]tablissement)?\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']{2,45}?)(?:\s*[?!.]|$)/i;
   const etablMatch = question.match(etablOriginePattern);
   if (etablMatch) {
     const name = etablMatch[1].trim();
@@ -745,7 +745,7 @@ function finalSanitizeAnalysisPlan(plan) {
     plan.filters = mergeFiltersUnique(kept, strict);
 
     // Avertissement : "venant du lycée X" sans filtre établissement résultant
-    const _etablOrigQ = /(venant\s+(?:du|de)|provenant\s+(?:du|de)|scolaris[eé][e]?\s+(?:au|[àa]))\s*(?:lyc[eé]e|[eé]tablissement)?\s*[a-zA-Z\u00C0-\u024F]/i;
+    const _etablOrigQ = /(venant\s+(?:du|de)|provenant\s+(?:du|de)|originaires?\s+(?:du|de)|issus?\s+(?:du|de)|qui\s+viennent\s+(?:du|de)|scolaris[eé]e?s?\s+(?:au|[àa]))\s*(?:lyc[eé]e|[eé]tablissement)?\s*[a-zA-Z\u00C0-\u024F]/i;
     if (_etablOrigQ.test(plan.question || '') && !plan.filters.some(f => /[eé]tablissement|lyc[eé]e/i.test(f.col) && /scolarit|origine|scolaire/i.test(f.col))) {
       plan._missingColWarning = "La colonne « établissement d'origine » (lycée du candidat) n'est pas disponible dans ce jeu de données. Ce type d'information figure dans certains exports Parcoursup mais pas dans celui-ci.";
     }
@@ -771,8 +771,15 @@ function finalSanitizeAnalysisPlan(plan) {
     return plan;
   }
 
+  // Chemin par défaut : fusionner les filtres stricts (établissement, boursier, basque…)
+  // sans quoi les questions comme "originaires du lycée X" n'appliquent aucun filtre.
+  if (strict.length > 0) {
+    plan.filters = mergeFiltersUnique(plan.filters || [], strict);
+    plan.mentionedCols = Array.from(new Set([...(plan.mentionedCols || []), ...strict.map(f => f.col)]));
+  }
+
   // Détection établissement d'origine non trouvé : "venant du lycée X" sans filtre correspondant
-  const _etablOrigQ = /(venant\s+(?:du|de)|provenant\s+(?:du|de)|scolaris[eé][e]?\s+(?:au|[àa]))\s*(?:lyc[eé]e|[eé]tablissement)?\s*[a-zA-Z\u00C0-\u024F]/i;
+  const _etablOrigQ = /(venant\s+(?:du|de)|provenant\s+(?:du|de)|originaires?\s+(?:du|de)|issus?\s+(?:du|de)|qui\s+viennent\s+(?:du|de)|scolaris[eé]e?s?\s+(?:au|[àa]))\s*(?:lyc[eé]e|[eé]tablissement)?\s*[a-zA-Z\u00C0-\u024F]/i;
   if (_etablOrigQ.test(plan.question || '') && !(plan.filters || []).some(f => /[eé]tablissement|lyc[eé]e/i.test(f.col) && /scolarit|origine|scolaire/i.test(f.col))) {
     plan._missingColWarning = "La colonne « établissement d'origine » (lycée du candidat) n'est pas disponible dans ce jeu de données. Ce type d'information figure dans certains exports Parcoursup mais pas dans celui-ci.";
   }
