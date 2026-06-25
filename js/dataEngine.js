@@ -161,6 +161,7 @@ function findColumnByConceptStrict(table, concept) {
     if (concept === 'academie_accueil' && /acad[eé]mie/.test(hn) && /accueil|accept/.test(hn)) score += 100;
     if (concept === 'serie' && /s[eé]rie.*classe|s[eé]rie.*bac/.test(hn)) score += 100;
     if (concept === 'formation_groupe' && /grands?.*groupes?.*formation|groupe.*formation/.test(hn)) score += 100;
+    if (concept === 'etablissement_origine' && /[eé]tablissement|lyc[eé]e/.test(hn) && /scolarit[eé]|origine|scolaire/.test(hn)) score += 100;
     return { h, score };
   }).filter(x => x.score > 0).sort((a,b)=>b.score-a.score);
   return scored[0]?.h || null;
@@ -215,11 +216,7 @@ function strictFiltersFromQuestion(table, question) {
   if (etablMatch) {
     const name = etablMatch[1].trim();
     // Cherche colonne d'origine (pas accueil)
-    const headers = table?.headers || [];
-    const origCol = headers.find(h => {
-      const hn = normalizeText(h);
-      return /etablissement|lycee/.test(hn) && /origine|scolarite|scolarité/.test(hn);
-    });
+    const origCol = findColumnByConceptStrict(table, 'etablissement_origine');
     if (origCol) {
       // Cherche la valeur exacte dans les données
       const vals = [...new Set((table?.objects || []).map(r => String(r[origCol] || '')).filter(Boolean))];
@@ -749,11 +746,14 @@ function finalSanitizeAnalysisPlan(plan) {
     return plan;
   }
 
+  // Détection établissement d'origine non trouvé : "venant du lycée X" sans filtre correspondant
+  const _etablOrigQ = /(venant\s+(?:du|de)|provenant\s+(?:du|de)|scolaris[eé][e]?\s+(?:au|[àa]))\s*(?:lyc[eé]e|[eé]tablissement)?\s*[A-Z\u00C0-\u00DC]/;
+  if (_etablOrigQ.test(plan.question || '') && !(plan.filters || []).some(f => /[eé]tablissement|lyc[eé]e/i.test(f.col) && /scolarit|origine|scolaire/i.test(f.col))) {
+    plan._missingColWarning = "La colonne « établissement d'origine » (lycée du candidat) n'est pas disponible dans ce jeu de données. Ce type d'information figure dans certains exports Parcoursup mais pas dans celui-ci.";
+  }
+
   return plan;
 }
-
-
-// V24 — comparaison de deux populations simples.
 function detectCompareGroups(table, question) {
   const q = normalizeText(question || '');
   const groups = [];
@@ -1221,11 +1221,14 @@ function renderDataEngineResultHtml(tool, plan, result) {
   const filtersHtml = (plan.filters || []).length
     ? `<ul>${plan.filters.map(f => `<li>${escapeHtml(f.col)} ${f.op === 'neq' ? '≠' : '='} <strong>${escapeHtml(f.value)}</strong></li>`).join('')}</ul>`
     : '<p>Aucun filtre appliqué.</p>';
+  const missingWarning = plan._missingColWarning
+    ? `<p style="color:var(--orange,#d97706);background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:8px 12px;font-size:12px;margin:8px 0">⚠️ ${escapeHtml(plan._missingColWarning)}</p>`
+    : '';
   const plannerDebug = typeof plannerPlanToDebugHtml === 'function' ? plannerPlanToDebugHtml(plan) : '';
   const debug = `<details class="msg-sources" open><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : ${escapeHtml(tool)}<br><strong>Source</strong> : ${escapeHtml(plan.table?.source || 'Données')} · ${escapeHtml(plan.table?.name || 'table')}<br><strong>Colonnes détectées</strong> : ${escapeHtml((plan.mentionedCols || []).join(' | ') || '—')}</div>${plannerDebug}</details>`;
   if (tool === 'count_rows') {
     const pct = result.total ? pctFr(result.count, result.total) : '—';
-    return `<h4>Résultat calculé localement</h4><p>Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ligne${result.count>1?'s':''} correspondant à la demande (${pct} du jeu de données).</p><p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
+    return `<h4>Résultat calculé localement</h4>${missingWarning}<p>Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ligne${result.count>1?'s':''} correspondant à la demande (${pct} du jeu de données).</p><p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
   }
   if (tool === 'group_by' || tool === 'top') {
     const rows = result.rows || [];
