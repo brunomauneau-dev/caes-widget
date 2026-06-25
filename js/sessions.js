@@ -426,10 +426,7 @@ function icToggleBlock(idx, checked) { if (_icState.blocks[idx]) { _icState.bloc
 // ── initSessions ──
 async function initSessions() {
   await loadSessionsFromStorage();
-  if (!sessions.length) {
-    sessions.push(createEmptySession('Session 1'));
-    persistSessions(); // sauvegarde immédiate pour qu'elle survive un rechargement
-  }
+  if (!sessions.length) sessions.push(createEmptySession('Session 1'));
   sessions.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
   currentSessionId = sessions[0].id;
   renderActiveSession();
@@ -470,9 +467,16 @@ function newSessionId() {
 
 
 // ── openInfographicComposer ──
-function openInfographicComposer() {
+function openInfographicComposer(targetUid = null) {
+  _icState.targetUid = targetUid || null;
   const session = getCurrentSession();
-  const blocks = (session?.dataBlocks || []).map(b => ({ ...b, checked: true }));
+  // Fusion des deux sources : blocs globaux (sûrs) + blocs de session
+  const globalBlocks = Array.isArray(window._copilotDataBlocks) ? window._copilotDataBlocks : [];
+  const sessionBlocks = session?.dataBlocks || [];
+  const seen = new Set();
+  const allBlocks = [...globalBlocks, ...sessionBlocks]
+    .filter(b => b && b.id && !seen.has(b.id) && seen.add(b.id));
+  const blocks = allBlocks.map(b => ({ ...b, checked: true }));
   if (!blocks.length) {
     alert('Aucun résultat Data Engine dans cette session.\nPosez d\'abord des questions d\'analyse (répartitions, comptages, comparaisons...).');
     return;
@@ -702,6 +706,7 @@ async function submitInfographicComposer() {
   const selected = _icState.blocks.filter(b => b.checked);
   if (!selected.length) return;
   const theme = INFOGRAPH_THEMES.find(t => t.id === _icState.theme) || INFOGRAPH_THEMES[0];
+  const targetUid = _icState.targetUid || null;
   closeInfographicComposer();
   const composerCtx = selected.map((b, i) => `[Analyse ${i + 1} — ${b.title}]\n${b.dataContext}`).join('\n\n---\n\n');
   const question = selected.map(b => b.title).join(', ');
@@ -710,7 +715,26 @@ async function submitInfographicComposer() {
   try {
     const { spec, html } = await _generateInfographicFromComposer(question, composerCtx, theme);
     removeLoadingMessage(loadingId);
-    addInfographicMessage(html, 'Infographie composée', { spec, themeId: theme.id });
+
+    if (targetUid) {
+      // Mise à jour de l'infographie existante (pas de nouveau message)
+      const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+      const newUrl = URL.createObjectURL(blob);
+      const frame    = document.getElementById(`ic-frame-${targetUid}`);
+      const openLink = document.getElementById(`ic-open-${targetUid}`);
+      const dlLink   = document.getElementById(`ic-dl-${targetUid}`);
+      if (frame)    frame.src    = newUrl;
+      if (openLink) openLink.href = newUrl;
+      if (dlLink)   dlLink.href   = newUrl;
+      // Mise à jour du spec stocké + éditeur de titres
+      if (window._infogSpecs) window._infogSpecs[targetUid] = { spec, themeId: theme.id };
+      const te = document.getElementById(`ic-te-${targetUid}`);
+      if (te && typeof _icBuildTitlesEditorHtml === 'function') {
+        te.innerHTML = _icBuildTitlesEditorHtml(spec, targetUid);
+      }
+    } else {
+      addInfographicMessage(html, 'Infographie composée', { spec, themeId: theme.id });
+    }
   } catch(e) {
     removeLoadingMessage(loadingId);
     addMessage('assistant', `<p style="color:var(--rouge)"><strong>Erreur pendant la génération</strong><br>${escapeHtml(e.message)}</p>`);

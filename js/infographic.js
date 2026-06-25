@@ -489,7 +489,7 @@ function addInfographicMessage(html, title = 'Infographie adaptive générée', 
             onclick="rethemeInfographic(this,${escapeHtml(JSON.stringify(specJson))},'${t.id}')">
             <span class="ic-theme-dot" style="background:${t.accent};width:9px;height:9px;border-radius:50%;display:inline-block"></span>${escapeHtml(t.label)}
           </button>`).join('')}
-        <button class="ic-retheme-btn" onclick="openInfographicComposer()" title="Recomposer">✏️ Recomposer</button>
+        <button class="ic-retheme-btn" onclick="openInfographicComposer(${uid})" title="Recomposer">✏️ Recomposer</button>
         <button class="ic-retheme-btn" onclick="icToggleTitlesEditor(${uid})" title="Modifier les titres">🖊 Titres</button>
       </div>
       <div id="ic-te-${uid}" style="display:none;border:1px solid var(--gris1);border-radius:8px;padding:10px;margin-bottom:8px;background:var(--gris0)">
