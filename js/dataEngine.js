@@ -86,7 +86,10 @@ window.resetCopilotDialogue = resetCopilotDialogue;
 
 function isFollowUpQuestion(question) {
   const q = normalizeText(question || '');
-  return !!getDataEngineState().lastPlan && /^(par|selon|uniquement|seulement|sauf|hors|avec|sans|graphique|camembert|histogramme|barres?|excel|csv|export|exporte|trie|tri|les boursiers|les non boursiers|visualis|repr[eé]sent|montre|dessine|trace)/.test(q);
+  return !!getDataEngineState().lastPlan && (
+    /^(par|selon|uniquement|seulement|sauf|hors|avec|sans|graphique|camembert|histogramme|barres?|excel|csv|export|exporte|trie|tri|les boursiers|les non boursiers|visualis|repr[eé]sent|montre|dessine|trace)/.test(q) ||
+    isFilterOnlyFollowUp(question)
+  );
 }
 
 function isChartRequest(question) {
@@ -142,13 +145,17 @@ function mergeFiltersUnique(base, extra) {
 function isExplicitFreshDataQuestion(question) {
   const q = normalizeText(question || '');
   if (!q) return false;
-  if (/^(combien|nombre|effectif|total|quelle est|quel est|moyenne|nombre moyen|top|classement|repartition|r[eé]partition|tableau crois[eé]|croise|pivot)/.test(q)) return true;
-  return false;
+  if (!/^(combien|nombre|effectif|total|quelle est|quel est|moyenne|nombre moyen|top|classement|repartition|r[eé]partition|tableau crois[eé]|croise|pivot)/.test(q)) return false;
+  // "combien sont-ils ?", "combien y en a-t-il ?" → pas de nouveau concept → follow-up pur
+  if (/^combien\s+(sont[- ]ils|y[- ]?a[- ]?t[- ]?il|en tout|au total|maintenant|cela|ca|ça)\s*\??$/.test(q)) return false;
+  return true;
 }
 
 function isFilterOnlyFollowUp(question) {
   const q = normalizeText(question || '').trim();
-  return /^(seulement|uniquement|avec|sans|sauf|hors|excluant|en excluant|les boursiers|les non boursiers|non boursiers|boursiers|et pour)/.test(q);
+  // Bare count follow-up : "combien sont-ils ?" / "combien y en a-t-il ?" — hérite du contexte
+  if (/^combien\s+(sont[- ]ils|y\s*(?:en\s+)?a[- ]?t[- ]?il|en tout|au total|maintenant|cela|ca|[cç]a)\s*\??$/.test(q)) return true;
+  return /^(seulement|uniquement|avec|sans|sauf|hors|excluant|en excluant|les boursiers|les non boursiers|non boursiers|boursiers|et pour|et les|et chez|parmi les|pour les|chez les|uniquement les|notamment les|en particulier|et chez|et parmi)/.test(q);
 }
 
 function findColumnByConceptStrict(table, concept) {
@@ -161,18 +168,17 @@ function findColumnByConceptStrict(table, concept) {
     if (concept === 'academie_accueil' && /acad[eé]mie/.test(hn) && /accueil|accept/.test(hn)) score += 100;
     if (concept === 'serie' && /s[eé]rie.*classe|s[eé]rie.*bac/.test(hn)) score += 100;
     if (concept === 'formation_groupe' && /grands?.*groupes?.*formation|groupe.*formation/.test(hn)) score += 100;
-    // Nouvelles colonnes du schéma Parcoursup SAIO Bordeaux
+    // Etablissement d'origine (scolarité) — priorité au champ nom direct
+    if (concept === 'etablissement_origine' && /[eé]tablissement|lyc[eé]e/.test(hn) && /scolarit[eé]|origine|scolaire/.test(hn)) {
+      score += 100;
+      if (!/d[eé]partement|commune|code|uai|minist[eè]re|type|contrat|rattachement/.test(hn)) score += 60;
+    }
     if (concept === 'etablissement_accueil' && /[eé]tablissement|lyc[eé]e/.test(hn) && /accueil|accept/.test(hn) && !/acad[eé]mie|commune|sp[eé]cialit[eé]|mention|groupe|formation/.test(hn)) score += 100;
     if (concept === 'commune_origine' && /commune/.test(hn) && /scolarit[eé]|origine/.test(hn)) score += 100;
     if (concept === 'commune_accueil' && /commune/.test(hn) && /accueil|accept/.test(hn)) score += 100;
     if (concept === 'departement_origine' && /d[eé]partement/.test(hn) && /scolarit[eé]|origine/.test(hn)) score += 100;
     if (concept === 'apprenti' && /apprenti/.test(hn)) score += 100;
     if (concept === 'nb_voeux' && /nb|nombre|total/.test(hn) && /v[oœ]ux|v[oœ]eu/.test(hn)) score += 100;
-    if (concept === 'etablissement_origine' && /[eé]tablissement|lyc[eé]e/.test(hn) && /scolarit[eé]|origine|scolaire/.test(hn)) {
-      score += 100;
-      // Bonus si c'est le champ nom (pas département, code UAI, commune, ministère, type, contrat)
-      if (!/d[eé]partement|commune|code|uai|minist[eè]re|type|contrat|rattachement/.test(hn)) score += 60;
-    }
     return { h, score };
   }).filter(x => x.score > 0).sort((a,b)=>b.score-a.score);
   return scored[0]?.h || null;
@@ -220,26 +226,17 @@ function strictFiltersFromQuestion(table, question) {
     if (col) add(col, 'Bordeaux', 'neq');
   }
 
-  // Détection : établissement d'origine (venant de / provenant de / lycée X)
-  // "venant du lycée Maine du Biran" → filtre sur colonne etablissement d'origine
-  const etablOriginePattern = /(?:venant\s+(?:du|de(?:\s+l[ae']?)?)|provenant\s+(?:du|de)|originaires?\s+(?:du|de)|issus?\s+(?:du|de)|qui\s+viennent\s+(?:du|de)|scolaris[eé]e?s?\s+(?:au|[àa]|en))\s*(?:lyc[eé]e|[eé]tablissement)?\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']{2,45}?)(?:\s*[?!.]|$)/i;
-  const etablMatch = question.match(etablOriginePattern);
-  if (etablMatch) {
-    const name = etablMatch[1].trim();
-    // Cherche colonne d'origine (pas accueil)
+  // Etablissement d'origine : "venant du/de", "issus du/de", "originaires du/de", "scolarisés au"
+  const _etablPattern = /(?:venant\s+(?:du|de(?:\s+l[ae']?)?)|provenant\s+(?:du|de)|originaires?\s+(?:du|de)|issus?\s+(?:du|de)|qui\s+viennent\s+(?:du|de)|scolaris[eé]e?s?\s+(?:au|[àa]))\s*(?:lyc[eé]e|[eé]tablissement)?\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']{2,45}?)(?:\s*[?!.]|$)/i;
+  const _etablMatch = (question || '').match(_etablPattern);
+  if (_etablMatch) {
+    const name = _etablMatch[1].trim();
     const origCol = findColumnByConceptStrict(table, 'etablissement_origine');
     if (origCol) {
-      // Correspondance par mots-clés significatifs (ignore du/de/le/la pour "Maine du Biran" ≈ "Maine de Biran")
-      const vals = [...new Set((table?.objects || []).map(r => String(r[origCol] || '')).filter(Boolean))];
-      const nameN = normalizeText(name);
-      const stopWords = new Set(['du','de','des','le','la','les','et','au','aux','en','un','une','a']);
-      const nameWords = nameN.split(/\s+/).filter(w => w.length > 2 && !stopWords.has(w));
-      const match = vals.find(v => {
-        const vn = normalizeText(v);
-        if (nameWords.length === 0) return false;
-        // Tous les mots significatifs du nom doivent apparaître dans la valeur
-        return nameWords.every(w => vn.includes(w));
-      });
+      const stopWords = new Set(['du','de','des','le','la','les','et','au','aux','en','lycee','etablissement']);
+      const nameWords = normalizeText(name).split(/\s+/).filter(w => w.length > 2 && !stopWords.has(w));
+      const vals = [...new Set((table.objects || []).map(r => String(r[origCol] ?? '')).filter(Boolean))];
+      const match = nameWords.length ? vals.find(v => nameWords.every(w => normalizeText(v).includes(w))) : null;
       if (match) add(origCol, match, 'eq');
     }
   }
@@ -308,11 +305,16 @@ function inheritConversationContext(plan, question) {
       plan.tool = 'group_by';
       if (!plan.targetCol && prev.targetCol) plan.targetCol = prev.targetCol;
     } else if (filterFollowUp) {
-      plan.tool = prev.tool || plan.tool;
-      if (prev.targetCol) plan.targetCol = prev.targetCol;
+      // Point 3 : si la question précédente était un group_by/compare/pivot,
+      // on force l'héritage de l'outil ET de la colonne cible — même si le
+      // planner a déduit count_rows pour la question courante.
+      const inheritTool = prev.tool || plan.tool;
+      plan.tool = inheritTool;
+      if (prev.targetCol)  plan.targetCol  = prev.targetCol;
       if (prev.targetCol2) plan.targetCol2 = prev.targetCol2;
-      if (prev.limit) plan.limit = prev.limit;
-      if (prev.mentionedCols && (!plan.mentionedCols || !plan.mentionedCols.length)) plan.mentionedCols = prev.mentionedCols;
+      if (prev.limit)      plan.limit      = prev.limit;
+      if (prev.mentionedCols && (!plan.mentionedCols || !plan.mentionedCols.length))
+        plan.mentionedCols = prev.mentionedCols;
     }
 
     if (isChartRequest(question)) {
@@ -431,7 +433,7 @@ function renderCompareCharts(plan, result) {
 function isDataEngineQuestion(question) {
   const q = normalizeText(question || '');
   if (!q) return false;
-  return /compare|comparaison|comparer|versus| vs |combien|nombre|effectif|compte|compter|repartition|r[eé]partition|ventilation|par |groupe|group[eé]|top|classement|principa|plus frequen|plus fréquent|croise|crois[eé]|tableau crois[eé]|pivot|moyen|moyenne|median|m[eé]diane|minimum|maximum|min|max|export|excel|csv|liste|filtre|graphique|graphe|diagramme|histogramme|camembert|barres?|boursier|basque|hors|sauf|seulement|uniquement|visualis|repr[eé]sent|montre-?moi|dessine|trace|issus?\s+d[ue']|originaires?\s+d[ue']|qui\s+viennent|scolaris[eé]e?s?\s+(?:au|[àa])|venant\s+(?:du|de)|provenant\s+(?:du|de)|sont\s+originaires/.test(q) || isFollowUpQuestion(question);
+  return /compare|comparaison|comparer|versus| vs |combien|nombre|effectif|compte|compter|repartition|r[eé]partition|ventilation|par |groupe|group[eé]|top|classement|principa|plus frequen|plus fréquent|croise|crois[eé]|tableau crois[eé]|pivot|moyen|moyenne|median|m[eé]diane|minimum|maximum|min|max|export|excel|csv|liste|filtre|graphique|graphe|diagramme|histogramme|camembert|barres?|boursier|basque|hors|sauf|seulement|uniquement|visualis|repr[eé]sent|montre-?moi|dessine|trace|issus?\s+d[ue]|originaires?|venant\s+d[ue]|provenant|scolaris|scolarit/.test(q) || isFollowUpQuestion(question);
 }
 
 function inferMeasureIntent(question) {
@@ -458,8 +460,14 @@ function inferMeasureIntent(question) {
   if (/top|classement|principales?|plus frequentes?|plus fréquentes?|les plus/.test(q)) return 'top';
   if (/repartition|r[eé]partition|ventilation|par |groupe|group[eé]|pourcentage|proportion/.test(q)) return 'group_by';
   if (/combien|nombre|effectif|compte|compter|total/.test(q)) return 'count_rows';
-  if (/issus?\s+d[ue']|originaires?\s+d[ue']|qui\s+viennent|scolaris[eé]e?s?\s+(?:au|[àa])|venant\s+(?:du|de)|provenant\s+(?:du|de)|sont\s+originaires/.test(q)) return 'count_rows';
   if (isFollowUpQuestion(question)) return getDataEngineState().lastPlan?.tool || 'count_rows';
+  // isFilterOnlyFollowUp couvre "et pour", "et les", "parmi les", etc. qui ne matchent
+  // pas isFollowUpQuestion (trop étroit) mais doivent hériter du tool précédent.
+  if (isFilterOnlyFollowUp(question) && getDataEngineState().lastPlan) {
+    return getDataEngineState().lastPlan.tool || 'count_rows';
+  }
+  // Requêtes d'établissement d'origine : count_rows avec filtre
+  if (/issus?\s+d[ue]|originaires?|venant\s+d[ue]|provenant|scolaris/.test(q)) return 'count_rows';
   return null;
 }
 
@@ -744,13 +752,6 @@ function finalSanitizeAnalysisPlan(plan) {
       return false; // type de colonne non reconnu : exclure par défaut
     });
     plan.filters = mergeFiltersUnique(kept, strict);
-
-    // Avertissement : "venant du lycée X" sans filtre établissement résultant
-    const _etablOrigQ = /(venant\s+(?:du|de)|provenant\s+(?:du|de)|originaires?\s+(?:du|de)|issus?\s+(?:du|de)|qui\s+viennent\s+(?:du|de)|scolaris[eé]e?s?\s+(?:au|[àa]))\s*(?:lyc[eé]e|[eé]tablissement)?\s*[a-zA-Z\u00C0-\u024F]/i;
-    if (_etablOrigQ.test(plan.question || '') && !plan.filters.some(f => /[eé]tablissement|lyc[eé]e/i.test(f.col) && /scolarit|origine|scolaire/i.test(f.col))) {
-      plan._missingColWarning = "La colonne « établissement d'origine » (lycée du candidat) n'est pas disponible dans ce jeu de données. Ce type d'information figure dans certains exports Parcoursup mais pas dans celui-ci.";
-    }
-
     return plan;
   }
 
@@ -772,21 +773,11 @@ function finalSanitizeAnalysisPlan(plan) {
     return plan;
   }
 
-  // Chemin par défaut : fusionner les filtres stricts (établissement, boursier, basque…)
-  // sans quoi les questions comme "originaires du lycée X" n'appliquent aucun filtre.
-  if (strict.length > 0) {
-    plan.filters = mergeFiltersUnique(plan.filters || [], strict);
-    plan.mentionedCols = Array.from(new Set([...(plan.mentionedCols || []), ...strict.map(f => f.col)]));
-  }
-
-  // Détection établissement d'origine non trouvé : "venant du lycée X" sans filtre correspondant
-  const _etablOrigQ = /(venant\s+(?:du|de)|provenant\s+(?:du|de)|originaires?\s+(?:du|de)|issus?\s+(?:du|de)|qui\s+viennent\s+(?:du|de)|scolaris[eé]e?s?\s+(?:au|[àa]))\s*(?:lyc[eé]e|[eé]tablissement)?\s*[a-zA-Z\u00C0-\u024F]/i;
-  if (_etablOrigQ.test(plan.question || '') && !(plan.filters || []).some(f => /[eé]tablissement|lyc[eé]e/i.test(f.col) && /scolarit|origine|scolaire/i.test(f.col))) {
-    plan._missingColWarning = "La colonne « établissement d'origine » (lycée du candidat) n'est pas disponible dans ce jeu de données. Ce type d'information figure dans certains exports Parcoursup mais pas dans celui-ci.";
-  }
-
   return plan;
 }
+
+
+// V24 — comparaison de deux populations simples.
 function detectCompareGroups(table, question) {
   const q = normalizeText(question || '');
   const groups = [];
@@ -1254,14 +1245,11 @@ function renderDataEngineResultHtml(tool, plan, result) {
   const filtersHtml = (plan.filters || []).length
     ? `<ul>${plan.filters.map(f => `<li>${escapeHtml(f.col)} ${f.op === 'neq' ? '≠' : '='} <strong>${escapeHtml(f.value)}</strong></li>`).join('')}</ul>`
     : '<p>Aucun filtre appliqué.</p>';
-  const missingWarning = plan._missingColWarning
-    ? `<p style="color:var(--orange,#d97706);background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:8px 12px;font-size:12px;margin:8px 0">⚠️ ${escapeHtml(plan._missingColWarning)}</p>`
-    : '';
   const plannerDebug = typeof plannerPlanToDebugHtml === 'function' ? plannerPlanToDebugHtml(plan) : '';
   const debug = `<details class="msg-sources" open><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : ${escapeHtml(tool)}<br><strong>Source</strong> : ${escapeHtml(plan.table?.source || 'Données')} · ${escapeHtml(plan.table?.name || 'table')}<br><strong>Colonnes détectées</strong> : ${escapeHtml((plan.mentionedCols || []).join(' | ') || '—')}</div>${plannerDebug}</details>`;
   if (tool === 'count_rows') {
     const pct = result.total ? pctFr(result.count, result.total) : '—';
-    return `<h4>Résultat calculé localement</h4>${missingWarning}<p>Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ligne${result.count>1?'s':''} correspondant à la demande (${pct} du jeu de données).</p><p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
+    return `<h4>Résultat calculé localement</h4><p>Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ligne${result.count>1?'s':''} correspondant à la demande (${pct} du jeu de données).</p><p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
   }
   if (tool === 'group_by' || tool === 'top') {
     const rows = result.rows || [];
