@@ -50,22 +50,23 @@ function makeTable(rows) {
 
 // Données minimales : 10 lignes avec des profils variés
 const TEST_ROWS = [
-  { 'Zone du Pays Basque': 'Oui', 'Grands groupes de formation d\'accueil acceptée': 'CPGE - CPES', 'Académie de l\'établissement d\'accueil acceptée': 'Bordeaux', 'Série de la Classe': 'Série Générale', 'Boursier des lycées': 'Non boursier' },
-  { 'Zone du Pays Basque': 'Oui', 'Grands groupes de formation d\'accueil acceptée': 'CPGE - CPES', 'Académie de l\'établissement d\'accueil acceptée': 'Toulouse',  'Série de la Classe': 'Série Générale', 'Boursier des lycées': 'Boursier des lycées' },
-  { 'Zone du Pays Basque': 'Oui', 'Grands groupes de formation d\'accueil acceptée': 'L1 - CUPGE - DEUST - DU', 'Académie de l\'établissement d\'accueil acceptée': 'Bordeaux', 'Série de la Classe': 'Professionnelle', 'Boursier des lycées': 'Non boursier' },
-  { 'Zone du Pays Basque': 'Oui', 'Grands groupes de formation d\'accueil acceptée': 'BTS - BTSA - DTS - DMA',  'Académie de l\'établissement d\'accueil acceptée': 'Bordeaux', 'Série de la Classe': 'Série Générale', 'Boursier des lycées': 'Boursier des lycées' },
-  { 'Zone du Pays Basque': 'Non', 'Grands groupes de formation d\'accueil acceptée': 'CPGE - CPES', 'Académie de l\'établissement d\'accueil acceptée': 'Paris',     'Série de la Classe': 'Série Générale', 'Boursier des lycées': 'Non boursier' },
-  { 'Zone du Pays Basque': 'Non', 'Grands groupes de formation d\'accueil acceptée': 'CPGE - CPES', 'Académie de l\'établissement d\'accueil acceptée': 'Lyon',      'Série de la Classe': 'Série Générale', 'Boursier des lycées': 'Boursier des lycées' },
-  { 'Zone du Pays Basque': 'Non', 'Grands groupes de formation d\'accueil acceptée': 'L1 - CUPGE - DEUST - DU', 'Académie de l\'établissement d\'accueil acceptée': 'Bordeaux', 'Série de la Classe': 'Professionnelle', 'Boursier des lycées': 'Non boursier' },
-  { 'Zone du Pays Basque': 'Non', 'Grands groupes de formation d\'accueil acceptée': 'L1 - CUPGE - DEUST - DU', 'Académie de l\'établissement d\'accueil acceptée': 'Toulouse',  'Série de la Classe': 'Série Générale', 'Boursier des lycées': 'Non boursier' },
-  { 'Zone du Pays Basque': 'Non', 'Grands groupes de formation d\'accueil acceptée': 'BTS - BTSA - DTS - DMA',  'Académie de l\'établissement d\'accueil acceptée': 'Paris',     'Série de la Classe': 'Professionnelle','Boursier des lycées': 'Non boursier' },
-  { 'Zone du Pays Basque': 'Non', 'Grands groupes de formation d\'accueil acceptée': 'L1 - CUPGE - DEUST - DU', 'Académie de l\'établissement d\'accueil acceptée': 'Lyon',      'Série de la Classe': 'Série Générale', 'Boursier des lycées': 'Boursier des lycées' },
+  { 'Zone du Pays Basque': 'Oui', 'Grands groupes de formation d\'accueil acceptée': 'CPGE - CPES', 'Académie de l\'établissement d\'accueil acceptée': 'Bordeaux', 'Série de la Classe': 'Série Générale', 'Boursier des lycées': 'Non boursier', 'Spécialité / mention formation d\'accueil acceptée': 'MPSI',                              'Etablissement de la scolarité': 'Lycée Cantau' },
+  { 'Zone du Pays Basque': 'Oui', 'Grands groupes de formation d\'accueil acceptée': 'CPGE - CPES', 'Académie de l\'établissement d\'accueil acceptée': 'Toulouse',  'Série de la Classe': 'Série Générale', 'Boursier des lycées': 'Boursier des lycées', 'Spécialité / mention formation d\'accueil acceptée': 'ECG - Mathématiques appliquées + ESH', 'Etablissement de la scolarité': 'Lycée Cantau' },
+  { 'Zone du Pays Basque': 'Oui', 'Grands groupes de formation d\'accueil acceptée': 'L1 - CUPGE - DEUST - DU', 'Académie de l\'établissement d\'accueil acceptée': 'Bordeaux', 'Série de la Classe': 'Professionnelle', 'Boursier des lycées': 'Non boursier', 'Spécialité / mention formation d\'accueil acceptée': 'Droit',              'Etablissement de la scolarité': 'Lycée Maine de Biran' },
+  { 'Zone du Pays Basque': 'Oui', 'Grands groupes de formation d\'accueil acceptée': 'BTS - BTSA - DTS - DMA',  'Académie de l\'établissement d\'accueil acceptée': 'Bordeaux', 'Série de la Classe': 'Série Générale', 'Boursier des lycées': 'Boursier des lycées', 'Spécialité / mention formation d\'accueil acceptée': 'BTS Commerce',     'Etablissement de la scolarité': 'Lycée Maine de Biran' },
+  { 'Zone du Pays Basque': 'Non', 'Grands groupes de formation d\'accueil acceptée': 'CPGE - CPES', 'Académie de l\'établissement d\'accueil acceptée': 'Paris',     'Série de la Classe': 'Série Générale', 'Boursier des lycées': 'Non boursier', 'Spécialité / mention formation d\'accueil acceptée': 'MPSI',                              'Etablissement de la scolarité': 'Lycée Cantau' },
+  { 'Zone du Pays Basque': 'Non', 'Grands groupes de formation d\'accueil acceptée': 'CPGE - CPES', 'Académie de l\'établissement d\'accueil acceptée': 'Lyon',      'Série de la Classe': 'Série Générale', 'Boursier des lycées': 'Boursier des lycées', 'Spécialité / mention formation d\'accueil acceptée': 'ECG - Mathématiques appliquées + ESH', 'Etablissement de la scolarité': 'Lycée Jean Dupont' },
+  { 'Zone du Pays Basque': 'Non', 'Grands groupes de formation d\'accueil acceptée': 'L1 - CUPGE - DEUST - DU', 'Académie de l\'établissement d\'accueil acceptée': 'Bordeaux', 'Série de la Classe': 'Professionnelle', 'Boursier des lycées': 'Non boursier', 'Spécialité / mention formation d\'accueil acceptée': 'Droit',              'Etablissement de la scolarité': 'Lycée Maine de Biran' },
+  { 'Zone du Pays Basque': 'Non', 'Grands groupes de formation d\'accueil acceptée': 'L1 - CUPGE - DEUST - DU', 'Académie de l\'établissement d\'accueil acceptée': 'Toulouse',  'Série de la Classe': 'Série Générale', 'Boursier des lycées': 'Non boursier', 'Spécialité / mention formation d\'accueil acceptée': 'Sociologie',              'Etablissement de la scolarité': 'Lycée Jean Dupont' },
+  { 'Zone du Pays Basque': 'Non', 'Grands groupes de formation d\'accueil acceptée': 'BTS - BTSA - DTS - DMA',  'Académie de l\'établissement d\'accueil acceptée': 'Paris',     'Série de la Classe': 'Professionnelle','Boursier des lycées': 'Non boursier', 'Spécialité / mention formation d\'accueil acceptée': 'BTS Comptabilité',            'Etablissement de la scolarité': 'Lycée Cantau' },
+  { 'Zone du Pays Basque': 'Non', 'Grands groupes de formation d\'accueil acceptée': 'L1 - CUPGE - DEUST - DU', 'Académie de l\'établissement d\'accueil acceptée': 'Lyon',      'Série de la Classe': 'Série Générale', 'Boursier des lycées': 'Boursier des lycées', 'Spécialité / mention formation d\'accueil acceptée': 'Psychologie',              'Etablissement de la scolarité': 'Lycée Cantau' },
 ];
 // Comptes connus sur ces données :
 // Basques total : 4 | Non-basques : 6
 // Basques en CPGE : 2 | Non-basques en CPGE : 2
 // Boursiers basques : 2 (rows 1 et 3)
 // Répartition académies basques : Bordeaux 3, Toulouse 1
+// Lycée Cantau : 4 lignes (rows 0,1,4,8,9 → indices 0-based)
 
 const TABLE = makeTable(TEST_ROWS);
 
@@ -269,6 +270,80 @@ test('"boursiers basques" applique bien deux filtres', () => {
   const boursier = plan.filters.find(f => /boursier/i.test(f.col));
   assert(basque,   'Filtre basque manquant');
   assert(boursier, 'Filtre boursier manquant');
+});
+
+test('"séries CPGE" cible Spécialité/mention (pas Série de la Classe)', () => {
+  const { plan } = ask('répartition des séries CPGE par académie');
+  assert(plan.targetCol, 'targetCol non défini');
+  assert(!/s[eé]rie de la classe/i.test(plan.targetCol),
+    `targetCol ne doit pas être Série de la Classe, obtenu : ${plan.targetCol}`);
+  assert(/sp[eé]cialit[eé]|mention/i.test(plan.targetCol),
+    `targetCol doit être Spécialité/mention, obtenu : ${plan.targetCol}`);
+});
+
+// ─── SUITE 6 : Follow-up targetCol & faux positifs explicitFresh ──────────────
+console.log('\n📋 Suite 6 — Follow-up targetCol & faux positifs explicitFresh\n');
+
+test('filterFollowUp après group_by hérite du targetCol et du tool', () => {
+  global.persistentFilters = [];
+  ask('répartition des basques par académie');
+  const { plan } = ask('et pour les non-boursiers ?');
+  assertEqual(plan.tool, 'group_by', 'tool doit rester group_by');
+  assert(/acad/i.test(plan.targetCol || ''), `targetCol doit être académie, obtenu : ${plan.targetCol}`);
+  const boursier = plan.filters.find(f => /boursier/i.test(f.col));
+  assert(boursier, 'Filtre boursier manquant');
+});
+
+test('"et les non-boursiers ?" est un filterFollowUp', () => {
+  global.persistentFilters = [];
+  ask('répartition des basques par académie');
+  const { plan } = ask('et les non-boursiers ?');
+  assertEqual(plan.tool, 'group_by', 'tool doit être group_by');
+  assert(/acad/i.test(plan.targetCol || ''), `targetCol doit être académie, obtenu : ${plan.targetCol}`);
+});
+
+test('"parmi les boursiers" hérite du contexte group_by', () => {
+  global.persistentFilters = [];
+  ask('répartition des basques par académie');
+  const { plan } = ask('parmi les boursiers');
+  assertEqual(plan.tool, 'group_by', 'tool doit être group_by');
+  assert(/acad/i.test(plan.targetCol || ''), `targetCol = ${plan.targetCol}`);
+});
+
+test('"combien sont-ils ?" hérite du contexte (pas explicitFresh)', () => {
+  global.persistentFilters = [];
+  ask('combien de basques');
+  const { plan } = ask('combien sont-ils ?');
+  const basque = plan.filters.find(f => /basque/i.test(f.col));
+  assert(basque, 'Filtre basque doit être hérité, pas réinitialisé');
+});
+
+test('"combien y en a-t-il ?" hérite du contexte', () => {
+  global.persistentFilters = [];
+  ask('combien de basques');
+  const { plan } = ask('combien y en a-t-il ?');
+  const basque = plan.filters.find(f => /basque/i.test(f.col));
+  assert(basque, 'Filtre basque doit être hérité');
+});
+
+test('question vide → isDataEngineQuestion retourne false', () => {
+  assert(!isDataEngineQuestion(''), 'vide doit retourner false');
+  assert(!isDataEngineQuestion(null), 'null doit retourner false');
+});
+
+test('"issus du lycée cantau" détecte l\'établissement d\'origine', () => {
+  global.persistentFilters = [];
+  const { plan } = ask('issus du lycée cantau');
+  const etab = plan.filters.find(f => /[eé]tablissement|scolarit/i.test(f.col));
+  assert(etab, `Filtre établissement manquant. Filtres : ${JSON.stringify(plan.filters)}`);
+  assert(/cantau/i.test(etab.value), `Valeur incorrecte : ${etab?.value}`);
+});
+
+test('"originaires du lycée cantau" détecte l\'établissement', () => {
+  global.persistentFilters = [];
+  const { plan } = ask('originaires du lycée cantau');
+  const etab = plan.filters.find(f => /[eé]tablissement|scolarit/i.test(f.col));
+  assert(etab, `Filtre établissement manquant. Filtres : ${JSON.stringify(plan.filters)}`);
 });
 
 // ─── Rapport final ────────────────────────────────────────────────────────────
