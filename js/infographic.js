@@ -139,6 +139,13 @@ function improveInfographicSpec(spec, question) {
   const otherSections = sections.filter(sec => (sec.type || '') !== 'insights');
   sections = otherSections.concat(insightSections);
 
+  // Détection textes génériques connus (déclaré ici avant tout usage)
+  const GENERIC_INSIGHT_TEXTS = ['les sections distinguent les chiffres globaux', 'les graphiques servent', 'perimetre explicite', 'lecture analytique'];
+  const _isGenericInsight = it => {
+    const t = (it.text || it.detail || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+    return GENERIC_INSIGHT_TEXTS.some(g => t.includes(g));
+  };
+
   // 4) Génère une section "À retenir" avec de vrais insights chiffrés tirés de la spec
   const _hasRealConclusion = sections.some(sec =>
     /conclusion|synthese|synthèse|retenir|points saillants/i.test(sec.title || '') &&
@@ -153,13 +160,6 @@ function improveInfographicSpec(spec, question) {
   }
 
   spec.sections = sections.slice(0, 8);
-
-  // Détection textes génériques connus
-  const GENERIC_INSIGHT_TEXTS = ['les sections distinguent les chiffres globaux', 'les graphiques servent', 'perimetre explicite', 'lecture analytique'];
-  const _isGenericInsight = it => {
-    const t = (it.text || it.detail || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-    return GENERIC_INSIGHT_TEXTS.some(g => t.includes(g));
-  };
 
   // Nettoyage des items avec labels génériques ("Item 1", "Catégorie X", etc.)
   const _isPlaceholder = s => /^(item\s*\d+|catégorie\s*\d+|cat[eé]gorie\s*\d*|label\s*\d*|valeur\s*\d*|texte\s*\d*)$/i.test(String(s || '').trim());

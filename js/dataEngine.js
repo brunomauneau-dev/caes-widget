@@ -208,6 +208,27 @@ function strictFiltersFromQuestion(table, question) {
     if (col) add(col, 'Bordeaux', 'neq');
   }
 
+  // Détection : établissement d'origine (venant de / provenant de / lycée X)
+  // "venant du lycée Maine du Biran" → filtre sur colonne etablissement d'origine
+  const etablOriginePattern = /(?:venant\s+(?:du|de\s+(?:l[a']?|l[ae]s?)?)|provenant\s+(?:du|de)|scolarisé[e]?\s+(?:au|à|en))\s+(?:lycée|lycee|établissement|etablissement|collège|college|cfa|iut|université|universite)?\s*([A-ZÀÂÉÈÊËÎÏÔÛÙÜ][a-zàâéèêëîïôùûüA-ZÀÂÉÈÊËÎÏÔÛÙÜ\s\-']{2,40})/;
+  const etablMatch = question.match(etablOriginePattern);
+  if (etablMatch) {
+    const name = etablMatch[1].trim();
+    // Cherche colonne d'origine (pas accueil)
+    const headers = table?.headers || [];
+    const origCol = headers.find(h => {
+      const hn = normalizeText(h);
+      return /etablissement|lycee/.test(hn) && /origine|scolarite|scolarité/.test(hn);
+    });
+    if (origCol) {
+      // Cherche la valeur exacte dans les données
+      const vals = [...new Set((table?.objects || []).map(r => String(r[origCol] || '')).filter(Boolean))];
+      const nameN = normalizeText(name);
+      const match = vals.find(v => normalizeText(v).includes(nameN) || nameN.includes(normalizeText(v).slice(0, 8)));
+      if (match) add(origCol, match, 'eq');
+    }
+  }
+
   return out;
 }
 

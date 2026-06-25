@@ -81,7 +81,7 @@
     let s = 0;
 
     const askedAccueil = /(accueil|acceptee|accepte|accept[eé]e|admis|admission|choisi|choisie|formation)/.test(q);
-    const askedOrigine = /(origine|scolarite|scolarité|lycee|lycée d origine|commune de scolarite)/.test(q);
+    const askedOrigine = /(venant de|venant du|provenant de|issu de|scolarisé|scolarise|origine|scolarite|scolarité|lycee|lycée d origine|commune de scolarite|etablissement d origine)/.test(q);
 
     if (k === 'zone_basque') s += 200;
 
