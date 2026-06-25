@@ -161,7 +161,18 @@ function findColumnByConceptStrict(table, concept) {
     if (concept === 'academie_accueil' && /acad[eé]mie/.test(hn) && /accueil|accept/.test(hn)) score += 100;
     if (concept === 'serie' && /s[eé]rie.*classe|s[eé]rie.*bac/.test(hn)) score += 100;
     if (concept === 'formation_groupe' && /grands?.*groupes?.*formation|groupe.*formation/.test(hn)) score += 100;
-    if (concept === 'etablissement_origine' && /[eé]tablissement|lyc[eé]e/.test(hn) && /scolarit[eé]|origine|scolaire/.test(hn)) score += 100;
+    // Nouvelles colonnes du schéma Parcoursup SAIO Bordeaux
+    if (concept === 'etablissement_accueil' && /[eé]tablissement|lyc[eé]e/.test(hn) && /accueil|accept/.test(hn) && !/acad[eé]mie|commune|sp[eé]cialit[eé]|mention|groupe|formation/.test(hn)) score += 100;
+    if (concept === 'commune_origine' && /commune/.test(hn) && /scolarit[eé]|origine/.test(hn)) score += 100;
+    if (concept === 'commune_accueil' && /commune/.test(hn) && /accueil|accept/.test(hn)) score += 100;
+    if (concept === 'departement_origine' && /d[eé]partement/.test(hn) && /scolarit[eé]|origine/.test(hn)) score += 100;
+    if (concept === 'apprenti' && /apprenti/.test(hn)) score += 100;
+    if (concept === 'nb_voeux' && /nb|nombre|total/.test(hn) && /v[oœ]ux|v[oœ]eu/.test(hn)) score += 100;
+    if (concept === 'etablissement_origine' && /[eé]tablissement|lyc[eé]e/.test(hn) && /scolarit[eé]|origine|scolaire/.test(hn)) {
+      score += 100;
+      // Bonus si c'est le champ nom (pas département, code UAI, commune, ministère, type, contrat)
+      if (!/d[eé]partement|commune|code|uai|minist[eè]re|type|contrat|rattachement/.test(hn)) score += 60;
+    }
     return { h, score };
   }).filter(x => x.score > 0).sort((a,b)=>b.score-a.score);
   return scored[0]?.h || null;
@@ -218,10 +229,17 @@ function strictFiltersFromQuestion(table, question) {
     // Cherche colonne d'origine (pas accueil)
     const origCol = findColumnByConceptStrict(table, 'etablissement_origine');
     if (origCol) {
-      // Cherche la valeur exacte dans les données
+      // Correspondance par mots-clés significatifs (ignore du/de/le/la pour "Maine du Biran" ≈ "Maine de Biran")
       const vals = [...new Set((table?.objects || []).map(r => String(r[origCol] || '')).filter(Boolean))];
       const nameN = normalizeText(name);
-      const match = vals.find(v => normalizeText(v).includes(nameN) || nameN.includes(normalizeText(v).slice(0, 8)));
+      const stopWords = new Set(['du','de','des','le','la','les','et','au','aux','en','un','une','a']);
+      const nameWords = nameN.split(/\s+/).filter(w => w.length > 2 && !stopWords.has(w));
+      const match = vals.find(v => {
+        const vn = normalizeText(v);
+        if (nameWords.length === 0) return false;
+        // Tous les mots significatifs du nom doivent apparaître dans la valeur
+        return nameWords.every(w => vn.includes(w));
+      });
       if (match) add(origCol, match, 'eq');
     }
   }
@@ -725,6 +743,13 @@ function finalSanitizeAnalysisPlan(plan) {
       return false; // type de colonne non reconnu : exclure par défaut
     });
     plan.filters = mergeFiltersUnique(kept, strict);
+
+    // Avertissement : "venant du lycée X" sans filtre établissement résultant
+    const _etablOrigQ = /(venant\s+(?:du|de)|provenant\s+(?:du|de)|scolaris[eé][e]?\s+(?:au|[àa]))\s*(?:lyc[eé]e|[eé]tablissement)?\s*[A-Z\u00C0-\u00DC]/;
+    if (_etablOrigQ.test(plan.question || '') && !plan.filters.some(f => /[eé]tablissement|lyc[eé]e/i.test(f.col) && /scolarit|origine|scolaire/i.test(f.col))) {
+      plan._missingColWarning = "La colonne « établissement d'origine » (lycée du candidat) n'est pas disponible dans ce jeu de données. Ce type d'information figure dans certains exports Parcoursup mais pas dans celui-ci.";
+    }
+
     return plan;
   }
 

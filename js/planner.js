@@ -69,7 +69,13 @@
     if (/apprenti|apprentissage/.test(c)) return 'apprentissage';
     if (/voeu|voeux|vœu|vœux/.test(c)) return 'voeu';
     if (/sexe|genre/.test(c)) return 'sexe';
-    if (/etablissement|établissement|lycee|lycée|universite|université|iut|cfa/.test(c)) return 'etablissement';
+    if (/apprenti/.test(c)) return 'apprenti';
+    if ((/nb|nombre|total/).test(c) && /v[oœ]ux|v[oœ]eu/.test(c)) return 'nb_voeux';
+    if (/etablissement|établissement|lycee|lycée|universite|université|iut|cfa/.test(c)) {
+      if (/accueil|accepte|acceptée/.test(c) && !/acad[eé]mie|commune|sp[eé]cialit|mention|groupe/.test(c)) return 'etablissement_accueil';
+      if (/scolarit|origine/.test(c) && !/commune|d[eé]partement|code|minist|type|contrat/.test(c)) return 'etablissement_origine_nom';
+      return 'etablissement';
+    }
     if (/annee|année|session|campagne/.test(c)) return 'year';
     return 'generic';
   }
@@ -82,6 +88,8 @@
 
     const askedAccueil = /(accueil|acceptee|accepte|accept[eé]e|admis|admission|choisi|choisie|formation)/.test(q);
     const askedOrigine = /(venant de|venant du|provenant de|issu de|scolarisé|scolarise|origine|scolarite|scolarité|lycee|lycée d origine|commune de scolarite|etablissement d origine)/.test(q);
+    const askedApprentis = /apprenti/.test(q);
+    const askedVoeux = /(v[oœ]ux|v[oœ]eu|v?oeux|nombre de voeux)/.test(q);
 
     if (k === 'zone_basque') s += 200;
 
