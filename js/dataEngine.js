@@ -146,16 +146,15 @@ function isExplicitFreshDataQuestion(question) {
   const q = normalizeText(question || '');
   if (!q) return false;
   if (!/^(combien|nombre|effectif|total|quelle est|quel est|moyenne|nombre moyen|top|classement|repartition|r[eé]partition|tableau crois[eé]|croise|pivot)/.test(q)) return false;
-  // "combien sont-ils ?", "combien y en a-t-il ?" → pas de nouveau concept → follow-up pur
-  if (/^combien\s+(sont[- ]ils|y[- ]?a[- ]?t[- ]?il|en tout|au total|maintenant|cela|ca|ça)\s*\??$/.test(q)) return false;
+  // "combien sont-ils ?", "combien y en a-t-il ?" = bare count follow-up → hérite du contexte
+  if (/^combien\s+(sont[- ]ils|y\s*(?:en\s+)?a[- ]?t[- ]?il|en tout|au total|maintenant|cela|ca|[cç]a)\s*\??$/.test(q)) return false;
   return true;
 }
 
 function isFilterOnlyFollowUp(question) {
   const q = normalizeText(question || '').trim();
-  // Bare count follow-up : "combien sont-ils ?" / "combien y en a-t-il ?" — hérite du contexte
   if (/^combien\s+(sont[- ]ils|y\s*(?:en\s+)?a[- ]?t[- ]?il|en tout|au total|maintenant|cela|ca|[cç]a)\s*\??$/.test(q)) return true;
-  return /^(seulement|uniquement|avec|sans|sauf|hors|excluant|en excluant|les boursiers|les non boursiers|non boursiers|boursiers|et pour|et les|et chez|parmi les|pour les|chez les|uniquement les|notamment les|en particulier|et chez|et parmi)/.test(q);
+  return /^(seulement|uniquement|avec|sans|sauf|hors|excluant|en excluant|les boursiers|les non boursiers|non boursiers|boursiers|et pour|et les|et chez|parmi les|pour les|chez les|uniquement les|notamment les|en particulier|et parmi)/.test(q);
 }
 
 function findColumnByConceptStrict(table, concept) {
@@ -168,7 +167,6 @@ function findColumnByConceptStrict(table, concept) {
     if (concept === 'academie_accueil' && /acad[eé]mie/.test(hn) && /accueil|accept/.test(hn)) score += 100;
     if (concept === 'serie' && /s[eé]rie.*classe|s[eé]rie.*bac/.test(hn)) score += 100;
     if (concept === 'formation_groupe' && /grands?.*groupes?.*formation|groupe.*formation/.test(hn)) score += 100;
-    // Etablissement d'origine (scolarité) — priorité au champ nom direct
     if (concept === 'etablissement_origine' && /[eé]tablissement|lyc[eé]e/.test(hn) && /scolarit[eé]|origine|scolaire/.test(hn)) {
       score += 100;
       if (!/d[eé]partement|commune|code|uai|minist[eè]re|type|contrat|rattachement/.test(hn)) score += 60;
@@ -204,29 +202,46 @@ function strictFiltersFromQuestion(table, question) {
   const out = [];
   const add = (col, value, op='eq') => { if (col && value !== undefined && value !== null) out.push({ col, value, op }); };
 
-  if (/pays basque|basque/.test(q)) {
+  if (/pays basque|basque/.test(q) && !/non[- ]?basque|hors.*basque/.test(q)) {
     const col = findColumnByConceptStrict(table, 'basque');
-    if (col) {
-      // "non basques", "hors pays basque", "hors zone basque", "sans les basques" → neq
-      const isNeg = /(non[- ]?basque|hors.*basque|hors zone|sauf.*basque|exclu.*basque|sans.*basque|autre.*basque)/.test(q);
-      add(col, pickColumnValue(table, col, 'oui'), isNeg ? 'neq' : 'eq');
-    }
+    if (col) add(col, pickColumnValue(table, col, 'oui'), 'eq');
   }
-
-  if (/non[ -]?boursier|sans boursier|hors boursier|exclu.*boursier|en excluant.*boursier/.test(q)) {
+  if (/non[- ]?basque|hors.*basque|hors.*pays.*basque/.test(q)) {
+    const col = findColumnByConceptStrict(table, 'basque');
+    if (col) add(col, pickColumnValue(table, col, 'oui'), 'neq');
+  }
+  if (/non[- ]?boursier|sans boursier|hors boursier|exclu.*boursier|en excluant.*boursier/.test(q)) {
     const col = findColumnByConceptStrict(table, 'boursier');
     if (col) add(col, pickColumnValue(table, col, 'boursier_non'), 'eq');
   } else if (/boursier|bourse/.test(q)) {
     const col = findColumnByConceptStrict(table, 'boursier');
     if (col) add(col, pickColumnValue(table, col, 'boursier_oui'), 'eq');
   }
-
   if (/hors.*bordeaux|sauf.*bordeaux|exclu.*bordeaux|diff[eé]rent.*bordeaux/.test(q)) {
     const col = findColumnByConceptStrict(table, 'academie_accueil');
     if (col) add(col, 'Bordeaux', 'neq');
   }
 
-  // Etablissement d'origine : "venant du/de", "issus du/de", "originaires du/de", "scolarisés au"
+  // Grands groupes de formation (CPGE, BTS, L1, etc.)
+  const formationCol = findColumnByConceptStrict(table, 'formation_groupe');
+  if (formationCol) {
+    const formVals = [...new Set((table.objects || []).map(r => String(r[formationCol] ?? '')).filter(Boolean))];
+    const formMatches = [
+      { test: /\bcpge\b|prep[ea]|preparatoire/, pat: /cpge/i },
+      { test: /\bbts\b|\bbtsa\b|\bdts\b/, pat: /bts/i },
+      { test: /\bbut\b|\bdut\b/, pat: /but|dut/i },
+      { test: /\bl1\b|\blicence\b|\bl2\b|\bl3\b/, pat: /^l1|^l2|^l3/i },
+      { test: /\bcap\b/, pat: /\bcap\b/i },
+    ];
+    for (const { test, pat } of formMatches) {
+      if (test.test(q) && !out.some(f => f.col === formationCol)) {
+        const match = formVals.find(v => pat.test(v));
+        if (match) add(formationCol, match, 'eq');
+      }
+    }
+  }
+
+  // Etablissement d\'origine : "venant du/de", "issus du/de", "originaires du/de"
   const _etablPattern = /(?:venant\s+(?:du|de(?:\s+l[ae']?)?)|provenant\s+(?:du|de)|originaires?\s+(?:du|de)|issus?\s+(?:du|de)|qui\s+viennent\s+(?:du|de)|scolaris[eé]e?s?\s+(?:au|[àa]))\s*(?:lyc[eé]e|[eé]tablissement)?\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']{2,45}?)(?:\s*[?!.]|$)/i;
   const _etablMatch = (question || '').match(_etablPattern);
   if (_etablMatch) {
@@ -305,16 +320,15 @@ function inheritConversationContext(plan, question) {
       plan.tool = 'group_by';
       if (!plan.targetCol && prev.targetCol) plan.targetCol = prev.targetCol;
     } else if (filterFollowUp) {
-      // Point 3 : si la question précédente était un group_by/compare/pivot,
-      // on force l'héritage de l'outil ET de la colonne cible — même si le
-      // planner a déduit count_rows pour la question courante.
-      const inheritTool = prev.tool || plan.tool;
-      plan.tool = inheritTool;
+      // Si la question précédente était group_by/compare, l'hériter PLUS les filtres planner nouveaux
+      plan.tool = prev.tool || plan.tool;
       if (prev.targetCol)  plan.targetCol  = prev.targetCol;
       if (prev.targetCol2) plan.targetCol2 = prev.targetCol2;
       if (prev.limit)      plan.limit      = prev.limit;
-      if (prev.mentionedCols && (!plan.mentionedCols || !plan.mentionedCols.length))
-        plan.mentionedCols = prev.mentionedCols;
+      if (prev.mentionedCols && !plan.mentionedCols?.length) plan.mentionedCols = prev.mentionedCols;
+      // Inclure aussi les filtres détectés par le planner pour la question courante (ex: CPGE)
+      const _newPlannerFilters = (plan.filters || []).filter(f => !prev.filters?.some(pf => pf.col === f.col));
+      plan.filters = mergeFiltersUnique(mergeFiltersUnique(prev.filters || [], strictFiltersFromQuestion(plan.table, question)), _newPlannerFilters);
     }
 
     if (isChartRequest(question)) {
@@ -461,12 +475,7 @@ function inferMeasureIntent(question) {
   if (/repartition|r[eé]partition|ventilation|par |groupe|group[eé]|pourcentage|proportion/.test(q)) return 'group_by';
   if (/combien|nombre|effectif|compte|compter|total/.test(q)) return 'count_rows';
   if (isFollowUpQuestion(question)) return getDataEngineState().lastPlan?.tool || 'count_rows';
-  // isFilterOnlyFollowUp couvre "et pour", "et les", "parmi les", etc. qui ne matchent
-  // pas isFollowUpQuestion (trop étroit) mais doivent hériter du tool précédent.
-  if (isFilterOnlyFollowUp(question) && getDataEngineState().lastPlan) {
-    return getDataEngineState().lastPlan.tool || 'count_rows';
-  }
-  // Requêtes d'établissement d'origine : count_rows avec filtre
+  if (isFilterOnlyFollowUp(question) && getDataEngineState().lastPlan) return getDataEngineState().lastPlan.tool || 'count_rows';
   if (/issus?\s+d[ue]|originaires?|venant\s+d[ue]|provenant|scolaris/.test(q)) return 'count_rows';
   return null;
 }
@@ -784,44 +793,95 @@ function detectCompareGroups(table, question) {
   const addGroup = (label, filters) => groups.push({ label, filters: filters.filter(Boolean) });
   const yesNoValue = (col, yes) => pickColumnValue(table, col, yes ? 'oui' : 'non');
 
-  // Basques vs non-Basques
-  if (/basque/.test(q) && /(non[- ]?basque|autres?|reste|hors)/.test(q)) {
+  // ── 1. Paires sémantiques hardcodées ──────────────────────────────────────
+  if (/basque/.test(q) && /(non[- ]?basque|autres?|reste|hors|compare|versus)/.test(q)) {
     const col = findColumnByConceptStrict(table, 'basque');
     if (col) {
-      addGroup('Pays Basque', [{ col, op: 'eq', value: yesNoValue(col, true) }]);
+      addGroup('Pays Basque',      [{ col, op: 'eq',  value: yesNoValue(col, true) }]);
       addGroup('Hors Pays Basque', [{ col, op: 'neq', value: yesNoValue(col, true) }]);
       return groups;
     }
   }
-  if (/compare.*basque|basque.*compare/.test(q)) {
-    const col = findColumnByConceptStrict(table, 'basque');
-    if (col) {
-      addGroup('Pays Basque', [{ col, op: 'eq', value: yesNoValue(col, true) }]);
-      addGroup('Hors Pays Basque', [{ col, op: 'neq', value: yesNoValue(col, true) }]);
-      return groups;
-    }
-  }
-
-  // Boursiers vs non-boursiers
-  if (/boursier/.test(q)) {
+  if (/boursier/.test(q) && /(non[- ]?boursier|compare|comparaison|versus| vs )/.test(q)) {
     const col = findColumnByConceptStrict(table, 'boursier');
-    if (col && (/non[- ]?boursier|compare|comparaison|versus| vs /.test(q))) {
-      addGroup('Boursiers', [{ col, op: 'eq', value: pickColumnValue(table, col, 'boursier_oui') }]);
-      addGroup('Non-boursiers', [{ col, op: 'eq', value: pickColumnValue(table, col, 'boursier_non') }]);
+    if (col) {
+      addGroup('Boursiers',    [{ col, op: 'eq', value: pickColumnValue(table, col, 'boursier_oui') }]);
+      addGroup('Non-boursiers',[{ col, op: 'eq', value: pickColumnValue(table, col, 'boursier_non') }]);
+      return groups;
+    }
+  }
+  if (/admis|r[eé]pondu favorablement|avec proposition/.test(q) &&
+      /(non[- ]?admis|sans proposition|refus[eé]|compare|versus)/.test(q)) {
+    const col = (table.headers || []).find(h => /r[eé]pondu favorablement|actuellement r[eé]pondu/i.test(h));
+    if (col) {
+      addGroup('Admis',     [{ col, op: 'eq', value: pickColumnValue(table, col, 'oui') }]);
+      addGroup('Non admis', [{ col, op: 'eq', value: pickColumnValue(table, col, 'non') }]);
+      return groups;
+    }
+  }
+  if (/apprenti/.test(q) && /(non[- ]?apprenti|compare|versus)/.test(q)) {
+    const col = findColumnByConceptStrict(table, 'apprenti');
+    if (col) {
+      addGroup('Apprentis',    [{ col, op: 'eq', value: yesNoValue(col, true) }]);
+      addGroup('Non-apprentis',[{ col, op: 'eq', value: yesNoValue(col, false) }]);
       return groups;
     }
   }
 
-  // BUT/DUT vs BTS
-  if (/(but|dut)/.test(q) && /bts/.test(q)) {
-    const col = findColumnByConceptStrict(table, 'formation_groupe') || (table.headers || []).find(h => /formation/i.test(h));
-    if (col) {
-      const vals = Array.from(new Set((table.objects || []).map(r => String(r[col] ?? '').trim()).filter(Boolean)));
-      const dut = vals.find(v => /\bDUT\b/i.test(v)) || 'DUT';
-      const bts = vals.find(v => /\bBTS\b|BTSA|DTS/i.test(v)) || 'BTS - BTSA - DTS - DMA';
-      addGroup('BUT / DUT', [{ col, op: 'eq', value: dut }]);
-      addGroup('BTS', [{ col, op: 'eq', value: bts }]);
+  // ── 2. Formations nommées (CPGE, L1, BTS, BUT, etc.) ─────────────────────
+  const formationCol = findColumnByConceptStrict(table, 'formation_groupe');
+  if (formationCol) {
+    const formVals = [...new Set((table.objects || []).map(r => String(r[formationCol] ?? '')).filter(Boolean))];
+    const FORM_KEYS = [
+      { re: /\bcpge\b|prep[ea]/, pat: /cpge/i, label: 'CPGE' },
+      { re: /\bl1\b|\blicence\b|\bl2\b|\bl3\b/, pat: /^l[123]/i, label: 'L1' },
+      { re: /\bbts\b|\bbtsa\b|\bdts\b/, pat: /bts/i, label: 'BTS' },
+      { re: /\bbut\b|\bdut\b/, pat: /but|dut/i, label: 'BUT/DUT' },
+      { re: /\bcap\b/, pat: /\bcap\b/i, label: 'CAP' },
+    ];
+    const found = [];
+    for (const fk of FORM_KEYS) {
+      if (fk.re.test(q)) {
+        const match = formVals.find(v => fk.pat.test(v));
+        if (match && !found.some(f => f.raw === match)) found.push({ raw: match, label: fk.label });
+      }
+    }
+    if (found.length >= 2) {
+      found.slice(0, 2).forEach(f => addGroup(f.raw, [{ col: formationCol, op: 'eq', value: f.raw }]));
       return groups;
+    }
+  }
+
+  // ── 3. Académies nommées ─────────────────────────────────────────────────
+  const acadCol = findColumnByConceptStrict(table, 'academie_accueil');
+  if (acadCol) {
+    const acadVals = [...new Set((table.objects || []).map(r => String(r[acadCol] ?? '')).filter(Boolean))];
+    const mentioned = acadVals.filter(v => {
+      const vn = normalizeText(v);
+      return vn.length > 2 && q.includes(vn);
+    });
+    if (mentioned.length >= 2) {
+      mentioned.slice(0, 2).forEach(a => addGroup(a, [{ col: acadCol, op: 'eq', value: a }]));
+      return groups;
+    }
+  }
+
+  // ── 4. Deux établissements (lycée X vs lycée Y) ───────────────────────────
+  const vsMatch = question.match(/(?:compare[rz]?\s+(?:l[ae]s?\s+)?)(.+?)\s+(?:et|vs\.?|versus)\s+(?:l[ae]s?\s+)?(.+?)(?:\s*[?!.]|$)/i);
+  if (vsMatch) {
+    const origCol = findColumnByConceptStrict(table, 'etablissement_origine');
+    if (origCol) {
+      const stopWords = new Set(['du','de','des','le','la','les','et','au','aux','en','lycee','etablissement','lycee']);
+      const vals = [...new Set((table.objects || []).map(r => String(r[origCol] ?? '')).filter(Boolean))];
+      const toWords = s => normalizeText(s).split(/\s+/).filter(w => w.length > 2 && !stopWords.has(w));
+      const wA = toWords(vsMatch[1]), wB = toWords(vsMatch[2]);
+      const matchA = wA.length ? vals.find(v => wA.every(w => normalizeText(v).includes(w))) : null;
+      const matchB = wB.length ? vals.find(v => wB.every(w => normalizeText(v).includes(w))) : null;
+      if (matchA && matchB && matchA !== matchB) {
+        addGroup(matchA, [{ col: origCol, op: 'eq', value: matchA }]);
+        addGroup(matchB, [{ col: origCol, op: 'eq', value: matchB }]);
+        return groups;
+      }
     }
   }
 
