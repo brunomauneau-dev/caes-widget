@@ -72,6 +72,53 @@ function inferSectionScope(section) {
   if (/proposition accept|repondu favorablement|admission/.test(t)) return 'Périmètre : candidats avec proposition acceptée';
   return section.scope || section.perimeter || '';
 }
+function _buildRealInsightsFromSpec({ sections = [], metrics = [], narrative = [] }) {
+  const insights = [];
+
+  // Insight 1 : depuis les métriques hero (ratio/volume clé)
+  if (metrics.length >= 2) {
+    const m0 = metrics[0], m1 = metrics[1];
+    const hasPercent = metrics.find(m => /%/.test(String(m.value || '')));
+    if (hasPercent) {
+      insights.push({
+        title: hasPercent.label,
+        text: `${hasPercent.value} — ${hasPercent.detail || `${hasPercent.label} selon les données analysées`}`
+      });
+    } else {
+      insights.push({
+        title: m0.label,
+        text: `${m0.value}${m0.detail ? ' — ' + m0.detail : ''}. ${m1.label} : ${m1.value}${m1.detail ? ' (' + m1.detail + ')' : ''}.`
+      });
+    }
+  }
+
+  // Insight 2 : depuis les sections ranking/bars — dominance du top et écart
+  const rankSec = sections.find(s => (s.type === 'ranking' || s.type === 'bars') && (s.items || []).length >= 2);
+  if (rankSec) {
+    const items = rankSec.items || [];
+    const top = items[0], second = items[1];
+    const topPct  = top.percent  || (top.pct  ? `${top.pct}` : '');
+    const secPct  = second.percent || (second.pct ? `${second.pct}` : '');
+    const topStr  = topPct  ? `${top.label} (${topPct})` : `${top.label} avec ${top.value} candidats`;
+    const secStr  = secPct  ? `${second.label} (${secPct})` : `${second.label} (${second.value})`;
+    insights.push({
+      title: `Concentration sur ${top.label}`,
+      text: `${topStr} arrive en tête, devant ${secStr}. ${items.length > 2 ? `Les ${items.length} premières valeurs couvrent l'essentiel de la distribution.` : ''}`
+    });
+  }
+
+  // Insight 3 : depuis la narrative d'Albert (1re phrase analytique pertinente)
+  const narr = (narrative || []).find(p => p && p.length > 30 && !p.toLowerCase().includes('graphique') && !p.toLowerCase().includes('section'));
+  if (narr && insights.length < 3) {
+    const firstSentence = narr.split(/[.!?]/)[0].trim();
+    if (firstSentence.length > 25) {
+      insights.push({ title: 'Synthèse', text: firstSentence + '.' });
+    }
+  }
+
+  return insights.filter(it => it.text && it.text.length > 20).slice(0, 3);
+}
+
 function improveInfographicSpec(spec, question) {
   const heroMetrics = Array.isArray(spec.metrics) ? spec.metrics : [];
   let sections = Array.isArray(spec.sections) ? spec.sections : [];
@@ -92,27 +139,34 @@ function improveInfographicSpec(spec, question) {
   const otherSections = sections.filter(sec => (sec.type || '') !== 'insights');
   sections = otherSections.concat(insightSections);
 
-  // 4) Ajoute une synthèse finale si Albert n'en a pas produit.
-  const hasConclusion = sections.some(sec => /conclusion|synthese|synthèse|retenir|points saillants/i.test(sec.title || '') && (sec.type || '') === 'insights');
-  if (!hasConclusion) {
-    sections.push({
-      type: 'insights',
-      title: 'À retenir',
-      scope: 'Lecture transversale',
-      items: [
-        { title: 'Périmètres explicités', text: 'Les sections distinguent les chiffres globaux, les sous-groupes et les candidats avec proposition acceptée lorsque ces informations sont disponibles.' },
-        { title: 'Lecture analytique', text: 'Les graphiques servent à dégager des signaux, pas seulement à empiler des statistiques.' }
-      ]
-    });
+  // 4) Génère une section "À retenir" avec de vrais insights chiffrés tirés de la spec
+  const _hasRealConclusion = sections.some(sec =>
+    /conclusion|synthese|synthèse|retenir|points saillants/i.test(sec.title || '') &&
+    sec.type === 'insights' &&
+    (sec.items || []).some(it => !_isGenericInsight(it))
+  );
+  if (!_hasRealConclusion) {
+    const realInsights = _buildRealInsightsFromSpec({ sections, metrics: spec.metrics, narrative: spec.narrative });
+    if (realInsights.length > 0) {
+      sections.push({ type: 'insights', title: 'À retenir', scope: 'Lecture transversale', items: realInsights });
+    }
   }
 
   spec.sections = sections.slice(0, 8);
 
-  // Nettoyage : supprime les items avec labels génériques ("Item 1", "Catégorie X", etc.)
+  // Détection textes génériques connus
+  const GENERIC_INSIGHT_TEXTS = ['les sections distinguent les chiffres globaux', 'les graphiques servent', 'perimetre explicite', 'lecture analytique'];
+  const _isGenericInsight = it => {
+    const t = (it.text || it.detail || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    return GENERIC_INSIGHT_TEXTS.some(g => t.includes(g));
+  };
+
+  // Nettoyage des items avec labels génériques ("Item 1", "Catégorie X", etc.)
   const _isPlaceholder = s => /^(item\s*\d+|catégorie\s*\d+|cat[eé]gorie\s*\d*|label\s*\d*|valeur\s*\d*|texte\s*\d*)$/i.test(String(s || '').trim());
   spec.sections = spec.sections.map(sec => {
     if (Array.isArray(sec.items) && sec.items.length > 0) {
-      const cleaned = sec.items.filter(it => !_isPlaceholder(it.label || it.name || it.title || ''));
+      let cleaned = sec.items.filter(it => !_isPlaceholder(it.label || it.name || it.title || ''));
+      if (sec.type === 'insights') cleaned = cleaned.filter(it => !_isGenericInsight(it));
       if (cleaned.length !== sec.items.length) sec = { ...sec, items: cleaned };
     }
     return sec;
@@ -290,6 +344,9 @@ function renderSection(section, idx) {
   else if (type === 'cascade') body = renderCascade(section);
   else if (type === 'table') body = renderTable(section.headers, section.rows);
   else body = `<p class="section-text">${escapeHtml(section.text || section.description || '')}</p>`;
+  // Filtre : si le body ne contient pas de texte réel (seulement du HTML structurel vide), on saute la section
+  const bodyText = body.replace(/<[^>]+>/g, '').replace(/&[a-z]+;/gi, ' ').trim();
+  if (!bodyText) return '';
   const note = section.note ? `<p class="section-note">${escapeHtml(section.note)}</p>` : '';
   return `<section class="info-section type-${escapeHtml(type)}">
     <div class="section-headline"><div><div class="section-kicker">${escapeHtml(kicker)}</div><h2>${escapeHtml(title)}</h2></div>${scope ? `<div class="scope-badge">${escapeHtml(scope)}</div>` : ''}</div>
