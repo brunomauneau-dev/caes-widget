@@ -198,18 +198,6 @@ function strictFiltersFromQuestion(table, question) {
   const out = [];
   const add = (col, value, op='eq') => { if (col && value !== undefined && value !== null) out.push({ col, value, op }); };
 
-  // DEBUG TEMPORAIRE — diagnostic colonnes
-  if (/(venant|provenant|scolaris)/.test(question || '')) {
-    const hdrs = table?.headers || Object.keys(table?.objects?.[0] || {});
-    console.log('[DEBUG-ETAB] headers (10 first):', JSON.stringify(hdrs.slice(0, 10)));
-    const origCol = findColumnByConceptStrict(table, 'etablissement_origine');
-    console.log('[DEBUG-ETAB] origCol:', origCol);
-    if (origCol) {
-      const sampleVals = [...new Set((table?.objects || []).slice(0, 5).map(r => String(r[origCol] || '')).filter(Boolean))];
-      console.log('[DEBUG-ETAB] sample values:', sampleVals);
-    }
-  }
-
   if (/pays basque|basque/.test(q)) {
     const col = findColumnByConceptStrict(table, 'basque');
     if (col) {
