@@ -521,6 +521,7 @@ function updateChatSub() {
 /* ═══════════════════════ SUGGESTIONS ═══════════════════════ */
 function renderSuggestions() {
   const wrap = document.getElementById('suggestions');
+  if (!wrap) return;
   wrap.innerHTML = '';
   SUGGESTIONS.forEach(s => {
     const chip = document.createElement('div');
@@ -530,9 +531,12 @@ function renderSuggestions() {
     wrap.appendChild(chip);
   });
 }
-renderSuggestions();
-updateSourceHub();
-if (typeof initSessions === 'function') initSessions();
+(function _initWidget() {
+  try { renderSuggestions(); } catch(e) { console.warn('[init] renderSuggestions:', e); }
+  try { updateSourceHub(); } catch(e) { console.warn('[init] updateSourceHub:', e); }
+  window._copilotDataBlocks = [];
+  if (typeof initSessions === 'function') initSessions();
+})();
 
 /* ═══════════════════════ CHAT ═══════════════════════ */
 function handleKeydown(e) {
@@ -608,18 +612,17 @@ async function sendMessage() {
     chatHistory.push({ role: 'assistant', content: deCtx });
     // Enregistre le bloc pour le compositeur d'infographie
     const _skipTools = ['chart_current', 'export_excel', 'export_csv'];
-    const sDE = getCurrentSession();
-    if (sDE && deCtx && deCtx.length > 20 && !_skipTools.includes(dataExecution.plan?.tool)) {
+    if (deCtx && deCtx.length > 20 && !_skipTools.includes(dataExecution.plan?.tool)) {
       try {
-        sDE.dataBlocks = sDE.dataBlocks || [];
         const blkTitle = (typeof extractBlockTitle === 'function')
           ? extractBlockTitle(dataExecution, question)
           : (question.length > 64 ? question.slice(0, 63) + '…' : question);
-        sDE.dataBlocks.push({ id: 'blk_' + Date.now(), title: blkTitle, question, dataContext: deCtx });
-        scheduleSessionsSave();
-      } catch(e) {
-        console.warn('[dataBlocks] Erreur lors de l\'enregistrement du bloc:', e);
-      }
+        const blk = { id: 'blk_' + Date.now(), title: blkTitle, question, dataContext: deCtx };
+        window._copilotDataBlocks = window._copilotDataBlocks || [];
+        window._copilotDataBlocks.push(blk);
+        const sDE = (typeof getCurrentSession === 'function') ? getCurrentSession() : null;
+        if (sDE) { sDE.dataBlocks = sDE.dataBlocks || []; sDE.dataBlocks.push(blk); scheduleSessionsSave(); }
+      } catch(e) { console.warn('[dataBlocks]', e); }
     }
     return;
   }
@@ -693,19 +696,17 @@ ${context || "(Aucun document chargé)"}`;
     chatHistory.push({ role: 'assistant', content: answer });
 
     // Enregistre la réponse Albert comme bloc composable
-    const sAlbert = getCurrentSession();
-    if (sAlbert && answer && answer.length > 80) {
+    if (answer && answer.length > 80) {
       try {
-        sAlbert.dataBlocks = sAlbert.dataBlocks || [];
         const plainCtx = answer.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
         const blkTitle = question.length > 64 ? question.slice(0, 63) + '…' : question;
-        sAlbert.dataBlocks.push({ id: 'blk_' + Date.now(), title: blkTitle, question, dataContext: plainCtx });
-        scheduleSessionsSave();
-      } catch(e) {
-        console.warn('[dataBlocks] Erreur lors de l\'enregistrement du bloc Albert:', e);
-      }
+        const blk = { id: 'blk_' + Date.now(), title: blkTitle, question, dataContext: plainCtx };
+        window._copilotDataBlocks = window._copilotDataBlocks || [];
+        window._copilotDataBlocks.push(blk);
+        const sAlbert = (typeof getCurrentSession === 'function') ? getCurrentSession() : null;
+        if (sAlbert) { sAlbert.dataBlocks = sAlbert.dataBlocks || []; sAlbert.dataBlocks.push(blk); scheduleSessionsSave(); }
+      } catch(e) { console.warn('[dataBlocks Albert]', e); }
     }
-
   } catch (e) {
     removeLoadingMessage(loadingId);
     const isNetworkError = /NetworkError|Failed to fetch|TypeError/i.test(e.message);
