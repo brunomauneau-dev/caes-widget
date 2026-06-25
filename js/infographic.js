@@ -107,6 +107,23 @@ function improveInfographicSpec(spec, question) {
   }
 
   spec.sections = sections.slice(0, 8);
+
+  // Nettoyage : supprime les items avec labels génériques ("Item 1", "Catégorie X", etc.)
+  const _isPlaceholder = s => /^(item\s*\d+|catégorie\s*\d+|cat[eé]gorie\s*\d*|label\s*\d*|valeur\s*\d*|texte\s*\d*)$/i.test(String(s || '').trim());
+  spec.sections = spec.sections.map(sec => {
+    if (Array.isArray(sec.items) && sec.items.length > 0) {
+      const cleaned = sec.items.filter(it => !_isPlaceholder(it.label || it.name || it.title || ''));
+      if (cleaned.length !== sec.items.length) sec = { ...sec, items: cleaned };
+    }
+    return sec;
+  }).filter(sec => {
+    // Re-vérifie les sections ranking/bars/comparison après nettoyage
+    if (sec.type === 'ranking' || sec.type === 'bars')
+      return (sec.items || []).length > 0;
+    if (sec.type === 'comparison')
+      return (sec.items || []).some(it => it.label || it.left || it.right);
+    return true;
+  });
   return spec;
 }
 
@@ -393,20 +410,92 @@ function buildFallbackInfographicSpec(question, localAnalysis) {
   return { title: question || 'Infographie adaptive', subtitle: source, eyebrow: 'Infographie adaptive · Albert', metrics, sections };
 }
 
+let _infogCounter = 0;
+window._infogSpecs = window._infogSpecs || {};
+
+function _icBuildTitlesEditorHtml(spec, uid) {
+  const fields = [
+    { id: `ict-${uid}-title`,    label: 'Titre principal',  val: spec.title    || '' },
+    { id: `ict-${uid}-subtitle`, label: 'Sous-titre',       val: spec.subtitle || '' },
+    ...(spec.sections || []).map((s, i) => ({
+      id:    `ict-${uid}-s${i}`,
+      label: `Section ${i+1} — ${s.type}`,
+      val:   s.title || ''
+    }))
+  ];
+  const inputs = fields.map(f =>
+    `<div style="display:flex;flex-direction:column;gap:3px">
+       <label style="font-size:10px;font-weight:700;color:var(--gris3);text-transform:uppercase">${escapeHtml(f.label)}</label>
+       <input id="${f.id}" value="${escapeAttr(f.val)}" style="border:1px solid var(--gris1);border-radius:6px;padding:5px 8px;font-size:12px;width:100%">
+     </div>`
+  ).join('');
+  return `<div style="display:grid;gap:8px;padding:12px 0">${inputs}
+    <div style="display:flex;gap:8px;margin-top:4px">
+      <button class="ic-retheme-btn" onclick="icApplyTitles(${uid})" style="background:var(--albert);color:white;border-color:var(--albert)">✅ Mettre à jour</button>
+      <button class="ic-retheme-btn" onclick="icToggleTitlesEditor(${uid})">Annuler</button>
+    </div>
+  </div>`;
+}
+
+function icToggleTitlesEditor(uid) {
+  const te = document.getElementById(`ic-te-${uid}`);
+  if (te) te.style.display = te.style.display === 'none' ? 'block' : 'none';
+}
+window.icToggleTitlesEditor = icToggleTitlesEditor;
+
+function icApplyTitles(uid) {
+  const stored = window._infogSpecs[uid];
+  if (!stored) return;
+  const spec = stored.spec;
+  const get = id => { const el = document.getElementById(id); return el ? el.value : null; };
+  const newTitle    = get(`ict-${uid}-title`);
+  const newSubtitle = get(`ict-${uid}-subtitle`);
+  if (newTitle    !== null) spec.title    = newTitle;
+  if (newSubtitle !== null) spec.subtitle = newSubtitle;
+  (spec.sections || []).forEach((s, i) => {
+    const v = get(`ict-${uid}-s${i}`);
+    if (v !== null) s.title = v;
+  });
+  // Re-render
+  const theme = (typeof INFOGRAPH_THEMES !== 'undefined' ? INFOGRAPH_THEMES : []).find(t => t.id === stored.themeId) || {};
+  const newHtml = renderAdaptiveInfographicHtml(spec, spec.title);
+  const blob = new Blob([newHtml], { type: 'text/html;charset=utf-8' });
+  const newUrl = URL.createObjectURL(blob);
+  const frame = document.getElementById(`ic-frame-${uid}`);
+  if (frame) frame.src = newUrl;
+  const openLink = document.getElementById(`ic-open-${uid}`);
+  if (openLink) openLink.href = newUrl;
+  const dlLink = document.getElementById(`ic-dl-${uid}`);
+  if (dlLink) dlLink.href = newUrl;
+  icToggleTitlesEditor(uid);
+}
+window.icApplyTitles = icApplyTitles;
+
 function addInfographicMessage(html, title = 'Infographie adaptive générée', opts = {}) {
   const safeHtml = html || renderAdaptiveInfographicHtml(buildFallbackInfographicSpec(title), title);
   generatedInfographics.push(safeHtml);
   const blob = new Blob([safeHtml], { type: 'text/html;charset=utf-8' });
   const url = URL.createObjectURL(blob);
+
+  const uid = ++_infogCounter;
   const specJson = opts.spec ? JSON.stringify(opts.spec) : null;
   const activeTheme = opts.themeId || 'bordeaux';
+  if (opts.spec) window._infogSpecs[uid] = { spec: JSON.parse(JSON.stringify(opts.spec)), themeId: activeTheme };
 
-  const rethemeHtml = specJson ? `<div class="ic-retheme">${(typeof INFOGRAPH_THEMES !== 'undefined' ? INFOGRAPH_THEMES : []).map(t =>
-    `<button class="ic-retheme-btn${t.id === activeTheme ? ' ic-active' : ''}" onclick="rethemeInfographic(this,${escapeHtml(JSON.stringify(specJson))},'${t.id}')">
-      <span class="ic-theme-dot" style="background:${t.accent};width:9px;height:9px;border-radius:50%;display:inline-block"></span>${escapeHtml(t.label)}
-    </button>`).join('')}
-    <button class="ic-retheme-btn" onclick="openInfographicComposer()" title="Recomposer">✏️ Recomposer</button>
-  </div>` : '';
+  const rethemeHtml = specJson
+    ? `<div class="ic-retheme">
+        ${(typeof INFOGRAPH_THEMES !== 'undefined' ? INFOGRAPH_THEMES : []).map(t =>
+          `<button class="ic-retheme-btn${t.id === activeTheme ? ' ic-active' : ''}"
+            onclick="rethemeInfographic(this,${escapeHtml(JSON.stringify(specJson))},'${t.id}')">
+            <span class="ic-theme-dot" style="background:${t.accent};width:9px;height:9px;border-radius:50%;display:inline-block"></span>${escapeHtml(t.label)}
+          </button>`).join('')}
+        <button class="ic-retheme-btn" onclick="openInfographicComposer()" title="Recomposer">✏️ Recomposer</button>
+        <button class="ic-retheme-btn" onclick="icToggleTitlesEditor(${uid})" title="Modifier les titres">🖊 Titres</button>
+      </div>
+      <div id="ic-te-${uid}" style="display:none;border:1px solid var(--gris1);border-radius:8px;padding:10px;margin-bottom:8px;background:var(--gris0)">
+        ${_icBuildTitlesEditorHtml(opts.spec, uid)}
+      </div>`
+    : '';
 
   const wrap = document.getElementById('chat-messages');
   const msg = document.createElement('div');
@@ -418,10 +507,10 @@ function addInfographicMessage(html, title = 'Infographie adaptive générée', 
     <h4>${escapeHtml(title)}</h4>
     ${rethemeHtml}
     <div style="display:flex;gap:8px;margin:10px 0;flex-wrap:wrap">
-      <a data-infobtn href="${url}" target="_blank" rel="noopener" style="background:var(--albert);color:white;text-decoration:none;padding:7px 10px;border-radius:6px;font-size:12px;font-weight:600">Ouvrir l'infographie</a>
-      <a data-infobtn href="${url}" download="infographie_adaptive_albert.html" style="background:var(--gris0);color:var(--texte);text-decoration:none;padding:7px 10px;border-radius:6px;border:1px solid var(--gris1);font-size:12px;font-weight:600">Télécharger le HTML</a>
+      <a id="ic-open-${uid}" href="${url}" target="_blank" rel="noopener" style="background:var(--albert);color:white;text-decoration:none;padding:7px 10px;border-radius:6px;font-size:12px;font-weight:600">Ouvrir l'infographie</a>
+      <a id="ic-dl-${uid}" href="${url}" download="infographie_adaptive_albert.html" style="background:var(--gris0);color:var(--texte);text-decoration:none;padding:7px 10px;border-radius:6px;border:1px solid var(--gris1);font-size:12px;font-weight:600">Télécharger le HTML</a>
     </div>
-    <iframe src="${url}" title="${escapeAttr(title)}" style="width:100%;height:560px;border:1px solid var(--gris1);border-radius:8px;background:white"></iframe>
+    <iframe id="ic-frame-${uid}" src="${url}" title="${escapeAttr(title)}" style="width:100%;height:560px;border:1px solid var(--gris1);border-radius:8px;background:white"></iframe>
   `;
   msg.appendChild(bubble);
   wrap.appendChild(msg);
@@ -476,6 +565,7 @@ Règles d'adaptation éditoriale :
 - Choisis le composant adapté : ranking/barres pour top catégories, comparison pour deux groupes, stacked pour répartitions qui totalisent 100 %, insights pour interprétation.
 - Évite les tableaux sauf si c'est indispensable ; préfère ranking, cartes ou insights. Ne termine jamais par un tableau : termine par des insights/conclusion. Exception : si le brief contient un TABLEAU EN CASCADE À INTÉGRER OBLIGATOIREMENT, crée une section dédiée cascade/tableau hiérarchique.
 - Pour les barres/rankings, fournis TOUJOURS une valeur numérique d'effectif dans "value". Le libellé affiché peut contenir "count" et "percent", mais "value" doit rester un nombre pur.
+- INTERDIT ABSOLU : Ne jamais utiliser de label générique comme "Item 1", "Item 2", "Item 3", "Catégorie X", "Label", "Valeur" ou tout autre placeholder. Chaque label doit être extrait LITTÉRALEMENT du contexte fourni (ex : "Bordeaux", "Toulouse", "CPGE - CPES", "L1"). Si tu ne trouves pas de label dans le contexte, omets l'item entier.
 - Les insights doivent interpréter les chiffres : évite "X domine" seul ; explique pourquoi c'est notable, surprenant ou utile.
 - N'invente aucun chiffre. Utilise seulement le contexte. Si un élément manque, n'en fais pas une section.
 - Pas de données personnelles ni d'identifiants individuels.
