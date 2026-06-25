@@ -431,7 +431,7 @@ function renderCompareCharts(plan, result) {
 function isDataEngineQuestion(question) {
   const q = normalizeText(question || '');
   if (!q) return false;
-  return /compare|comparaison|comparer|versus| vs |combien|nombre|effectif|compte|compter|repartition|r[eé]partition|ventilation|par |groupe|group[eé]|top|classement|principa|plus frequen|plus fréquent|croise|crois[eé]|tableau crois[eé]|pivot|moyen|moyenne|median|m[eé]diane|minimum|maximum|min|max|export|excel|csv|liste|filtre|graphique|graphe|diagramme|histogramme|camembert|barres?|boursier|basque|hors|sauf|seulement|uniquement|visualis|repr[eé]sent|montre-?moi|dessine|trace/.test(q) || isFollowUpQuestion(question);
+  return /compare|comparaison|comparer|versus| vs |combien|nombre|effectif|compte|compter|repartition|r[eé]partition|ventilation|par |groupe|group[eé]|top|classement|principa|plus frequen|plus fréquent|croise|crois[eé]|tableau crois[eé]|pivot|moyen|moyenne|median|m[eé]diane|minimum|maximum|min|max|export|excel|csv|liste|filtre|graphique|graphe|diagramme|histogramme|camembert|barres?|boursier|basque|hors|sauf|seulement|uniquement|visualis|repr[eé]sent|montre-?moi|dessine|trace|issus?\s+d[ue']|originaires?\s+d[ue']|qui\s+viennent|scolaris[eé]e?s?\s+(?:au|[àa])|venant\s+(?:du|de)|provenant\s+(?:du|de)|sont\s+originaires/.test(q) || isFollowUpQuestion(question);
 }
 
 function inferMeasureIntent(question) {
@@ -458,6 +458,7 @@ function inferMeasureIntent(question) {
   if (/top|classement|principales?|plus frequentes?|plus fréquentes?|les plus/.test(q)) return 'top';
   if (/repartition|r[eé]partition|ventilation|par |groupe|group[eé]|pourcentage|proportion/.test(q)) return 'group_by';
   if (/combien|nombre|effectif|compte|compter|total/.test(q)) return 'count_rows';
+  if (/issus?\s+d[ue']|originaires?\s+d[ue']|qui\s+viennent|scolaris[eé]e?s?\s+(?:au|[àa])|venant\s+(?:du|de)|provenant\s+(?:du|de)|sont\s+originaires/.test(q)) return 'count_rows';
   if (isFollowUpQuestion(question)) return getDataEngineState().lastPlan?.tool || 'count_rows';
   return null;
 }
