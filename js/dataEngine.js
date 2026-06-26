@@ -217,26 +217,29 @@ function pickColumnValue(table, col, kind) {
 function strictFiltersFromQuestion(table, question) {
   const q = normalizeText(question || '');
   const out = [];
-  const add = (col, value, op='eq') => { if (col && value !== undefined && value !== null) out.push({ col, value, op }); };
+  const add = (col, value, op='eq', label=null) => {
+    if (col && value !== undefined && value !== null)
+      out.push({ col, value, op, label: label || null });
+  };
 
   if (/pays basque|basque/.test(q) && !/non[- ]?basque|hors.*basque/.test(q)) {
     const col = findColumnByConceptStrict(table, 'basque');
-    if (col) add(col, pickColumnValue(table, col, 'oui'), 'eq');
+    if (col) add(col, pickColumnValue(table, col, 'oui'), 'eq', 'Pays Basque');
   }
   if (/non[- ]?basque|hors.*basque|hors.*pays.*basque/.test(q)) {
     const col = findColumnByConceptStrict(table, 'basque');
-    if (col) add(col, pickColumnValue(table, col, 'oui'), 'neq');
+    if (col) add(col, pickColumnValue(table, col, 'oui'), 'neq', 'Hors Pays Basque');
   }
   if (/non[- ]?boursier|sans boursier|hors boursier|exclu.*boursier|en excluant.*boursier/.test(q)) {
     const col = findColumnByConceptStrict(table, 'boursier');
-    if (col) add(col, pickColumnValue(table, col, 'boursier_non'), 'eq');
+    if (col) add(col, pickColumnValue(table, col, 'boursier_non'), 'eq', 'Non-boursiers');
   } else if (/boursier|bourse/.test(q)) {
     const col = findColumnByConceptStrict(table, 'boursier');
-    if (col) add(col, pickColumnValue(table, col, 'boursier_oui'), 'eq');
+    if (col) add(col, pickColumnValue(table, col, 'boursier_oui'), 'eq', 'Boursiers');
   }
   if (/hors.*bordeaux|sauf.*bordeaux|exclu.*bordeaux|diff[eé]rent.*bordeaux/.test(q)) {
     const col = findColumnByConceptStrict(table, 'academie_accueil');
-    if (col) add(col, 'Bordeaux', 'neq');
+    if (col) add(col, 'Bordeaux', 'neq', 'Hors Bordeaux');
   }
 
   // Grands groupes de formation (CPGE, BTS, L1, etc.)
@@ -402,8 +405,8 @@ function updateEngineContextBar() {
 
   // Filtres de base
   (plan.filters || []).forEach(f => {
-    const sign = f.op === 'neq' ? '\u2260 ' : '= ';
-    labels.push(f.col + ' ' + sign + f.value);
+    const sign = f.op === 'neq' ? '\u2260 ' : '';
+    labels.push((f.label ? (sign + f.label) : (f.col + ' ' + (f.op === 'neq' ? '\u2260 ' : '= ') + f.value)));
   });
 
   if (!labels.length) { bar.classList.add('empty'); chips.innerHTML = ''; return; }
@@ -1197,7 +1200,7 @@ function renderCompareStatsTable(col, statsRows) {
 
 function renderCompareHtml(plan, result) {
   const filtersHtml = (plan.filters || []).length
-    ? `<div style="margin:10px 0"><strong>Filtres communs</strong><ul style="margin:6px 0 0;padding-left:18px">${plan.filters.map(f => `<li>${escapeHtml(f.col)} ${f.op === 'neq' ? '≠' : '='} <strong>${escapeHtml(f.value)}</strong></li>`).join('')}</ul></div>`
+    ? `<div style="margin:10px 0"><strong>Filtres communs</strong><ul style="margin:6px 0 0;padding-left:18px">${plan.filters.map(f => `<li>${escapeHtml(f.col)} ${f.op === 'neq' ? '≠' : '='} <strong>${escapeHtml(f.label || f.value)}</strong></li>`).join('')}</ul></div>`
     : '<p style="margin:10px 0"><strong>Filtres communs</strong> : aucun.</p>';
   const rows = result.rows || [];
   const baseTotal = result.baseTotal || rows.reduce((s, r) => s + (r.count || 0), 0);
@@ -1425,7 +1428,7 @@ function dataEngineResultToContext(exec) {
 
 function renderDataEngineResultHtml(tool, plan, result) {
   const filtersHtml = (plan.filters || []).length
-    ? `<ul>${plan.filters.map(f => `<li>${escapeHtml(f.col)} ${f.op === 'neq' ? '≠' : '='} <strong>${escapeHtml(f.value)}</strong></li>`).join('')}</ul>`
+    ? `<ul>${plan.filters.map(f => `<li>${escapeHtml(f.col)} ${f.op === 'neq' ? '≠' : '='} <strong>${escapeHtml(f.label || f.value)}</strong></li>`).join('')}</ul>`
     : '<p>Aucun filtre appliqué.</p>';
   const plannerDebug = typeof plannerPlanToDebugHtml === 'function' ? plannerPlanToDebugHtml(plan) : '';
   const debug = `<details class="msg-sources" open><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : ${escapeHtml(tool)}<br><strong>Source</strong> : ${escapeHtml(plan.table?.source || 'Données')} · ${escapeHtml(plan.table?.name || 'table')}<br><strong>Colonnes détectées</strong> : ${escapeHtml((plan.mentionedCols || []).join(' | ') || '—')}</div>${plannerDebug}</details>`;

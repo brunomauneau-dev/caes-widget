@@ -233,3 +233,87 @@ describe('PR 2.2 — resetEngineContext : currentCompare remis a null', () => {
 console.log(`\n${'─'.repeat(50)}`);
 console.log(`Resultat : ${passed} \u2713  ${failed} \u2717  (${passed + failed} tests)`);
 if (failed > 0) process.exit(1);
+
+// ─── Tests label lisible sur les filtres ──────────────────────────────────────
+describe('PR 2.2 fix — label lisible dans updateEngineContextBar', () => {
+  function makeUpdateWithLabel(document, getDataEngineState) {
+    return function updateEngineContextBar() {
+      const bar   = document.getElementById('ec-bar');
+      const chips = document.getElementById('ec-chips');
+      if (!bar || !chips) return;
+      const plan = getDataEngineState().lastPlan;
+      if (!plan) { bar.classList.add('empty'); chips.innerHTML = ''; return; }
+      const labels = [];
+      if (plan.tool === 'compare' && plan.compareGroups && plan.compareGroups.length >= 2) {
+        labels.push(plan.compareGroups.map(g => g.label).join(' / '));
+      }
+      (plan.filters || []).forEach(f => {
+        const sign = f.op === 'neq' ? '\u2260 ' : '';
+        labels.push(f.label ? (sign + f.label) : (f.col + ' ' + (f.op === 'neq' ? '\u2260 ' : '= ') + f.value));
+      });
+      if (!labels.length) { bar.classList.add('empty'); chips.innerHTML = ''; return; }
+      chips.innerHTML = labels.map(l => '<span class="ec-chip">' + escapeHtml(l) + '</span>').join('');
+      bar.classList.remove('empty');
+    };
+  }
+
+  assert(
+    (() => {
+      const dom = makeDomWithEcBar();
+      const fn = makeUpdateWithLabel(dom, () => ({
+        lastPlan: {
+          tool: 'count_rows', filters: [{ col: 'Boursier des lycees', op: 'eq', value: 'Boursier des lycees', label: 'Boursiers' }]
+        }
+      }));
+      fn();
+      return dom._state.chipsHtml.includes('Boursiers') && !dom._state.chipsHtml.includes('Boursier des lycees = Boursier des lycees');
+    })(),
+    'filtre avec label : affiche "Boursiers" et non "Boursier des lycees = Boursier des lycees"'
+  );
+
+  assert(
+    (() => {
+      const dom = makeDomWithEcBar();
+      const fn = makeUpdateWithLabel(dom, () => ({
+        lastPlan: {
+          tool: 'count_rows', filters: [{ col: 'Boursier des lycees', op: 'eq', value: 'Non boursier du secondaire', label: 'Non-boursiers' }]
+        }
+      }));
+      fn();
+      return dom._state.chipsHtml.includes('Non-boursiers');
+    })(),
+    'filtre non-boursiers avec label : affiche "Non-boursiers"'
+  );
+
+  assert(
+    (() => {
+      const dom = makeDomWithEcBar();
+      const fn = makeUpdateWithLabel(dom, () => ({
+        lastPlan: {
+          tool: 'count_rows', filters: [{ col: 'Academie', op: 'neq', value: 'Bordeaux', label: 'Hors Bordeaux' }]
+        }
+      }));
+      fn();
+      return dom._state.chipsHtml.includes('\u2260') && dom._state.chipsHtml.includes('Hors Bordeaux');
+    })(),
+    'filtre neq avec label : signe != et label "Hors Bordeaux"'
+  );
+
+  assert(
+    (() => {
+      // Sans label : fallback sur col = value (ancien comportement)
+      const dom = makeDomWithEcBar();
+      const fn = makeUpdateWithLabel(dom, () => ({
+        lastPlan: {
+          tool: 'count_rows', filters: [{ col: 'Academie', op: 'eq', value: 'Toulouse' }]
+        }
+      }));
+      fn();
+      return dom._state.chipsHtml.includes('Academie') && dom._state.chipsHtml.includes('Toulouse');
+    })(),
+    'filtre sans label : fallback sur col = value'
+  );
+});
+
+console.log('\n' + '-'.repeat(50));
+console.log('Resultat final : ' + (passed) + ' OK  ' + (failed) + ' KO  (' + (passed + failed) + ' tests)');
