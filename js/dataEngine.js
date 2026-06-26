@@ -730,11 +730,18 @@ function currentExecutionToRows(exec) {
   return [];
 }
 
-function downloadRowsAsFile(rows, filename, format) {
+function downloadRowsAsFile(rows, filename, format, meta = {}) {
   if (!rows || !rows.length) return { ok: false, html: '<h4>Export impossible</h4><p>Aucune donnée à exporter.</p>' };
-  const ws = XLSX.utils.json_to_sheet(rows);
+
+  // ── PR 3.1 fix : ligne de métadonnées en tête de fichier ──
+  const dateStr = new Date().toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const filtresStr = (meta.filters || []).map(f => `${f.col} ${f.op === 'neq' ? '≠' : '='} "${f.value}"`).join(' ; ') || 'Aucun filtre';
+  const perimetreStr = meta.perimetre || 'Ensemble';
+  const metaRow = [`Exporté le : ${dateStr}`, `Filtres : ${filtresStr}`, `Périmètre : ${perimetreStr}`, `Lignes : ${rows.length.toLocaleString('fr-FR')}`];
+
   if (format === 'csv') {
-    const csv = XLSX.utils.sheet_to_csv(ws);
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const csv = [metaRow.join('\t'), '', XLSX.utils.sheet_to_csv(ws)].join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -745,6 +752,13 @@ function downloadRowsAsFile(rows, filename, format) {
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 500);
   } else {
+    // Construire la feuille avec la ligne de métadonnées au-dessus des données
+    const dataSheet = XLSX.utils.json_to_sheet(rows);
+    const dataAoa = XLSX.utils.sheet_to_json(dataSheet, { header: 1 });
+    const fullAoa = [metaRow, [], ...dataAoa];
+    const ws = XLSX.utils.aoa_to_sheet(fullAoa);
+    // Style gris clair sur la ligne de métadonnées (compatible Excel)
+    ws['!rows'] = [{ hpt: 18 }, { hpt: 6 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Resultat');
     XLSX.writeFile(wb, filename);
@@ -1267,7 +1281,13 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     const rows = currentExecutionToRows(prev);
     const format = plan.tool === 'export_current_csv' ? 'csv' : 'xlsx';
     const filename = format === 'csv' ? 'resultat_analyse.csv' : 'resultat_analyse.xlsx';
-    const res = downloadRowsAsFile(rows, filename, format);
+    // PR 3.1 fix : construire les métadonnées depuis le plan source
+    const prevFilters = (prev?.plan?.filters || []);
+    const perimetreStr = prevFilters.length
+      ? prevFilters.map(f => `${f.col} ${f.op === 'neq' ? '≠' : '='} "${f.value}"`).join(' ; ')
+      : 'Ensemble';
+    const meta = { filters: prevFilters, perimetre: perimetreStr };
+    const res = downloadRowsAsFile(rows, filename, format, meta);
     return { kind: 'export', plan, result: res, html: res.html };
   }
   if (plan.tool === 'export_excel' || plan.tool === 'export_csv') {
