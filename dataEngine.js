@@ -194,6 +194,9 @@ function pickColumnValue(table, col, kind) {
   if (kind === 'oui') {
     return (normVals.find(x => /^oui$|yes|true|1/.test(x.n)) || normVals.find(x => /oui/.test(x.n)))?.raw || 'oui';
   }
+  if (kind === 'non') {
+    return (normVals.find(x => /^non$|no|false|0/.test(x.n)) || normVals.find(x => /^non/.test(x.n)))?.raw || 'Non';
+  }
   return vals[0];
 }
 
