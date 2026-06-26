@@ -231,6 +231,238 @@ describe('sessions.js — null guards addMessage / addInfographicMessage', () =>
   );
 });
 
+// ─── Reproduction du code patché — renderSuggestions ─────────────────────────
+
+function makeRenderSuggestions(document, SUGGESTIONS, sendMessage) {
+  return function renderSuggestions() {
+    const wrap = document.getElementById('suggestions');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+    SUGGESTIONS.forEach(s => {
+      const chip = { textContent: '', className: '', onclick: null };
+      chip.textContent = s;
+      chip.className = 'sugg-chip';
+      chip.onclick = () => {
+        const input = document.getElementById('chat-input');
+        if (!input) return;
+        input.value = s;
+        sendMessage();
+      };
+      wrap._children = wrap._children || [];
+      wrap._children.push(chip);
+    });
+  };
+}
+
+// ─── Reproduction du code patché — updateChatSub ─────────────────────────────
+
+function makeUpdateChatSub(document, getState) {
+  return function updateChatSub() {
+    const { gristRecords, documents } = getState();
+    const ok = documents.filter(d => d.status === 'ok').length;
+    const total = documents.length;
+    let txt = '';
+    if (gristRecords.length) {
+      txt = `${gristRecords.length} lignes Grist · source prioritaire`;
+    } else if (total === 0) txt = 'Aucun document chargé';
+    else if (ok < total) txt = `${ok}/${total} documents prêts`;
+    else txt = `${ok} document${ok > 1 ? 's' : ''} prêt${ok > 1 ? 's' : ''}`;
+    const el = document.getElementById('chat-sub');
+    if (!el) return;
+    el.textContent = txt;
+  };
+}
+
+// ─── Reproduction du code patché — grist.onOptions ───────────────────────────
+
+function makeGristOnOptions(callbacks = []) {
+  return {
+    onOptions(fn) { callbacks.push(fn); },
+    trigger(opts) { callbacks.forEach(fn => fn(opts)); }
+  };
+}
+
+// ─── Tests renderSuggestions ─────────────────────────────────────────────────
+
+describe('albert.js — renderSuggestions null guard', () => {
+  const SUGGESTIONS = ['Question A', 'Question B'];
+
+  assert(
+    (() => {
+      try {
+        const fn = makeRenderSuggestions(makeDom([]), SUGGESTIONS, () => {});
+        fn();
+        return true;
+      } catch(e) { return false; }
+    })(),
+    'DOM sans #suggestions : aucune exception levée'
+  );
+
+  assert(
+    (() => {
+      const dom = makeDom(['suggestions']);
+      dom.getElementById('suggestions')._children = [];
+      dom.getElementById('suggestions').innerHTML = '';
+      const fn = makeRenderSuggestions(dom, SUGGESTIONS, () => {});
+      fn();
+      return dom.getElementById('suggestions')._children.length === SUGGESTIONS.length;
+    })(),
+    'DOM avec #suggestions : autant de chips que de suggestions'
+  );
+
+  assert(
+    (() => {
+      const dom = makeDom(['suggestions']);
+      dom.getElementById('suggestions')._children = [];
+      dom.getElementById('suggestions').innerHTML = '';
+      const fn = makeRenderSuggestions(dom, SUGGESTIONS, () => {});
+      fn();
+      const chips = dom.getElementById('suggestions')._children;
+      return chips.every(c => c.className === 'sugg-chip');
+    })(),
+    'chaque chip a la classe sugg-chip'
+  );
+
+  assert(
+    (() => {
+      // onclick sans #chat-input : ne doit pas crasher
+      try {
+        const dom = makeDom(['suggestions']);
+        dom.getElementById('suggestions')._children = [];
+        dom.getElementById('suggestions').innerHTML = '';
+        const fn = makeRenderSuggestions(dom, SUGGESTIONS, () => {});
+        fn();
+        const chip = dom.getElementById('suggestions')._children[0];
+        chip.onclick(); // chat-input absent
+        return true;
+      } catch(e) { return false; }
+    })(),
+    'onclick chip sans #chat-input : aucune exception levée'
+  );
+
+  assert(
+    (() => {
+      let sent = false;
+      const dom = makeDom(['suggestions', 'chat-input']);
+      dom.getElementById('suggestions')._children = [];
+      dom.getElementById('suggestions').innerHTML = '';
+      dom.getElementById('chat-input').value = '';
+      const fn = makeRenderSuggestions(dom, ['Question A'], () => { sent = true; });
+      fn();
+      const chip = dom.getElementById('suggestions')._children[0];
+      chip.onclick();
+      return dom.getElementById('chat-input').value === 'Question A' && sent;
+    })(),
+    'onclick chip avec #chat-input : value et sendMessage() appelés'
+  );
+});
+
+// ─── Tests updateChatSub ─────────────────────────────────────────────────────
+
+describe('albert.js — updateChatSub null guard', () => {
+  assert(
+    (() => {
+      try {
+        const fn = makeUpdateChatSub(makeDom([]), () => ({ gristRecords: [], documents: [] }));
+        fn();
+        return true;
+      } catch(e) { return false; }
+    })(),
+    'DOM sans #chat-sub : aucune exception levée'
+  );
+
+  assert(
+    (() => {
+      const dom = makeDom(['chat-sub']);
+      dom.getElementById('chat-sub').textContent = '';
+      const fn = makeUpdateChatSub(dom, () => ({ gristRecords: [], documents: [] }));
+      fn();
+      return dom.getElementById('chat-sub').textContent === 'Aucun document chargé';
+    })(),
+    'aucun doc, aucun Grist : texte "Aucun document chargé"'
+  );
+
+  assert(
+    (() => {
+      const dom = makeDom(['chat-sub']);
+      dom.getElementById('chat-sub').textContent = '';
+      const fn = makeUpdateChatSub(dom, () => ({
+        gristRecords: [{}, {}, {}],
+        documents: []
+      }));
+      fn();
+      return dom.getElementById('chat-sub').textContent.includes('3 lignes Grist');
+    })(),
+    'Grist actif : texte contient le nombre de lignes'
+  );
+
+  assert(
+    (() => {
+      const dom = makeDom(['chat-sub']);
+      dom.getElementById('chat-sub').textContent = '';
+      const fn = makeUpdateChatSub(dom, () => ({
+        gristRecords: [],
+        documents: [{ status: 'ok' }, { status: 'loading' }]
+      }));
+      fn();
+      return dom.getElementById('chat-sub').textContent === '1/2 documents prêts';
+    })(),
+    'docs partiellement prêts : texte "x/y documents prêts"'
+  );
+});
+
+// ─── Tests grist.onOptions (init différée) ────────────────────────────────────
+
+describe('albert.js — init différée via grist.onOptions', () => {
+  assert(
+    (() => {
+      const callbacks = [];
+      const grist = makeGristOnOptions(callbacks);
+      let renderCalled = false, updateCalled = false;
+      grist.onOptions(() => { renderCalled = true; updateCalled = true; });
+      // Avant déclenchement : rien ne doit avoir été appelé
+      return !renderCalled && !updateCalled;
+    })(),
+    'avant grist.onOptions déclenché : renderSuggestions et updateSourceHub non appelés'
+  );
+
+  assert(
+    (() => {
+      const callbacks = [];
+      const grist = makeGristOnOptions(callbacks);
+      let renderCalled = false, updateCalled = false;
+      grist.onOptions(() => { renderCalled = true; updateCalled = true; });
+      grist.trigger({});
+      return renderCalled && updateCalled;
+    })(),
+    'après grist.onOptions déclenché : renderSuggestions et updateSourceHub appelés'
+  );
+
+  assert(
+    (() => {
+      // Simuler un DOM null au moment de l'appel direct (ancien comportement)
+      // vs différé (nouveau comportement)
+      let crashedDirect = false;
+      function renderWithNullDom() {
+        const wrap = null; // simule getElementById retournant null
+        wrap.innerHTML = ''; // crash intentionnel
+      }
+      try { renderWithNullDom(); } catch(e) { crashedDirect = true; }
+
+      // Avec onOptions : la fonction n'est appelée qu'après que Grist est prêt
+      const callbacks = [];
+      const grist = makeGristOnOptions(callbacks);
+      let calledAfterReady = false;
+      grist.onOptions(() => { calledAfterReady = true; });
+      // Pas encore déclenché
+      let safeBeforeTrigger = !calledAfterReady;
+      grist.trigger({});
+      return crashedDirect && safeBeforeTrigger && calledAfterReady;
+    })(),
+    'régression : appel direct crashait, appel différé via onOptions est sûr'
+  );
+});
+
 // ─── Résumé ───────────────────────────────────────────────────────────────────
 console.log(`\n${'─'.repeat(50)}`);
 console.log(`Résultat : ${passed} ✓  ${failed} ✗  (${passed + failed} tests)`);

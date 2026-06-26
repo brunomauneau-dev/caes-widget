@@ -515,23 +515,33 @@ function updateChatSub() {
   } else if (total === 0) txt = 'Aucun document chargé';
   else if (ok < total) txt = `${ok}/${total} documents prêts`;
   else txt = `${ok} document${ok>1?'s':''} prêt${ok>1?'s':''}`;
-  document.getElementById('chat-sub').textContent = txt;
+  const chatSubEl = document.getElementById('chat-sub');
+  if (!chatSubEl) return;
+  chatSubEl.textContent = txt;
 }
 
 /* ═══════════════════════ SUGGESTIONS ═══════════════════════ */
 function renderSuggestions() {
   const wrap = document.getElementById('suggestions');
+  if (!wrap) return;
   wrap.innerHTML = '';
   SUGGESTIONS.forEach(s => {
     const chip = document.createElement('div');
     chip.className = 'sugg-chip';
     chip.textContent = s;
-    chip.onclick = () => { document.getElementById('chat-input').value = s; sendMessage(); };
+    chip.onclick = () => {
+      const input = document.getElementById('chat-input');
+      if (!input) return;
+      input.value = s;
+      sendMessage();
+    };
     wrap.appendChild(chip);
   });
 }
-renderSuggestions();
-updateSourceHub();
+grist.onOptions(function() {
+  renderSuggestions();
+  updateSourceHub();
+});
 
 /* ═══════════════════════ CHAT ═══════════════════════ */
 function handleKeydown(e) {
