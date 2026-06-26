@@ -514,37 +514,27 @@ async function persistSessions() {
     console.warn('Sérialisation des sessions impossible :', e);
     return;
   }
-  // Garde-fou anti-saturation : si le volume dépasse ~4 Mo, on retire
-  // progressivement les données lourdes des sessions les plus anciennes
-  // (jamais la session active), par ordre de priorité croissante.
-  if (payload.length > 4 * 1024 * 1024) {
+  // Garde-fou anti-saturation : 3 passes progressives, jamais sur la session active.
+  // Chaque passe parcourt les sessions de la plus ancienne à la plus récente et
+  // s'arrête dès que le payload repasse sous 4 Mo.
+  // On utilise un tableau de fonctions de purge pour éviter la duplication et garantir
+  // que la passe suivante ne démarre que si la passe courante n'a pas suffi.
+  const LIMIT = 4 * 1024 * 1024;
+  const purgePasses = [
+    s => { s.dataEngineState = { lastPlan: null, lastExecution: null }; },
+    s => { s.dataBlocks = []; },
+    s => { s.messages = s.messages.filter(m => m.type !== 'infographic' && m.type !== 'html'); }
+  ];
+  if (payload.length > LIMIT) {
     const oldestFirst = [...sessions].sort((a, b) => new Date(a.updatedAt) - new Date(b.updatedAt));
-    // Passe 1 : purge dataEngineState des sessions inactives
-    for (const s of oldestFirst) {
-      if (s.id === currentSessionId) continue;
-      s.dataEngineState = { lastPlan: null, lastExecution: null };
-      payload = JSON.stringify(sessions);
-      if (payload.length <= 4 * 1024 * 1024) break;
-    }
-  }
-  if (payload.length > 4 * 1024 * 1024) {
-    const oldestFirst = [...sessions].sort((a, b) => new Date(a.updatedAt) - new Date(b.updatedAt));
-    // Passe 2 : purge dataBlocks (dataContext peut être très lourd)
-    for (const s of oldestFirst) {
-      if (s.id === currentSessionId) continue;
-      s.dataBlocks = [];
-      payload = JSON.stringify(sessions);
-      if (payload.length <= 4 * 1024 * 1024) break;
-    }
-  }
-  if (payload.length > 4 * 1024 * 1024) {
-    const oldestFirst = [...sessions].sort((a, b) => new Date(a.updatedAt) - new Date(b.updatedAt));
-    // Passe 3 : purge les messages HTML lourds (infographies) des sessions inactives
-    for (const s of oldestFirst) {
-      if (s.id === currentSessionId) continue;
-      s.messages = s.messages.filter(m => m.type !== 'infographic' && m.type !== 'html');
-      payload = JSON.stringify(sessions);
-      if (payload.length <= 4 * 1024 * 1024) break;
+    for (const purge of purgePasses) {
+      if (payload.length <= LIMIT) break;
+      for (const s of oldestFirst) {
+        if (s.id === currentSessionId) continue;
+        purge(s);
+        payload = JSON.stringify(sessions);
+        if (payload.length <= LIMIT) break;
+      }
     }
   }
   try {
