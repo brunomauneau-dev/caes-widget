@@ -635,7 +635,7 @@ async function sendMessage() {
 
   if (isInfographicRequest(question)) {
     try {
-      const html = await generateInfographicWithAlbert(question, localAnalysis);
+      const html = await generateInfographicWithAlbert(question, localAnalysis, dataExecution);
       removeLoadingMessage(loadingId);
       addInfographicMessage(html, 'Infographie Albert');
       chatHistory.push({ role: 'user', content: question });

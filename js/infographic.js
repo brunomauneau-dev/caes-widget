@@ -591,8 +591,17 @@ function addInfographicMessage(html, title = 'Infographie adaptive générée', 
   }
 }
 
-async function generateInfographicWithAlbert(question, localAnalysis) {
-  const context = buildContext(localAnalysis);
+async function generateInfographicWithAlbert(question, localAnalysis, dataExecution = null) {
+  // Si un résultat Data Engine est disponible (compare, group_by, pivot…), on l'injecte
+  // en tête de contexte — il est plus structuré que la répartition locale et doit primer.
+  let deContext = '';
+  if (dataExecution && typeof dataEngineResultToContext === 'function') {
+    try {
+      const raw = dataEngineResultToContext(dataExecution);
+      if (raw && raw.length > 20) deContext = raw + '\n\n';
+    } catch(e) { console.warn('[infographic] dataEngineResultToContext error:', e); }
+  }
+  const context = deContext + buildContext(localAnalysis);
   const specPrompt = `Tu es un directeur artistique, data analyst et rédacteur institutionnel.
 
 Tu dois produire une SPECIFICATION JSON pour une infographie adaptive. Le HTML sera généré ensuite par un moteur de rendu : ne renvoie donc PAS de HTML.
