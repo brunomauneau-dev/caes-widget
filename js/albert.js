@@ -754,10 +754,12 @@ function removeLoadingMessage(id) {
 
 /* ═══════════════════════ AUTO-RESIZE TEXTAREA ═══════════════════════ */
 const textarea = document.getElementById('chat-input');
-textarea.addEventListener('input', () => {
-  textarea.style.height = 'auto';
-  textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
-});
+if (textarea) {
+  textarea.addEventListener('input', () => {
+    textarea.style.height = 'auto';
+    textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+  });
+}
 
 /* ═══════════════════════ VIEWER DE DOCUMENT ═══════════════════════ */
 let viewerCurrentDocId = null;
@@ -829,13 +831,16 @@ function copyViewerContent() {
 }
 
 // Met à jour le viewer en direct si le document affiché finit son extraction
-const originalRenderDocs = renderDocs;
-renderDocs = function() {
-  originalRenderDocs();
-  if (viewerCurrentDocId && document.getElementById('viewer-overlay').classList.contains('show')) {
-    const doc = documents.find(d => d.id === viewerCurrentDocId);
-    if (doc && doc.status !== 'loading') openViewer(viewerCurrentDocId);
-  }
-};
+if (typeof renderDocs === 'function') {
+  const originalRenderDocs = renderDocs;
+  renderDocs = function() {
+    originalRenderDocs();
+    const overlay = document.getElementById('viewer-overlay');
+    if (viewerCurrentDocId && overlay && overlay.classList.contains('show')) {
+      const doc = documents.find(d => d.id === viewerCurrentDocId);
+      if (doc && doc.status !== 'loading') openViewer(viewerCurrentDocId);
+    }
+  };
+}
 
 

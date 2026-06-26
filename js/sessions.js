@@ -617,9 +617,10 @@ function renderActiveSession() {
     if (typeof renderSuggestions === 'function') renderSuggestions();
   } else {
     session.messages.forEach(entry => {
-      if (entry.type === 'text') addMessage(entry.role, entry.text, { record: false });
-      else if (entry.type === 'html') addMessage(entry.role, entry.html, { record: false });
-      else if (entry.type === 'infographic') addInfographicMessage(entry.html, entry.title, { record: false });
+      if (typeof addMessage !== 'function' && typeof addInfographicMessage !== 'function') return;
+      if (entry.type === 'text' && typeof addMessage === 'function') addMessage(entry.role, entry.text, { record: false });
+      else if (entry.type === 'html' && typeof addMessage === 'function') addMessage(entry.role, entry.html, { record: false });
+      else if (entry.type === 'infographic' && typeof addInfographicMessage === 'function') addInfographicMessage(entry.html, entry.title, { record: false });
     });
   }
 
