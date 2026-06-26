@@ -12,7 +12,7 @@ Schéma :
 Règles ABSOLUES :
 - Infographie narrative avec fil conducteur clair, max 7 sections non redondantes.
 - N'invente aucun chiffre. Utilise SEULEMENT les données fournies ci-dessous.
-- INTERDIT ABSOLU : Ne jamais utiliser de label générique comme "Item 1", "Item 2", "Item 3", "Catégorie X", "Label", "Valeur". Chaque label doit être extrait LITTÉRALEMENT des données fournies (ex : "Bordeaux", "Toulouse", "CPGE - CPES"). Si tu ne trouves pas de label dans les données, omets l'item entier.
+- INTERDIT ABSOLU : Ne jamais utiliser de label générique comme "Item 1", "Item 2", "Item 3", "Analyse 1", "Catégorie X", "Label", "Valeur", "Périmètre", "Section X". Chaque label doit être extrait LITTÉRALEMENT des données fournies (ex : "Bordeaux", "Toulouse", "CPGE - CPES"). Si tu ne trouves pas de label dans les données, omets l'item entier.
 - INTERDIT : champs vides (""), valeurs "...", titres génériques comme "À retenir" sans texte, cards insights sans contenu réel.
 - Chaque card insights DOIT avoir un champ "text" non vide (minimum 15 mots) avec une vraie analyse ou interprétation issue des données.
 - Si tu n'as pas assez de données pour remplir une section complètement, réduis le nombre d'items plutôt que de laisser des champs vides.

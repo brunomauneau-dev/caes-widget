@@ -840,6 +840,87 @@ function copyViewerContent() {
   });
 }
 
+
+// PR 4.1 — normalizeInfographicSpec : filtre les placeholders résiduels après génération Albert.
+// Appelée par sessions.js après parsing du JSON infographie.
+function normalizeInfographicSpec(spec, question) {
+  if (!spec || typeof spec !== 'object') return spec;
+
+  // Patterns de placeholders à détecter (insensible à la casse)
+  const PLACEHOLDER_PATTERNS = [
+    /^item\s*\d+$/i,
+    /^analyse\s*\d*$/i,
+    /^catégorie\s*[xn°\d]*$/i,
+    /^section\s*\d*$/i,
+    /^donnée\s*[xn°\d]*$/i,
+    /^label$/i,
+    /^valeur$/i,
+    /^périmètre$/i,
+    /^titre$/i,
+    /^texte$/i,
+    /^\.\.\.*$/,
+    /^xxx+$/i,
+    /^n\/a$/i,
+    /^à\s+compléter$/i,
+    /^à\s+définir$/i,
+  ];
+
+  function isPlaceholder(str) {
+    if (!str || typeof str !== 'string') return true;
+    const s = str.trim();
+    if (!s) return true;
+    return PLACEHOLDER_PATTERNS.some(p => p.test(s));
+  }
+
+  function cleanItems(items) {
+    if (!Array.isArray(items)) return items;
+    return items.filter(item => {
+      if (!item || typeof item !== 'object') return false;
+      // Rejeter si le label/titre est un placeholder
+      if (isPlaceholder(item.label) || isPlaceholder(item.title)) return false;
+      // Rejeter si la valeur principale est vide ou placeholder
+      const mainVal = item.value ?? item.text ?? '';
+      if (isPlaceholder(mainVal)) return false;
+      // Rejeter les insights avec texte trop court (< 10 mots)
+      if (item.text !== undefined && typeof item.text === 'string') {
+        const wordCount = item.text.trim().split(/\s+/).length;
+        if (wordCount < 10) return false;
+      }
+      return true;
+    });
+  }
+
+  // Nettoyer le titre et subtitle globaux
+  if (isPlaceholder(spec.title)) spec.title = (question || 'Analyse Parcoursup').slice(0, 60);
+  if (isPlaceholder(spec.subtitle)) delete spec.subtitle;
+
+  // Nettoyer les métriques
+  if (Array.isArray(spec.metrics)) {
+    spec.metrics = cleanItems(spec.metrics);
+  }
+
+  // Nettoyer les sections
+  if (Array.isArray(spec.sections)) {
+    spec.sections = spec.sections
+      .map(section => {
+        if (!section || typeof section !== 'object') return null;
+        if (isPlaceholder(section.title)) return null;
+        if (Array.isArray(section.items)) {
+          section.items = cleanItems(section.items);
+          // Supprimer la section entière si plus aucun item valide
+          if (!section.items.length) return null;
+        }
+        return section;
+      })
+      .filter(Boolean);
+  }
+
+  // Nettoyer le footer
+  if (isPlaceholder(spec.footer)) delete spec.footer;
+
+  return spec;
+}
+
 // Met à jour le viewer en direct si le document affiché finit son extraction
 if (typeof renderDocs === 'function') {
   const originalRenderDocs = renderDocs;
