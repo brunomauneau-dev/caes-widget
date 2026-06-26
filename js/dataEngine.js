@@ -381,7 +381,46 @@ function rememberDataEngineExecution(exec) {
   state.history = state.history || [];
   state.history.push({ at: new Date().toISOString(), plan: exec.plan, kind: exec.kind, summary: dataEngineResultToContext(exec).slice(0, 1000) });
   state.history = state.history.slice(-12);
+  updateEngineContextBar();
 }
+
+// PR 2.2 — badge contexte moteur : affiche les filtres/groupes actifs du lastPlan.
+function updateEngineContextBar() {
+  const bar   = document.getElementById('ec-bar');
+  const chips = document.getElementById('ec-chips');
+  if (!bar || !chips) return;
+
+  const plan = getDataEngineState().lastPlan;
+  if (!plan) { bar.classList.add('empty'); chips.innerHTML = ''; return; }
+
+  const labels = [];
+
+  // Groupes compare
+  if (plan.tool === 'compare' && plan.compareGroups && plan.compareGroups.length >= 2) {
+    labels.push(plan.compareGroups.map(g => g.label).join(' / '));
+  }
+
+  // Filtres de base
+  (plan.filters || []).forEach(f => {
+    const sign = f.op === 'neq' ? '\u2260 ' : '= ';
+    labels.push(f.col + ' ' + sign + f.value);
+  });
+
+  if (!labels.length) { bar.classList.add('empty'); chips.innerHTML = ''; return; }
+
+  chips.innerHTML = labels.map(l =>
+    '<span class="ec-chip">' + escapeHtml(l) + '</span>'
+  ).join('');
+  bar.classList.remove('empty');
+}
+
+// PR 2.2 — reset contexte seul (DATA_ENGINE_STATE) sans vider le chat.
+function resetEngineContext() {
+  window.__DATA_ENGINE_STATE = { lastPlan: null, lastExecution: null, history: [] };
+  updateEngineContextBar();
+  if (typeof updateChatSub === 'function') updateChatSub();
+}
+window.resetEngineContext = resetEngineContext;
 
 function renderMiniBarChart(rows, total) {
   if (!rows || !rows.length) return '';
