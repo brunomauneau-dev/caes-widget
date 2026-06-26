@@ -599,7 +599,6 @@ async function sendMessage() {
   const dataExecution = dataPlan ? runDataEnginePlan(dataPlan) : null;
   const localAnalysis = executeLocalDataQuery(question, filterContextText);
 
-  console.log('[ALBERT] dataExecution:', !!dataExecution, 'kind:', dataExecution?.kind, 'local?', shouldAnswerLocallyWithoutAlbert(dataExecution), 'infographic?', isInfographicRequest(question));
   if (dataExecution && shouldAnswerLocallyWithoutAlbert(dataExecution) && !isInfographicRequest(question)) {
     removeLoadingMessage(loadingId);
     addMessage('assistant', dataExecution.html);

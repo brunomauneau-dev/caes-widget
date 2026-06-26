@@ -576,12 +576,10 @@ function detectDataEnginePlan(question, filterContextText = question) {
   if (currentPlan) return currentPlan;
 
   const tool = inferMeasureIntent(question);
-  console.log('[DE] question:', JSON.stringify(question), '→ tool:', tool, '| lastPlan.tool:', getDataEngineState().lastPlan?.tool || 'null');
   if (!tool) return null;
 
   if (tool === 'compare') {
     const groups = detectCompareGroups(table, question);
-    console.log('[DE] detectCompareGroups:', groups.length, 'groups:', groups.map(g => g.label));
     if (groups.length >= 2) {
       const baseFilters = strictFiltersFromQuestion(table, question).filter(f => !groups.some(g => (g.filters || []).some(gf => gf.col === f.col)));
       return inheritConversationContext({
@@ -1168,8 +1166,7 @@ function renderCompareHtml(plan, result) {
 
 function runDataEnginePlan(plan, persistentFiltersOverride) {
   plan = finalSanitizeAnalysisPlan(plan);
-  console.log('[RUN] after sanitize: tool=', plan?.tool, 'table?', !!plan?.table, 'compareGroups=', plan?.compareGroups?.length);
-  if (!plan || !plan.table) { console.warn('[RUN] returning null: plan=', !!plan, 'table=', !!plan?.table); return null; }
+  if (!plan || !plan.table) return null;
   // Re-injection des filtres persistants APRES le sanitize.
   // Comparaison par COLONNE uniquement (pas par {col,op,value}) pour éviter
   // d'ajouter "Zone = oui" quand la question a explicitement posé "Zone ≠ oui".
@@ -1184,19 +1181,16 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
   }
   if (plan.tool === 'compare') {
     const groups = plan.compareGroups || detectCompareGroups(plan.table, plan.question);
-    console.log('[RUN compare] groups:', groups?.length, groups?.map(g=>g.label));
-    if (!groups || groups.length < 2) { console.warn('[RUN compare] not enough groups, returning null'); return null; }
+    if (!groups || groups.length < 2) return null;
     const commonFilters = sanitizeCompareCommonFilters(plan, groups);
     const comparePlan = { ...plan, filters: commonFilters, compareGroups: groups };
     const rows = compareGroupSummary(plan.table, groups, commonFilters);
     const baseTotal = applyLocalActionFilters(plan.table.objects || [], commonFilters).length;
-    console.log('[RUN compare] baseTotal=', baseTotal, 'rows=', rows.map(r=>r.label+':'+r.count));
     let _compareHtml;
     try { _compareHtml = renderCompareHtml(comparePlan, { rows, baseTotal }); }
     catch(e) { console.error('[RUN compare] renderCompareHtml THREW:', e); return null; }
     const exec = { kind: 'compare', plan: comparePlan, result: { rows, baseTotal }, text: rows.map(r => `${r.label}: ${r.count}`).join('\n'), html: _compareHtml };
     rememberDataEngineExecution(exec);
-    console.log('[RUN compare] exec created, kind=compare ✅');
     return exec;
   }
   if (plan.tool === 'chart_current') {
