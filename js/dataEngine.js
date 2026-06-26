@@ -157,6 +157,20 @@ function isFilterOnlyFollowUp(question) {
   return /^(seulement|uniquement|avec|sans|sauf|hors|excluant|en excluant|les boursiers|les non boursiers|non boursiers|boursiers|et pour|et les|et chez|parmi les|pour les|chez les|uniquement les|notamment les|en particulier|et parmi)/.test(q);
 }
 
+// PR 2.1 — distingue "filtre sur population" vs "nouvelle paire à comparer".
+// "Et pour les non-boursiers ?" après un compare admis/non-admis = filtre, pas nouvelle paire.
+// "Compare boursiers vs non-boursiers" = nouvelle paire.
+// Règle : si la question contient un marqueur de population unique (boursier, basque,
+// apprenti, admis) SANS marqueur de comparaison (vs, versus, compare, comparaison),
+// c'est un filtre de population pur.
+function isPopulationFilterFollowUp(question) {
+  const q = normalizeText(question || '');
+  const hasCompareMarker = /\bversus\b| vs | comparer?\b|comparaison/.test(q);
+  if (hasCompareMarker) return false;
+  return /^(et pour|pour les|chez les|parmi les|et chez|et parmi|et les|uniquement les?|seulement les?)\s+(les?\s+)?(non[- ]?boursiers?|boursiers?|non[- ]?basques?|basques?|non[- ]?admis|admis|non[- ]?apprentis?|apprentis?)/.test(q)
+    || /^(non[- ]?boursiers?|boursiers?|non[- ]?basques?|basques?|non[- ]?admis|admis|non[- ]?apprentis?|apprentis?)\s*\??$/.test(q);
+}
+
 function findColumnByConceptStrict(table, concept) {
   const headers = table?.headers || Object.keys(table?.objects?.[0] || {});
   const scored = headers.map(h => {
@@ -794,14 +808,22 @@ function finalSanitizeAnalysisPlan(plan) {
       if (inheritTool === 'compare') {
         const newGroups = plan.table ? detectCompareGroups(plan.table, plan.question || '') : [];
         const prevGroups = prev.compareGroups || [];
-        // Si de nouveaux groupes DIFFÉRENTS sont détectés → nouvelle comparaison
-        const groupsDiffer = newGroups.length >= 2 &&
-          !newGroups.every(ng => prevGroups.some(pg => pg.label === ng.label));
-        if (groupsDiffer) {
+        // PR 2.1 — filtre de population pur ("Et pour les non-boursiers ?") :
+        // pas une nouvelle paire, juste un filtre de base sur la même question.
+        // On sort du compare pour répondre sur la population filtrée.
+        if (isPopulationFilterFollowUp(plan.question || '')) {
+          plan.tool = prev.targetCol ? 'group_by' : 'count_rows';
+          if (prev.targetCol)  plan.targetCol  = prev.targetCol;
+          if (prev.targetCol2) plan.targetCol2 = prev.targetCol2;
+          if (prev.limit)      plan.limit      = prev.limit;
+          plan.filters = mergeFiltersUnique([], strict);
+        // Si de nouveaux groupes DIFFERENTS sont detectes -> nouvelle comparaison
+        } else if (newGroups.length >= 2 &&
+          !newGroups.every(ng => prevGroups.some(pg => pg.label === ng.label))) {
           plan.tool = 'compare';
           plan.compareGroups = newGroups;
         } else if (prevGroups.length >= 2) {
-          // Hériter les groupes précédents + le filtre courant devient filtre de base commun
+          // Heriter les groupes precedents + le filtre courant devient filtre de base commun
           plan.tool = 'compare';
           plan.compareGroups = prevGroups;
           plan.filters = mergeFiltersUnique(prev.filters || [], strict);
