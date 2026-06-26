@@ -48,6 +48,12 @@ function isPlaceholder_simple(str) {
   return /^(analyse\s*\d*|item\s*\d+|section\s*(?:[xX]|\d+)?|cat[eé]gorie\s*(?:[xX]|\d+)|donn[eé]e\s*[xX]?|p[eé]rim[eè]tre|titre|texte|label|valeur|n\/a|\.{2,}|xxx+)$/i.test(s);
 }
 
+// Détecte un pattern placeholder en sous-chaîne (pour footer, notes, etc.)
+function containsPlaceholderSubstring(str) {
+  if (!str || typeof str !== 'string') return false;
+  return /\b(analyse\s*\d+|table\s*[«"]\s*analyse\s*\d+|item\s*\d+|catégorie\s*\d+|label\s*\d+|valeur\s*\d+|texte\s*\d+)\b/i.test(str);
+}
+
 function normalizeInfographicSpec(spec, question) {
   spec = spec && typeof spec === 'object' ? spec : {};
   spec.title = spec.title || 'Infographie de données';
@@ -59,7 +65,9 @@ function normalizeInfographicSpec(spec, question) {
   spec.secondary = /^#[0-9a-f]{6}$/i.test(spec.secondary || '') ? spec.secondary : '#1a3a5c';
   spec.metrics = Array.isArray(spec.metrics) ? spec.metrics.slice(0, 6) : [];
   spec.sections = Array.isArray(spec.sections) ? spec.sections.slice(0, 10) : [];
-  spec.footer = spec.footer || 'Infographie générée à partir des données analysées localement par le widget.';
+  spec.footer = (spec.footer && !containsPlaceholderSubstring(spec.footer))
+    ? spec.footer
+    : 'Infographie générée à partir des données analysées localement par le widget.';
   return improveInfographicSpec(spec, question);
 }
 
@@ -183,8 +191,15 @@ function improveInfographicSpec(spec, question) {
   }).filter(sec => {
     const type = sec.type || 'text';
     const items = sec.items || sec.data || sec.insights || sec.metrics || [];
-    if (type === 'ranking' || type === 'bars')
-      return Array.isArray(items) && items.length > 0;
+    if (type === 'ranking' || type === 'bars') {
+      if (!Array.isArray(items) || items.length === 0) return false;
+      // Rejeter si aucun item n'a de valeur numérique exploitable (évite les barres plates à 2%)
+      const hasNumericValue = items.some(it => {
+        const v = it.value ?? it.count ?? it.n ?? it.effectif ?? it.nb ?? it.total ?? it.display ?? null;
+        return v !== null && v !== '' && !isNaN(parseFloat(String(v).replace(/[\s ]/g, '').replace(',', '.')));
+      });
+      return hasNumericValue;
+    }
     if (type === 'comparison')
       // Un item comparison doit avoir des valeurs gauche ET droite, pas juste un label
       return Array.isArray(items) && items.some(it => (it.left || it.right) && (it.left !== '/' && it.right !== '/'));
