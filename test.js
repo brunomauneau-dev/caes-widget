@@ -404,6 +404,17 @@ test('"et les boursiers ?" après count_rows hérite le filtre', () => {
   assert(boursier, 'Filtre boursier doit être ajouté');
 });
 
+test('"et pour les non-boursiers ?" après compare hérite les groupes', () => {
+  global.persistentFilters = [];
+  ask('compare les admis et les non admis');
+  const { plan } = ask('et pour les non-boursiers ?');
+  assertEqual(plan.tool, 'compare', 'tool doit rester compare');
+  assert(plan.compareGroups?.length >= 2, `compareGroups manquants après follow-up : ${JSON.stringify(plan.compareGroups)}`);
+  // Filtre non-boursier doit être présent en base
+  const boursier = plan.filters.find(f => /boursier/i.test(f.col));
+  assert(boursier, 'Filtre non-boursier doit être en filtre de base');
+});
+
 // ─── Rapport final ────────────────────────────────────────────────────────────
 const total = passed + failed;
 console.log(`\n${'─'.repeat(50)}`);

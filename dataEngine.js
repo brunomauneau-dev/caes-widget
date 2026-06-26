@@ -777,15 +777,21 @@ function finalSanitizeAnalysisPlan(plan) {
     }
     if (filterFollowUp) {
       const inheritTool = prev.tool || plan.tool;
-      // Si le tool hérité est 'compare' mais la question courante ne définit pas 2 groupes,
-      // rétrograder vers group_by (ou count_rows si pas de targetCol).
       if (inheritTool === 'compare') {
         const newGroups = plan.table ? detectCompareGroups(plan.table, plan.question || '') : [];
-        if (newGroups.length >= 2) {
+        const prevGroups = prev.compareGroups || [];
+        // Si de nouveaux groupes DIFFÉRENTS sont détectés → nouvelle comparaison
+        const groupsDiffer = newGroups.length >= 2 &&
+          !newGroups.every(ng => prevGroups.some(pg => pg.label === ng.label));
+        if (groupsDiffer) {
           plan.tool = 'compare';
           plan.compareGroups = newGroups;
+        } else if (prevGroups.length >= 2) {
+          // Hériter les groupes précédents + le filtre courant devient filtre de base commun
+          plan.tool = 'compare';
+          plan.compareGroups = prevGroups;
+          plan.filters = mergeFiltersUnique(prev.filters || [], strict);
         } else {
-          // Pas de nouveaux groupes → group_by avec filtre ajouté (ou count_rows)
           plan.tool = prev.targetCol ? 'group_by' : 'count_rows';
           if (prev.targetCol) plan.targetCol = prev.targetCol;
         }
