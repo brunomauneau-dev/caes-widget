@@ -604,34 +604,42 @@ async function sendMessage() {
   const loadingId = 'loading_' + Date.now();
   addLoadingMessage(loadingId);
 
-  const filterContextText = [...chatHistory.slice(-4).map(m => m.content), question].join('\n');
-  let dataPlan = detectDataEnginePlan(question, filterContextText);
-  const dataExecution = dataPlan ? runDataEnginePlan(dataPlan) : null;
-  const localAnalysis = executeLocalDataQuery(question, filterContextText);
-
-  if (dataExecution && shouldAnswerLocallyWithoutAlbert(dataExecution) && !isInfographicRequest(question)) {
-    removeLoadingMessage(loadingId);
-    addMessage('assistant', dataExecution.html);
-    chatHistory.push({ role: 'user', content: question });
-    const deCtx = dataEngineResultToContext(dataExecution);
-    chatHistory.push({ role: 'assistant', content: deCtx });
-    // Enregistre le bloc pour le compositeur d'infographie
-    const _skipTools = ['chart_current', 'export_excel', 'export_csv'];
-    const sDE = getCurrentSession();
-    if (sDE && deCtx && deCtx.length > 20 && !_skipTools.includes(dataExecution.plan?.tool)) {
-      try {
-        sDE.dataBlocks = sDE.dataBlocks || [];
-        const blkTitle = (typeof extractBlockTitle === 'function')
-          ? extractBlockTitle(dataExecution, question)
-          : (question.length > 64 ? question.slice(0, 63) + '…' : question);
-        sDE.dataBlocks.push({ id: 'blk_' + Date.now(), title: blkTitle, question, dataContext: deCtx });
-        scheduleSessionsSave();
-      } catch(e) {
-        console.warn('[dataBlocks] Erreur lors de l\'enregistrement du bloc:', e);
-      }
-    }
-    return;
-  }
+   const filterContextText = [...chatHistory.slice(-4).map(m => m.content), question].join('\n');
+   let dataPlan = detectDataEnginePlan(question, filterContextText);
+   const dataExecution = dataPlan ? runDataEnginePlan(dataPlan) : null;
+   const localAnalysis = executeLocalDataQuery(question, filterContextText);
+ 
+   // Enregistre le bloc Data Engine dès qu'il existe, quel que soit le chemin de rendu ensuite.
+   // Garantit que le compositeur d'infographie trouve les résultats compare/group_by/pivot
+   // même quand Albert gère lui-même la réponse textuelle.
+   const _skipToolsEarly = ['chart_current', 'export_excel', 'export_csv'];
+   if (dataExecution && !_skipToolsEarly.includes(dataExecution.plan?.tool)) {
+     try {
+       const deCtxEarly = dataEngineResultToContext(dataExecution);
+       if (deCtxEarly && deCtxEarly.length > 20) {
+         const sEarly = getCurrentSession();
+         if (sEarly) {
+           sEarly.dataBlocks = sEarly.dataBlocks || [];
+           const blkTitleEarly = (typeof extractBlockTitle === 'function')
+             ? extractBlockTitle(dataExecution, question)
+             : (question.length > 64 ? question.slice(0, 63) + '\u2026' : question);
+           sEarly.dataBlocks.push({ id: 'blk_' + Date.now(), title: blkTitleEarly, question, dataContext: deCtxEarly });
+           scheduleSessionsSave();
+         }
+       }
+     } catch(e) {
+       console.warn('[dataBlocks] Erreur enregistrement bloc anticipé:', e);
+     }
+   }
+ 
+   if (dataExecution && shouldAnswerLocallyWithoutAlbert(dataExecution) && !isInfographicRequest(question)) {
+     removeLoadingMessage(loadingId);
+     addMessage('assistant', dataExecution.html);
+     chatHistory.push({ role: 'user', content: question });
+     const deCtx = dataEngineResultToContext(dataExecution);
+     chatHistory.push({ role: 'assistant', content: deCtx });
+     return;
+   }
 
   if (isInfographicRequest(question)) {
     try {
