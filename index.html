@@ -328,6 +328,23 @@
   .pf-clear { font-size: 10px; color: var(--gris3); background: none; border: none; cursor: pointer; margin-left: 4px; }
   .pf-clear:hover { color: var(--rouge); }
 
+  /* PR 2.2 - barre contexte moteur */
+  .ec-bar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    padding: 5px max(22px, calc((100vw - 1040px)/2));
+    background: #eff6ff; border-bottom: 1px solid #bfdbfe;
+    min-height: 32px;
+  }
+  .ec-bar.empty { display: none; }
+  .ec-label { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .7px; color: #3b82f6; flex-shrink: 0; }
+  .ec-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: #dbeafe; border: 1px solid #93c5fd; color: #1e40af;
+    font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 20px;
+  }
+  .ec-reset { font-size: 10px; color: #3b82f6; background: none; border: none; cursor: pointer; margin-left: auto; }
+  .ec-reset:hover { color: var(--rouge); text-decoration: underline; }
+
   /* Modal config Albert */
   .modal-overlay {
     display: none;
@@ -804,6 +821,13 @@
       <span class="pf-label">🔒 Filtres actifs</span>
       <div id="pf-chips"></div>
       <button class="pf-clear" onclick="clearAllPersistentFilters()">Tout effacer</button>
+    </div>
+
+    <!-- PR 2.2 - Barre contexte moteur (filtre / groupes actifs) -->
+    <div class="ec-bar empty" id="ec-bar">
+      <span class="ec-label">Contexte</span>
+      <div id="ec-chips"></div>
+      <button class="ec-reset" onclick="resetEngineContext()">&#x21BA; Reinitialiser contexte</button>
     </div>
 
     <div class="chat-messages" id="chat-messages">
