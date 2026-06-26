@@ -62,6 +62,7 @@ async function loadAlbertConfig() {
   }
 }
 loadAlbertConfig();
+if (typeof initSessions === 'function') initSessions();
 
 function updateConfigStatusBadge() {
   const badge = document.querySelector('.albert-badge');
