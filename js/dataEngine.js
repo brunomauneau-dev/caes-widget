@@ -425,13 +425,85 @@ function resetEngineContext() {
 }
 window.resetEngineContext = resetEngineContext;
 
-function renderMiniBarChart(rows, total) {
+// PR 3.2 — export image PNG d'un graphique SVG ou d'un bloc HTML de barres.
+// Sérialise le nœud DOM ciblé en SVG/Canvas puis déclenche un téléchargement PNG.
+function exportChartAsPng(btn, filename) {
+  filename = filename || 'graphique.png';
+  const card = btn.closest('.de-chart-export-wrap');
+  if (!card) return;
+  const svgEl = card.querySelector('svg');
+  if (svgEl) {
+    // Chemin SVG → Canvas → PNG
+    const svgStr = new XMLSerializer().serializeToString(svgEl);
+    const svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = svgEl.viewBox?.baseVal?.width || svgEl.width?.baseVal?.value || 560;
+      canvas.height = svgEl.viewBox?.baseVal?.height || svgEl.height?.baseVal?.value || 200;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+      const a = document.createElement('a');
+      a.download = filename;
+      a.href = canvas.toDataURL('image/png');
+      a.click();
+    };
+    img.src = url;
+  } else {
+    // Chemin barres HTML → Canvas via html2canvas non disponible : fallback SVG généré à la volée
+    const bars = card.querySelectorAll('[data-bar-value]');
+    if (!bars.length) { alert('Export non disponible pour ce type de graphique.'); return; }
+    const W = 600, barH = 24, gap = 8, pad = 12, labelW = 220;
+    const H = pad * 2 + bars.length * (barH + gap);
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+    bars.forEach((bar, i) => {
+      const y = pad + i * (barH + gap);
+      const label = bar.dataset.barLabel || '';
+      const pct = parseFloat(bar.dataset.barValue) || 0;
+      const count = bar.dataset.barCount || '';
+      // fond
+      ctx.fillStyle = '#f3f4f6';
+      ctx.beginPath(); ctx.roundRect(labelW + pad, y, W - labelW - pad * 2, barH, 6); ctx.fill();
+      // barre
+      ctx.fillStyle = '#6d28d9';
+      ctx.beginPath(); ctx.roundRect(labelW + pad, y, Math.max(4, (W - labelW - pad * 2) * pct / 100), barH, 6); ctx.fill();
+      // label
+      ctx.fillStyle = '#1f2937'; ctx.font = '12px system-ui,sans-serif';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label.slice(0, 30), pad, y + barH / 2);
+      // count
+      ctx.fillStyle = '#374151'; ctx.font = 'bold 11px system-ui,sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(count, W - pad, y + barH / 2);
+      ctx.textAlign = 'left';
+    });
+    const a = document.createElement('a');
+    a.download = filename;
+    a.href = canvas.toDataURL('image/png');
+    a.click();
+  }
+}
+
+function _chartExportBtn(filename) {
+  return `<button onclick="exportChartAsPng(this,'${filename}')" style="margin-top:8px;border:1px solid var(--gris2,#e5e7eb);background:#fff;border-radius:7px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;color:var(--gris3,#6b7280)" title="Exporter le graphique en PNG">📷 Exporter l'image</button>`;
+}
+
+function renderMiniBarChart(rows, total, filename) {
   if (!rows || !rows.length) return '';
   const max = Math.max(...rows.map(r => r.count || 0), 1);
-  return `<div style="margin:10px 0;display:grid;gap:6px;max-width:560px">${rows.slice(0,12).map(r => {
+  const bars = rows.slice(0,12).map(r => {
     const w = Math.max(2, Math.round((r.count || 0) / max * 100));
-    return `<div style="display:grid;grid-template-columns:minmax(120px,220px) 1fr auto;gap:8px;align-items:center"><div style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(r.value)}">${escapeHtml(r.value)}</div><div style="height:12px;background:var(--gris1);border-radius:6px;overflow:hidden"><div style="height:12px;width:${w}%;background:var(--albert);border-radius:6px"></div></div><div style="font-size:11px;font-weight:700">${(r.count || 0).toLocaleString('fr-FR')}</div></div>`;
-  }).join('')}</div>`;
+    const pct = total ? ((r.count || 0) / total * 100).toFixed(1) : '0';
+    return `<div data-bar-label="${escapeHtml(r.value)}" data-bar-value="${pct}" data-bar-count="${(r.count||0).toLocaleString('fr-FR')}" style="display:grid;grid-template-columns:minmax(120px,220px) 1fr auto;gap:8px;align-items:center"><div style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(r.value)}">${escapeHtml(r.value)}</div><div style="height:12px;background:var(--gris1);border-radius:6px;overflow:hidden"><div style="height:12px;width:${w}%;background:var(--albert);border-radius:6px"></div></div><div style="font-size:11px;font-weight:700">${(r.count || 0).toLocaleString('fr-FR')}</div></div>`;
+  }).join('');
+  return `<div class="de-chart-export-wrap" style="margin:10px 0"><div style="display:grid;gap:6px;max-width:560px">${bars}</div>${_chartExportBtn(filename || 'graphique_barres.png')}</div>`;
 }
 
 // v27.5.2 — rendu camembert en SVG inline (aucune dépendance externe).
@@ -470,18 +542,19 @@ function renderMiniPieChart(rows, total) {
     return `<div style="display:flex;align-items:center;gap:7px;font-size:11px"><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${s.color};flex:0 0 auto"></i><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px" title="${escapeHtml(s.row.value)}">${escapeHtml(s.row.value)}</span><strong style="margin-left:auto">${(s.row.count || 0).toLocaleString('fr-FR')} · ${pct} %</strong></div>`;
   }).join('')}</div>`;
 
-  return `<div style="margin:10px 0;display:flex;gap:18px;flex-wrap:wrap;align-items:center">${svg}${legend}</div>`;
+  return `<div class="de-chart-export-wrap" style="margin:10px 0"><div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center">${svg}${legend}</div>${_chartExportBtn('graphique_camembert.png')}</div>`;
 }
 
 
 function renderComparePopulationChart(rows, baseTotal) {
   if (!rows || !rows.length) return '';
   const max = Math.max(...rows.map(r => r.count || 0), 1);
-  return `<div class="de-chart-card" style="margin:14px 0;padding:12px;border:1px solid var(--gris2,#e5e7eb);border-radius:10px;background:rgba(0,0,0,.02)"><div style="font-weight:700;margin-bottom:8px">Graphique · populations comparées</div><div style="display:grid;gap:7px;max-width:680px">${rows.map(r => {
+  const bars = rows.map(r => {
     const w = Math.max(2, Math.round((r.count || 0) / max * 100));
     const pct = baseTotal ? (r.count || 0) / baseTotal * 100 : (r.pct || 0);
-    return `<div style="display:grid;grid-template-columns:minmax(120px,220px) 1fr auto;gap:8px;align-items:center"><div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(r.label)}">${escapeHtml(r.label)}</div><div style="height:14px;background:var(--gris1,#f3f4f6);border-radius:7px;overflow:hidden"><div style="height:14px;width:${w}%;background:var(--albert,#2563eb);border-radius:7px"></div></div><div style="font-size:12px;font-weight:700">${(r.count || 0).toLocaleString('fr-FR')} · ${fmtComparePct(pct)}</div></div>`;
-  }).join('')}</div></div>`;
+    return `<div data-bar-label="${escapeHtml(r.label)}" data-bar-value="${((r.count||0)/max*100).toFixed(1)}" data-bar-count="${(r.count||0).toLocaleString('fr-FR')}" style="display:grid;grid-template-columns:minmax(120px,220px) 1fr auto;gap:8px;align-items:center"><div style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(r.label)}">${escapeHtml(r.label)}</div><div style="height:14px;background:var(--gris1,#f3f4f6);border-radius:7px;overflow:hidden"><div style="height:14px;width:${w}%;background:var(--albert,#2563eb);border-radius:7px"></div></div><div style="font-size:12px;font-weight:700">${(r.count || 0).toLocaleString('fr-FR')} · ${fmtComparePct(pct)}</div></div>`;
+  }).join('');
+  return `<div class="de-chart-export-wrap de-chart-card" style="margin:14px 0;padding:12px;border:1px solid var(--gris2,#e5e7eb);border-radius:10px;background:rgba(0,0,0,.02)"><div style="font-weight:700;margin-bottom:8px">Graphique · populations comparées</div><div style="display:grid;gap:7px;max-width:680px">${bars}</div>${_chartExportBtn('comparaison_populations.png')}</div>`;
 }
 
 function renderCompareDeltaChart(title, catRows, groupRows, limit = 5) {
