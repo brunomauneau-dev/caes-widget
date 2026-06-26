@@ -576,10 +576,12 @@ function detectDataEnginePlan(question, filterContextText = question) {
   if (currentPlan) return currentPlan;
 
   const tool = inferMeasureIntent(question);
+  console.log('[DE] question:', JSON.stringify(question), '→ tool:', tool, '| lastPlan.tool:', getDataEngineState().lastPlan?.tool || 'null');
   if (!tool) return null;
 
   if (tool === 'compare') {
     const groups = detectCompareGroups(table, question);
+    console.log('[DE] detectCompareGroups:', groups.length, 'groups:', groups.map(g => g.label));
     if (groups.length >= 2) {
       const baseFilters = strictFiltersFromQuestion(table, question).filter(f => !groups.some(g => (g.filters || []).some(gf => gf.col === f.col)));
       return inheritConversationContext({
