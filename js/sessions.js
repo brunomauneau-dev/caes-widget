@@ -514,14 +514,35 @@ async function persistSessions() {
     console.warn('Sérialisation des sessions impossible :', e);
     return;
   }
-  // Garde-fou anti-saturation : si le volume dépasse ~4 Mo, on retire le
-  // contexte Data Engine des sessions les plus anciennes (jamais la session
-  // active) plutôt que de risquer de bloquer toute la sauvegarde.
+  // Garde-fou anti-saturation : si le volume dépasse ~4 Mo, on retire
+  // progressivement les données lourdes des sessions les plus anciennes
+  // (jamais la session active), par ordre de priorité croissante.
   if (payload.length > 4 * 1024 * 1024) {
     const oldestFirst = [...sessions].sort((a, b) => new Date(a.updatedAt) - new Date(b.updatedAt));
+    // Passe 1 : purge dataEngineState des sessions inactives
     for (const s of oldestFirst) {
       if (s.id === currentSessionId) continue;
       s.dataEngineState = { lastPlan: null, lastExecution: null };
+      payload = JSON.stringify(sessions);
+      if (payload.length <= 4 * 1024 * 1024) break;
+    }
+  }
+  if (payload.length > 4 * 1024 * 1024) {
+    const oldestFirst = [...sessions].sort((a, b) => new Date(a.updatedAt) - new Date(b.updatedAt));
+    // Passe 2 : purge dataBlocks (dataContext peut être très lourd)
+    for (const s of oldestFirst) {
+      if (s.id === currentSessionId) continue;
+      s.dataBlocks = [];
+      payload = JSON.stringify(sessions);
+      if (payload.length <= 4 * 1024 * 1024) break;
+    }
+  }
+  if (payload.length > 4 * 1024 * 1024) {
+    const oldestFirst = [...sessions].sort((a, b) => new Date(a.updatedAt) - new Date(b.updatedAt));
+    // Passe 3 : purge les messages HTML lourds (infographies) des sessions inactives
+    for (const s of oldestFirst) {
+      if (s.id === currentSessionId) continue;
+      s.messages = s.messages.filter(m => m.type !== 'infographic' && m.type !== 'html');
       payload = JSON.stringify(sessions);
       if (payload.length <= 4 * 1024 * 1024) break;
     }
@@ -679,10 +700,17 @@ function rethemeInfographic(btn, specJson, themeId) {
 // ── sanitizeExecutionForStorage ──
 function sanitizeExecutionForStorage(exec) {
   if (!exec) return null;
+  // On retire les champs lourds de result (rows, objects) qui peuvent peser
+  // plusieurs Mo et saturer le quota navigateur.
+  let result = null;
+  if (exec.result) {
+    const { rows, objects, ...resultMeta } = exec.result;
+    result = resultMeta;
+  }
   return {
     kind: exec.kind,
     plan: sanitizePlanForStorage(exec.plan),
-    result: exec.result,
+    result,
     text: exec.text,
     html: exec.html
   };
@@ -693,6 +721,13 @@ function sanitizeExecutionForStorage(exec) {
 function sanitizePlanForStorage(plan) {
   if (!plan) return null;
   const { table, sourceExecution, ...rest } = plan;
+  // compareGroups peut embarquer des rows brutes (plusieurs Mo) — on les retire.
+  if (Array.isArray(rest.compareGroups)) {
+    rest.compareGroups = rest.compareGroups.map(g => {
+      const { rows, objects, ...gMeta } = g;
+      return gMeta;
+    });
+  }
   return rest;
 }
 
