@@ -1516,6 +1516,37 @@ function dataEngineResultToContext(exec) {
   if (exec.kind === 'stats') {
     out += `Colonne statistique : ${p.targetCol}\nValeurs numériques : ${exec.result.numericCount}/${exec.result.total}\nMoyenne : ${exec.result.avg} · Médiane : ${exec.result.median} · Min : ${exec.result.min} · Max : ${exec.result.max}\n`;
   }
+  if (exec.kind === 'compare') {
+    const rows = exec.result?.rows || [];
+    const baseTotal = exec.result?.baseTotal || rows.reduce((s, r) => s + (r.count || 0), 0);
+    out += `Comparaison de groupes — base : ${baseTotal} ligne(s)\n`;
+    out += `Effectifs par groupe :\n${rows.map(r => `- ${r.label} : ${r.count} (${r.pct.toFixed(1).replace('.', ',')} %)`).join('\n')}\n`;
+    const cols = (typeof getCompareColumns === 'function') ? getCompareColumns(p.table) : {};
+    const catBlocks = [
+      { label: 'Grands groupes de formation', col: cols.formation },
+      { label: 'Académie d’accueil', col: cols.academie },
+      { label: 'Série de bac', col: cols.serie }
+    ];
+    catBlocks.forEach(({ label, col }) => {
+      if (!col) return;
+      const catRows = (typeof compareCategoryRows === 'function') ? compareCategoryRows(rows, col, 8) : [];
+      if (!catRows.length) return;
+      out += `\nRépartition par ${label} (colonne ${col}) :\n`;
+      catRows.forEach(cr => {
+        const perGroup = cr.groups.map(g => `${g.label} : ${g.count} (${g.pct.toFixed(1).replace('.', ',')} %)`).join(' · ');
+        out += `- ${cr.value} — ${perGroup}\n`;
+      });
+    });
+    if (cols.voeux && typeof compareNumericStatsRows === 'function') {
+      const statsRows = compareNumericStatsRows(rows, cols.voeux);
+      if (statsRows.length) {
+        out += `\nVœux confirmés (colonne ${cols.voeux}) :\n`;
+        statsRows.forEach(sr => {
+          out += `- ${sr.label} : moyenne ${sr.avg} · médiane ${sr.median} · min ${sr.min} · max ${sr.max} (${sr.numericCount} valeurs numériques)\n`;
+        });
+      }
+    }
+  }
   return out;
 }
 
