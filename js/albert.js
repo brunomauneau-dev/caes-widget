@@ -582,6 +582,55 @@ ${localAnalysis.text}
 
 
 
+/**
+ * T4 — Vérifie que lastExecution est cohérent avec la question courante.
+ * Retourne false si l'exec porte sur un périmètre incompatible (ex: basques alors
+ * que la question parle de boursiers), pour éviter la contamination de contexte.
+ * Exposée globalement pour être testable en console.
+ */
+function _isExecCompatibleWithQuestion(exec, question) {
+  if (!exec || !exec.plan) return false;
+
+  const q = (question || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+  // Mots-clés extraits du plan (filtres + compareGroups)
+  const planLabels = [
+    ...(exec.plan.filters      || []).map(f => f.label || ''),
+    ...(exec.plan.compareGroups|| []).map(g => g.label || ''),
+  ]
+    .join(' ')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  if (!planLabels.trim()) return true; // pas de labels → on ne peut pas trancher, on accepte
+
+  // Groupes de termes incompatibles : si le plan contient un terme d'un groupe
+  // et que la question contient un terme d'un AUTRE groupe, c'est incompatible.
+  const INCOMPATIBLE_GROUPS = [
+    ['basque', 'pays basque', 'bayonne', 'biarritz', 'pau'],
+    ['boursier', 'boursiers', 'non-boursier', 'non-boursiers', 'bourse'],
+    ['apprenti', 'apprentis', 'apprentissage'],
+    ['neo', 'neo-bachelier', 'neo bachelier'],
+  ];
+
+  for (const group of INCOMPATIBLE_GROUPS) {
+    const planHasGroup  = group.some(t => planLabels.includes(t));
+    const queryHasGroup = group.some(t => q.includes(t));
+    if (planHasGroup && !queryHasGroup) {
+      // Le plan est centré sur ce groupe mais la question n'en parle pas → incompatible
+      // Sauf si la question est générique (pas d'autre groupe mentionné)
+      const questionMentionsOtherGroup = INCOMPATIBLE_GROUPS
+        .filter(g => g !== group)
+        .some(g => g.some(t => q.includes(t)));
+      if (questionMentionsOtherGroup) return false;
+    }
+  }
+
+  return true;
+}
+window._isExecCompatibleWithQuestion = _isExecCompatibleWithQuestion;
+
 async function sendMessage() {
   const input = document.getElementById('chat-input');
   const question = input.value.trim();
@@ -628,8 +677,9 @@ async function sendMessage() {
     try {
       // dataExecution est null quand la question est "infographie" (pas une question Data Engine).
       // On utilise le dernier résultat local disponible en session pour alimenter le contexte.
+      const _lastExec = typeof getDataEngineState === 'function' ? getDataEngineState().lastExecution : null;
       const _infExec = dataExecution ||
-        (typeof getDataEngineState === 'function' ? getDataEngineState().lastExecution : null);
+        (_isExecCompatibleWithQuestion(_lastExec, question) ? _lastExec : null);
       const html = await generateInfographicWithAlbert(question, localAnalysis, _infExec);
       removeLoadingMessage(loadingId);
       addInfographicMessage(html, 'Infographie Albert');
