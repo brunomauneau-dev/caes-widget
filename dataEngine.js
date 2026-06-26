@@ -323,15 +323,29 @@ function inheritConversationContext(plan, question) {
       plan.tool = 'group_by';
       if (!plan.targetCol && prev.targetCol) plan.targetCol = prev.targetCol;
     } else if (filterFollowUp) {
-      // Si la question précédente était group_by/compare, l'hériter PLUS les filtres planner nouveaux
       plan.tool = prev.tool || plan.tool;
       if (prev.targetCol)  plan.targetCol  = prev.targetCol;
       if (prev.targetCol2) plan.targetCol2 = prev.targetCol2;
       if (prev.limit)      plan.limit      = prev.limit;
       if (prev.mentionedCols && !plan.mentionedCols?.length) plan.mentionedCols = prev.mentionedCols;
-      // Inclure aussi les filtres détectés par le planner pour la question courante (ex: CPGE)
-      const _newPlannerFilters = (plan.filters || []).filter(f => !prev.filters?.some(pf => pf.col === f.col));
-      plan.filters = mergeFiltersUnique(mergeFiltersUnique(prev.filters || [], strictFiltersFromQuestion(plan.table, question)), _newPlannerFilters);
+      // Si prev était un compare : vérifier si on a de nouveaux groupes ou hériter les anciens
+      if (prev.tool === 'compare') {
+        const prevGroups = prev.compareGroups || [];
+        const curGroups  = plan.compareGroups || [];
+        const groupsDiffer = curGroups.length >= 2 &&
+          !curGroups.every(cg => prevGroups.some(pg => pg.label === cg.label));
+        if (groupsDiffer) {
+          // Nouveaux groupes → les garder, ajouter strict comme filtre de base
+          plan.filters = mergeFiltersUnique(prev.filters || [], strictFiltersFromQuestion(plan.table, question));
+        } else if (prevGroups.length >= 2) {
+          // Même type de comparaison → hériter les groupes + le filtre courant en base
+          plan.compareGroups = prevGroups;
+          plan.filters = mergeFiltersUnique(prev.filters || [], strictFiltersFromQuestion(plan.table, question));
+        }
+      } else {
+        const _newPlannerFilters = (plan.filters || []).filter(f => !prev.filters?.some(pf => pf.col === f.col));
+        plan.filters = mergeFiltersUnique(mergeFiltersUnique(prev.filters || [], strictFiltersFromQuestion(plan.table, question)), _newPlannerFilters);
+      }
     }
 
     if (isChartRequest(question)) {
@@ -896,20 +910,34 @@ function detectCompareGroups(table, question) {
     }
   }
 
-  // ── 4. Deux établissements (lycée X vs lycée Y) ───────────────────────────
-  const vsMatch = question.match(/(?:compare[rz]?\s+(?:l[ae]s?\s+)?)(.+?)\s+(?:et|vs\.?|versus)\s+(?:l[ae]s?\s+)?(.+?)(?:\s*[?!.]|$)/i);
-  if (vsMatch) {
-    const origCol = findColumnByConceptStrict(table, 'etablissement_origine');
-    if (origCol) {
-      const stopWords = new Set(['du','de','des','le','la','les','et','au','aux','en','lycee','etablissement','lycee']);
-      const vals = [...new Set((table.objects || []).map(r => String(r[origCol] ?? '')).filter(Boolean))];
-      const toWords = s => normalizeText(s).split(/\s+/).filter(w => w.length > 2 && !stopWords.has(w));
-      const wA = toWords(vsMatch[1]), wB = toWords(vsMatch[2]);
-      const matchA = wA.length ? vals.find(v => wA.every(w => normalizeText(v).includes(w))) : null;
-      const matchB = wB.length ? vals.find(v => wB.every(w => normalizeText(v).includes(w))) : null;
-      if (matchA && matchB && matchA !== matchB) {
-        addGroup(matchA, [{ col: origCol, op: 'eq', value: matchA }]);
-        addGroup(matchB, [{ col: origCol, op: 'eq', value: matchB }]);
+  // ── 4. Deux lycées / établissements nommés ────────────────────────────────────
+  const origCol = findColumnByConceptStrict(table, 'etablissement_origine');
+  if (origCol) {
+    const etabVals = [...new Set((table.objects || []).map(r => String(r[origCol] ?? '')).filter(Boolean))];
+    const stopWords = new Set(['du','de','des','le','la','les','et','au','aux','en','lycee','etablissement']);
+    const findEtab = frag => {
+      const words = normalizeText(frag).split(/\s+/).filter(w => w.length > 2 && !stopWords.has(w));
+      return words.length ? etabVals.find(v => words.every(w => normalizeText(v).includes(w))) : null;
+    };
+
+    // Pattern A : "compare le lycée X et le lycée Y" — lycée nommé explicitement
+    const lycMatch = question.match(/compare\s+(?:l[ae]s?\s+)?(?:lyc[eé]e|[eé]tablissement)\s+(.+?)\s+(?:et|vs\.?)\s+(?:l[ae]s?\s+)?(?:lyc[eé]e|[eé]tablissement)?\s*(.+?)(?:\s*[?!.]|$)/i);
+    if (lycMatch) {
+      const mA = findEtab(lycMatch[1]), mB = findEtab(lycMatch[2]);
+      if (mA && mB && mA !== mB) {
+        addGroup(mA, [{ col: origCol, op: 'eq', value: mA }]);
+        addGroup(mB, [{ col: origCol, op: 'eq', value: mB }]);
+        return groups;
+      }
+    }
+
+    // Pattern B : "compare X et Y" — générique (les deux termes matchent des valeurs de la colonne)
+    const vsMatch = question.match(/(?:compare[rz]?\s+(?:l[ae]s?\s+)?)(.+?)\s+(?:et|vs\.?|versus)\s+(?:l[ae]s?\s+)?(.+?)(?:\s*[?!.]|$)/i);
+    if (vsMatch) {
+      const mA = findEtab(vsMatch[1]), mB = findEtab(vsMatch[2]);
+      if (mA && mB && mA !== mB) {
+        addGroup(mA, [{ col: origCol, op: 'eq', value: mA }]);
+        addGroup(mB, [{ col: origCol, op: 'eq', value: mB }]);
         return groups;
       }
     }
