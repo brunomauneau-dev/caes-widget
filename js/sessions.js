@@ -17,6 +17,18 @@ Règles ABSOLUES :
 - Chaque card insights DOIT avoir un champ "text" non vide (minimum 15 mots) avec une vraie analyse ou interprétation issue des données.
 - Si tu n'as pas assez de données pour remplir une section complètement, réduis le nombre d'items plutôt que de laisser des champs vides.
 - Toutes les sections doivent avoir uniquement des items avec titre ET texte/valeur réels.
+
+EXEMPLES (à suivre strictement) :
+
+✅ BON — section ranking avec labels issus des données :
+{"type":"ranking","title":"Académies d'accueil","items":[{"label":"Bordeaux","value":"1 789","percent":"75,5 %"},{"label":"Toulouse","value":"253","percent":"10,7 %"},{"label":"Paris","value":"68","percent":"2,9 %"}]}
+
+✅ BON — section insights avec vraie analyse (text > 15 mots) :
+{"type":"insights","title":"Points saillants","items":[{"title":"Concentration académique","text":"75,5 % des candidats du Pays Basque restent dans l'académie de Bordeaux, contre 10,7 % qui rejoignent Toulouse — un ancrage territorial marqué."}]}
+
+❌ MAUVAIS — ne jamais produire ceci :
+{"type":"ranking","title":"Répartition","items":[{"label":"Item 1","value":"..."},{"label":"Catégorie X","value":""},{"label":"Analyse 1","value":"N/A"}]}
+
 DONNÉES :\n${composerCtx}`;
   const resp = await fetch(albertConfig.endpoint, {
     method:'POST', headers:{'Content-Type':'application/json'},
