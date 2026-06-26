@@ -40,11 +40,21 @@ function parseJsonLoose(text) {
   throw new Error('Albert n’a pas renvoyé une spécification JSON exploitable.');
 }
 
+// Détecte les labels génériques dans les champs simples (eyebrow, titre, etc.)
+function isPlaceholder_simple(str) {
+  if (!str || typeof str !== 'string') return true;
+  const s = str.trim();
+  if (!s) return true;
+  return /^(analyse\s*\d*|item\s*\d+|section\s*(?:[xX]|\d+)?|cat[eé]gorie\s*(?:[xX]|\d+)|donn[eé]e\s*[xX]?|p[eé]rim[eè]tre|titre|texte|label|valeur|n\/a|\.{2,}|xxx+)$/i.test(s);
+}
+
 function normalizeInfographicSpec(spec, question) {
   spec = spec && typeof spec === 'object' ? spec : {};
   spec.title = spec.title || 'Infographie de données';
   spec.subtitle = spec.subtitle || question || 'Analyse synthétique';
-  spec.eyebrow = spec.eyebrow || 'Analyse adaptive · Albert';
+  spec.eyebrow = (spec.eyebrow && !isPlaceholder_simple(spec.eyebrow))
+    ? spec.eyebrow
+    : 'Analyse Parcoursup · Albert';
   spec.accent = /^#[0-9a-f]{6}$/i.test(spec.accent || '') ? spec.accent : '#c1440e';
   spec.secondary = /^#[0-9a-f]{6}$/i.test(spec.secondary || '') ? spec.secondary : '#1a3a5c';
   spec.metrics = Array.isArray(spec.metrics) ? spec.metrics.slice(0, 6) : [];
@@ -648,6 +658,17 @@ Règles d'adaptation éditoriale :
 - Les insights doivent interpréter les chiffres : évite "X domine" seul ; explique pourquoi c'est notable, surprenant ou utile.
 - N'invente aucun chiffre. Utilise seulement le contexte. Si un élément manque, n'en fais pas une section.
 - Pas de données personnelles ni d'identifiants individuels.
+
+EXEMPLES OBLIGATOIRES À SUIVRE :
+
+✅ BON — eyebrow et ranking avec labels réels :
+{"eyebrow":"Parcoursup 2026 · Pays Basque","sections":[{"type":"ranking","title":"Académies d'accueil","scope":"Périmètre : zone Pays Basque","items":[{"label":"Bordeaux","value":1789,"percent":"75,5 %"},{"label":"Toulouse","value":253,"percent":"10,7 %"},{"label":"Paris","value":68,"percent":"2,9 %"}]}]}
+
+✅ BON — insight avec analyse chiffrée (minimum 15 mots) :
+{"type":"insights","title":"Points saillants","items":[{"title":"Ancrage territorial fort","text":"75,5 % des candidats du Pays Basque restent dans l'académie de Bordeaux — un taux de proximité bien supérieur à la moyenne nationale, qui reflète l'effet frontière de la région."}]}
+
+❌ MAUVAIS — ne jamais produire :
+{"eyebrow":"Analyse 1","sections":[{"type":"ranking","title":"Répartition","items":[{"label":"Item 1","value":"..."},{"label":"Catégorie X","value":""}]}]}
 
 Demande utilisateur : ${question}
 

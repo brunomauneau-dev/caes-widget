@@ -62,7 +62,6 @@ async function loadAlbertConfig() {
   }
 }
 loadAlbertConfig();
-if (typeof initSessions === 'function') initSessions();
 
 function updateConfigStatusBadge() {
   const badge = document.querySelector('.albert-badge');
@@ -516,33 +515,23 @@ function updateChatSub() {
   } else if (total === 0) txt = 'Aucun document chargé';
   else if (ok < total) txt = `${ok}/${total} documents prêts`;
   else txt = `${ok} document${ok>1?'s':''} prêt${ok>1?'s':''}`;
-  const chatSubEl = document.getElementById('chat-sub');
-  if (!chatSubEl) return;
-  chatSubEl.textContent = txt;
+  document.getElementById('chat-sub').textContent = txt;
 }
 
 /* ═══════════════════════ SUGGESTIONS ═══════════════════════ */
 function renderSuggestions() {
   const wrap = document.getElementById('suggestions');
-  if (!wrap) return;
   wrap.innerHTML = '';
   SUGGESTIONS.forEach(s => {
     const chip = document.createElement('div');
     chip.className = 'sugg-chip';
     chip.textContent = s;
-    chip.onclick = () => {
-      const input = document.getElementById('chat-input');
-      if (!input) return;
-      input.value = s;
-      sendMessage();
-    };
+    chip.onclick = () => { document.getElementById('chat-input').value = s; sendMessage(); };
     wrap.appendChild(chip);
   });
 }
-grist.onOptions(function() {
-  renderSuggestions();
-  updateSourceHub();
-});
+renderSuggestions();
+updateSourceHub();
 
 /* ═══════════════════════ CHAT ═══════════════════════ */
 function handleKeydown(e) {
@@ -605,46 +594,42 @@ async function sendMessage() {
   const loadingId = 'loading_' + Date.now();
   addLoadingMessage(loadingId);
 
-   const filterContextText = [...chatHistory.slice(-4).map(m => m.content), question].join('\n');
-   let dataPlan = detectDataEnginePlan(question, filterContextText);
-   const dataExecution = dataPlan ? runDataEnginePlan(dataPlan) : null;
-   const localAnalysis = executeLocalDataQuery(question, filterContextText);
- 
-   // Enregistre le bloc Data Engine dès qu'il existe, quel que soit le chemin de rendu ensuite.
-   // Garantit que le compositeur d'infographie trouve les résultats compare/group_by/pivot
-   // même quand Albert gère lui-même la réponse textuelle.
-   const _skipToolsEarly = ['chart_current', 'export_excel', 'export_csv'];
-   if (dataExecution && !_skipToolsEarly.includes(dataExecution.plan?.tool)) {
-     try {
-       const deCtxEarly = dataEngineResultToContext(dataExecution);
-       if (deCtxEarly && deCtxEarly.length > 20) {
-         const sEarly = getCurrentSession();
-         if (sEarly) {
-           sEarly.dataBlocks = sEarly.dataBlocks || [];
-           const blkTitleEarly = (typeof extractBlockTitle === 'function')
-             ? extractBlockTitle(dataExecution, question)
-             : (question.length > 64 ? question.slice(0, 63) + '\u2026' : question);
-           sEarly.dataBlocks.push({ id: 'blk_' + Date.now(), title: blkTitleEarly, question, dataContext: deCtxEarly });
-           scheduleSessionsSave();
-         }
-       }
-     } catch(e) {
-       console.warn('[dataBlocks] Erreur enregistrement bloc anticipé:', e);
-     }
-   }
- 
-   if (dataExecution && shouldAnswerLocallyWithoutAlbert(dataExecution) && !isInfographicRequest(question)) {
-     removeLoadingMessage(loadingId);
-     addMessage('assistant', dataExecution.html);
-     chatHistory.push({ role: 'user', content: question });
-     const deCtx = dataEngineResultToContext(dataExecution);
-     chatHistory.push({ role: 'assistant', content: deCtx });
-     return;
-   }
+  const filterContextText = [...chatHistory.slice(-4).map(m => m.content), question].join('\n');
+  let dataPlan = detectDataEnginePlan(question, filterContextText);
+  const dataExecution = dataPlan ? runDataEnginePlan(dataPlan) : null;
+  const localAnalysis = executeLocalDataQuery(question, filterContextText);
+
+  if (dataExecution && shouldAnswerLocallyWithoutAlbert(dataExecution) && !isInfographicRequest(question)) {
+    removeLoadingMessage(loadingId);
+    addMessage('assistant', dataExecution.html);
+    chatHistory.push({ role: 'user', content: question });
+    const deCtx = dataEngineResultToContext(dataExecution);
+    chatHistory.push({ role: 'assistant', content: deCtx });
+    // Enregistre le bloc pour le compositeur d'infographie
+    const _skipTools = ['chart_current', 'export_excel', 'export_csv'];
+    const sDE = getCurrentSession();
+    if (sDE && deCtx && deCtx.length > 20 && !_skipTools.includes(dataExecution.plan?.tool)) {
+      try {
+        sDE.dataBlocks = sDE.dataBlocks || [];
+        const blkTitle = (typeof extractBlockTitle === 'function')
+          ? extractBlockTitle(dataExecution, question)
+          : (question.length > 64 ? question.slice(0, 63) + '…' : question);
+        sDE.dataBlocks.push({ id: 'blk_' + Date.now(), title: blkTitle, question, dataContext: deCtx });
+        scheduleSessionsSave();
+      } catch(e) {
+        console.warn('[dataBlocks] Erreur lors de l\'enregistrement du bloc:', e);
+      }
+    }
+    return;
+  }
 
   if (isInfographicRequest(question)) {
     try {
-      const html = await generateInfographicWithAlbert(question, localAnalysis, dataExecution);
+      // dataExecution est null quand la question est "infographie" (pas une question Data Engine).
+      // On utilise le dernier résultat local disponible en session pour alimenter le contexte.
+      const _infExec = dataExecution ||
+        (typeof getDataEngineState === 'function' ? getDataEngineState().lastExecution : null);
+      const html = await generateInfographicWithAlbert(question, localAnalysis, _infExec);
       removeLoadingMessage(loadingId);
       addInfographicMessage(html, 'Infographie Albert');
       chatHistory.push({ role: 'user', content: question });
@@ -773,12 +758,10 @@ function removeLoadingMessage(id) {
 
 /* ═══════════════════════ AUTO-RESIZE TEXTAREA ═══════════════════════ */
 const textarea = document.getElementById('chat-input');
-if (textarea) {
-  textarea.addEventListener('input', () => {
-    textarea.style.height = 'auto';
-    textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
-  });
-}
+textarea.addEventListener('input', () => {
+  textarea.style.height = 'auto';
+  textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+});
 
 /* ═══════════════════════ VIEWER DE DOCUMENT ═══════════════════════ */
 let viewerCurrentDocId = null;
@@ -849,98 +832,14 @@ function copyViewerContent() {
   });
 }
 
-
-// PR 4.1 — normalizeInfographicSpec : filtre les placeholders résiduels après génération Albert.
-// Appelée par sessions.js après parsing du JSON infographie.
-function normalizeInfographicSpec(spec, question) {
-  if (!spec || typeof spec !== 'object') return spec;
-
-  // Patterns de placeholders à détecter (insensible à la casse)
-  const PLACEHOLDER_PATTERNS = [
-    /^item\s*\d+$/i,
-    /^analyse\s*\d*$/i,
-    /^catégorie\s*[xn°\d]*$/i,
-    /^section\s*\d*$/i,
-    /^donnée\s*[xn°\d]*$/i,
-    /^label$/i,
-    /^valeur$/i,
-    /^périmètre$/i,
-    /^titre$/i,
-    /^texte$/i,
-    /^\.\.\.*$/,
-    /^xxx+$/i,
-    /^n\/a$/i,
-    /^à\s+compléter$/i,
-    /^à\s+définir$/i,
-  ];
-
-  function isPlaceholder(str) {
-    if (!str || typeof str !== 'string') return true;
-    const s = str.trim();
-    if (!s) return true;
-    return PLACEHOLDER_PATTERNS.some(p => p.test(s));
-  }
-
-  function cleanItems(items) {
-    if (!Array.isArray(items)) return items;
-    return items.filter(item => {
-      if (!item || typeof item !== 'object') return false;
-      // Rejeter si le label/titre est un placeholder
-      if (isPlaceholder(item.label) || isPlaceholder(item.title)) return false;
-      // Rejeter si la valeur principale est vide ou placeholder
-      const mainVal = item.value ?? item.text ?? '';
-      if (isPlaceholder(mainVal)) return false;
-      // Rejeter les insights avec texte trop court (< 10 mots)
-      if (item.text !== undefined && typeof item.text === 'string') {
-        const wordCount = item.text.trim().split(/\s+/).length;
-        if (wordCount < 10) return false;
-      }
-      return true;
-    });
-  }
-
-  // Nettoyer le titre et subtitle globaux
-  if (isPlaceholder(spec.title)) spec.title = (question || 'Analyse Parcoursup').slice(0, 60);
-  if (isPlaceholder(spec.subtitle)) delete spec.subtitle;
-
-  // Nettoyer les métriques
-  if (Array.isArray(spec.metrics)) {
-    spec.metrics = cleanItems(spec.metrics);
-  }
-
-  // Nettoyer les sections
-  if (Array.isArray(spec.sections)) {
-    spec.sections = spec.sections
-      .map(section => {
-        if (!section || typeof section !== 'object') return null;
-        if (isPlaceholder(section.title)) return null;
-        if (Array.isArray(section.items)) {
-          section.items = cleanItems(section.items);
-          // Supprimer la section entière si plus aucun item valide
-          if (!section.items.length) return null;
-        }
-        return section;
-      })
-      .filter(Boolean);
-  }
-
-  // Nettoyer le footer
-  if (isPlaceholder(spec.footer)) delete spec.footer;
-
-  return spec;
-}
-
 // Met à jour le viewer en direct si le document affiché finit son extraction
-if (typeof renderDocs === 'function') {
-  const originalRenderDocs = renderDocs;
-  renderDocs = function() {
-    originalRenderDocs();
-    const overlay = document.getElementById('viewer-overlay');
-    if (viewerCurrentDocId && overlay && overlay.classList.contains('show')) {
-      const doc = documents.find(d => d.id === viewerCurrentDocId);
-      if (doc && doc.status !== 'loading') openViewer(viewerCurrentDocId);
-    }
-  };
-}
+const originalRenderDocs = renderDocs;
+renderDocs = function() {
+  originalRenderDocs();
+  if (viewerCurrentDocId && document.getElementById('viewer-overlay').classList.contains('show')) {
+    const doc = documents.find(d => d.id === viewerCurrentDocId);
+    if (doc && doc.status !== 'loading') openViewer(viewerCurrentDocId);
+  }
+};
 
 

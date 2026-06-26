@@ -139,6 +139,40 @@ test('Prompt contient INTERDIT ABSOLU (régression)',() => assert(sessionsConten
 test('Labels réels dans les exemples (Bordeaux)',   () => assert(sessionsContent.includes('"Bordeaux"')));
 test('Exemple MAUVAIS cite "Item 1"',               () => assert(sessionsContent.includes('"Item 1"')));
 
+// ─── Suite 4 : isPlaceholder_simple (eyebrow / titre global) ──────────────
+// Simule la fonction de infographic.js
+function isPlaceholder_simple(str) {
+  if (!str || typeof str !== 'string') return true;
+  const s = str.trim();
+  if (!s) return true;
+  return /^(analyse\s*\d*|item\s*\d+|section\s*(?:[xX]|\d+)?|cat[eé]gorie\s*(?:[xX]|\d+)|donn[eé]e\s*[xX]?|p[eé]rim[eè]tre|titre|texte|label|valeur|n\/a|\.{2,}|xxx+)$/i.test(s);
+}
+
+test('"Analyse 1" détecté par isPlaceholder_simple', () => assert(isPlaceholder_simple('Analyse 1')));
+test('"Analyse" seul détecté',                      () => assert(isPlaceholder_simple('Analyse')));
+test('"Section X" détecté par isPlaceholder_simple', () => assert(isPlaceholder_simple('Section X')));
+test('"Périmètre" détecté par isPlaceholder_simple', () => assert(isPlaceholder_simple('Périmètre')));
+test('"Parcoursup 2026 · Pays Basque" NON détecté', () => assert(!isPlaceholder_simple('Parcoursup 2026 · Pays Basque')));
+test('"Comparaison boursiers / non-boursiers" NON détecté', () => assert(!isPlaceholder_simple('Comparaison boursiers / non-boursiers')));
+test('"Lycée Cantau · 349 candidats" NON détecté',  () => assert(!isPlaceholder_simple('Lycée Cantau · 349 candidats')));
+
+// ─── Suite 5 : prompt generateInfographicWithAlbert ────────────────────────
+const infContent = fs.readFileSync('/home/claude/work/infographic.js', 'utf8');
+
+test('Prompt infographic contient les exemples few-shot',     () => assert(infContent.includes('EXEMPLES OBLIGATOIRES')));
+test('Prompt infographic contient exemple BON eyebrow réel',  () => assert(infContent.includes('"eyebrow":"Parcoursup 2026')));
+test('Prompt infographic contient exemple MAUVAIS eyebrow',   () => assert(infContent.includes('"eyebrow":"Analyse 1"')));
+test('isPlaceholder_simple définie dans infographic.js',      () => assert(infContent.includes('function isPlaceholder_simple(')));
+test('normalizeInfographicSpec filtre le champ eyebrow',      () => assert(infContent.includes('isPlaceholder_simple(spec.eyebrow)')));
+
+// ─── Suite 6 : albert.js — lastExecution fallback ──────────────────────────
+const albertContent = fs.readFileSync('/home/claude/work/albert_prod.js', 'utf8');
+
+test('albert.js passe lastExecution en fallback', () =>
+  assert(albertContent.includes('getDataEngineState().lastExecution'), 'lastExecution fallback manquant'));
+test('generateInfographicWithAlbert reçoit _infExec', () =>
+  assert(albertContent.includes('generateInfographicWithAlbert(question, localAnalysis, _infExec)'), 'appel avec _infExec manquant'));
+
 // ─── Rapport ────────────────────────────────────────────────────────────────
 console.log('\n──────────────────────────────────────────────────');
 results.filter(r => !r.ok).forEach(r => console.log(`  ❌ ${r.name}\n     → ${r.err}`));
