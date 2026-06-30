@@ -593,6 +593,7 @@ function addInfographicMessage(html, title = 'Infographie adaptive générée', 
     : '';
 
   const wrap = document.getElementById('chat-messages');
+  if (!wrap) return;
   const msg = document.createElement('div');
   msg.className = 'msg assistant';
   msg.style.maxWidth = '95%';

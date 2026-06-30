@@ -517,7 +517,8 @@ function updateChatSub() {
   } else if (total === 0) txt = 'Aucun document chargé';
   else if (ok < total) txt = `${ok}/${total} documents prêts`;
   else txt = `${ok} document${ok>1?'s':''} prêt${ok>1?'s':''}`;
-  document.getElementById('chat-sub').textContent = txt;
+  const chatSub = document.getElementById('chat-sub');
+  if (chatSub) chatSub.textContent = txt;
 }
 
 /* ═══════════════════════ SUGGESTIONS ═══════════════════════
@@ -831,6 +832,7 @@ ${context || "(Aucun document chargé)"}`;
 
 function addMessage(role, content, opts = {}) {
   const wrap = document.getElementById('chat-messages');
+  if (!wrap) return;
   const msg = document.createElement('div');
   msg.className = 'msg ' + role;
   const bubble = document.createElement('div');
@@ -868,10 +870,12 @@ function removeLoadingMessage(id) {
 
 /* ═══════════════════════ AUTO-RESIZE TEXTAREA ═══════════════════════ */
 const textarea = document.getElementById('chat-input');
-textarea.addEventListener('input', () => {
-  textarea.style.height = 'auto';
-  textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
-});
+if (textarea) {
+  textarea.addEventListener('input', () => {
+    textarea.style.height = 'auto';
+    textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+  });
+}
 
 /* ═══════════════════════ VIEWER DE DOCUMENT ═══════════════════════ */
 let viewerCurrentDocId = null;
