@@ -22,10 +22,10 @@ réconciliées en une base unique cohérente :
 - la lignée **PR1 → PR4.1** (roadmap v6, voir plus bas)
 - la lignée **T2 / T4 / compositeur multi-blocs** (architecture infographie)
 
-Suite de tests actuelle : **12 fichiers, 243 tests, tous verts.**
+Suite de tests actuelle : **13 fichiers, 271 tests, tous verts.**
 (`sessions.test.js`, `pr12.test.js`, `pr21.test.js`, `pr22.test.js`, `test_pr41.js`,
 `pr31.test.js`, `test_t4.js`, `test_action_bar.js`, `test_clear_titles.js`,
-`pr32.test.js`, `pr42.test.js`, `test_dom_guards.js`)
+`pr32.test.js`, `pr42.test.js`, `test_dom_guards.js`, `test_copilot_feel.js`)
 
 ⚠️ Point de vigilance pour la suite : `test_t4.js` et `test_action_bar.js` ont dû
 être **recréés** lors de la réconciliation — les fichiers originaux écrits pendant
@@ -92,8 +92,24 @@ seulement les fichiers de code patché.
 
     Tests : `pr42.test.js` (19 tests, incluant un cas dédié à chaque bug
     pour éviter la régression).
-  - 4.3 dashboards prédéfinis — non démarré
-- **PR5 — Architecture** — non démarré (intent detection LLM, connexion SAP PostgreSQL)
+  - ~~4.3 dashboards prédéfinis~~ — **retiré de la roadmap (30/06)**. Aucune
+    trace de l'intention d'origine retrouvée, et pas d'utilité franche
+    identifiée pour l'utilisateur en discussion : PR4.2 (suggestions
+    dynamiques) couvre déjà le besoin "je ne sais pas par où commencer", et le
+    compositeur multi-blocs permet déjà d'assembler plusieurs analyses a
+    posteriori. Un "dashboard" séparé aurait ajouté une troisième façon
+    d'obtenir une vue d'ensemble, potentiellement redondante. Décision : ne
+    pas développer, à reconsidérer seulement si un besoin concret réapparaît
+    clairement en usage réel.
+- **PR5 — Architecture**
+  - 5.1 intent detection LLM — non démarré, pas de besoin réel identifié à ce
+    jour (à creuser si besoin)
+  - 5.2 connexion SAP PostgreSQL — **bloqué, pas par manque de code mais par
+    accès** (30/06) : pas d'accès à l'API SAP BusinessObjects actuellement.
+    Le workflow existant (export SAP BO manuel → import Grist) reste donc la
+    voie utilisée. À reprendre seulement si l'accès API devient disponible
+    côté SAIO/rectorat — pas de développement à l'aveugle sans pouvoir tester
+    contre un vrai accès.
 
 ## Chantier T2/T4 — Architecture infographie (clos)
 
@@ -158,6 +174,48 @@ héritage silencieux du filtre — sur le même principe que PR2.1 qui distingue
 déjà "et pour les non-boursiers ?" (filtre, hérite) d'une vraie nouvelle paire.
 Jugée plus structurante mais plus risquée (faux positifs possibles sur la
 détection). Pas de décision de priorisation prise.
+
+## Chantier "vrai copilot" — confiance et prise en main (clos, 30/06)
+
+**Contexte.** Discussion sur l'amélioration de l'outil pour des personnels
+peu familiers de la manipulation de données. Objectif explicite formulé par
+l'utilisateur : "donner l'impression d'un vrai copilot / assistant
+conversationnel adapté au métier", pas juste ajouter une fonctionnalité
+d'aide isolée. Quatre axes retenus et implémentés :
+
+**1. Message de chargement contextuel.** Avant : texte fixe "Albert analyse
+les documents…" même quand la question portait sur la table Grist (pas des
+documents), ce qui pouvait semer le doute. Après : `buildLoadingLabel()`
+détecte le type de question (infographie / export / calcul Data Engine /
+générique) et adapte le message en conséquence ("Calcul sur les données
+Grist…", "Composition de l'infographie…", "Préparation de l'export…").
+
+**2. Badge "✓ Calcul exact".** Avant : aucune distinction visuelle entre une
+réponse calculée directement sur les lignes brutes (Data Engine, garantie
+exacte) et une réponse Albert générique (interprétation IA, moins garantie).
+Après : badge vert discret ajouté systématiquement sur le titre de toute
+réponse Data Engine, via une fonction commune `deTitleHtml()` réutilisée par
+les 5 branches de `renderDataEngineResultHtml` (count_rows, group_by/top,
+pivot, stats, compare). Au passage, les deux derniers titres jargon
+("Tableau croisé calculé localement", "Statistiques calculées localement")
+ont été corrigés vers des titres clairs, oubliés lors du chantier titres
+clairs précédent.
+
+**3. Tooltips sur les boutons techniques.** Sessions, Sources, Composer une
+infographie, Reset, paramètres (⚙️) ainsi que la section repliée "Plan Data
+Engine" ont maintenant un attribut `title` natif HTML expliquant en une
+phrase, en langage métier, ce que fait le bouton — pour réduire l'hésitation
+à cliquer par peur de "casser quelque chose".
+
+**4. Bandeau d'exemples permanent (mini-suggestions).** Avant : les
+suggestions de questions (PR4.2) ne sont visibles que sur l'écran vide,
+disparaissent dès la première question posée. Après : un second bandeau
+compact (`#mini-suggestions`, 3 exemples, style discret) reste affiché en
+permanence sous la zone de saisie, réutilisant `buildDynamicSuggestions()`
+sans dupliquer sa logique — un utilisateur hésitant peut toujours voir
+comment formuler une question, même en pleine conversation.
+
+Test dédié : `test_copilot_feel.js` (28 tests) couvrant les 4 axes.
 
 ## Chantier garde-fous DOM — accès Grist non confirmé (clos, 30/06)
 

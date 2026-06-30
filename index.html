@@ -11,13 +11,13 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="js/planner.js?v=27.5.7"></script>
-<script src="js/dataEngine.js?v=27.5.8"></script>
+<script src="js/dataEngine.js?v=27.5.9"></script>
 <script src="js/config.js?v=27.5.6"></script>
 <script src="js/knowledge.js?v=27.5.6"></script>
 <script src="js/documents.js?v=27.5.6"></script>
 <script src="js/infographic.js?v=27.5.7"></script>
 <script src="js/sessions.js?v=27.5.8"></script>
-<script src="js/albert.js?v=27.6.5"></script>
+<script src="js/albert.js?v=27.6.6"></script>
 <style>
   :root {
     --bleu:    #1a3a5c;
@@ -256,6 +256,18 @@
     color: var(--gris3); cursor: pointer; transition: all 0.1s;
   }
   .sugg-chip:hover { border-color: var(--albert); color: var(--albert); background: var(--albert2); }
+
+  .mini-suggestions {
+    display: flex; flex-wrap: wrap; gap: 5px; padding: 0 0 6px;
+  }
+  .mini-suggestions:empty { display: none; }
+  .mini-sugg-chip {
+    background: var(--gris0,#f8fafc); border: 1px solid var(--gris1,#f3f4f6);
+    padding: 3px 9px; border-radius: 14px; font-size: 10px;
+    color: var(--gris4,#9ca3af); cursor: pointer; transition: all 0.1s;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;
+  }
+  .mini-sugg-chip:hover { border-color: var(--albert); color: var(--albert); background: var(--albert2); }
 
   .loading-msg {
     display: flex; align-items: center; gap: 8px;
@@ -808,12 +820,12 @@
         <div class="ch-sub" id="chat-sub">Aucun document chargé</div>
       </div>
       <div class="chat-header-actions">
-        <button class="header-action" onclick="openSessionsPanel()">🗂 <span class="label">Sessions</span></button>
-        <button class="header-action primary" onclick="openSourcesPanel()">📂 <span class="label">Sources</span></button>
-        <button class="header-action" onclick="openInfographicComposer()">🖼 <span class="label">Composer une infographie</span></button>
-        <button class="header-action" onclick="resetCopilotDialogue()">↻ <span class="label">Reset</span></button>
+        <button class="header-action" onclick="openSessionsPanel()" title="Retrouver vos anciennes conversations et en démarrer une nouvelle">🗂 <span class="label">Sessions</span></button>
+        <button class="header-action primary" onclick="openSourcesPanel()" title="Voir quelle table Grist ou quels fichiers sont utilisés pour répondre à vos questions">📂 <span class="label">Sources</span></button>
+        <button class="header-action" onclick="openInfographicComposer()" title="Créer une infographie en choisissant parmi vos résultats précédents dans cette conversation">🖼 <span class="label">Composer une infographie</span></button>
+        <button class="header-action" onclick="resetCopilotDialogue()" title="Effacer le contexte actuel (filtres, dernière question) pour repartir d'une analyse neutre">↻ <span class="label">Reset</span></button>
         <div class="albert-badge"><div class="dot"></div>Albert API</div>
-        <button class="gear-btn" onclick="openConfig()">⚙️</button>
+        <button class="gear-btn" onclick="openConfig()" title="Paramètres techniques (clé API, modèle)">⚙️</button>
       </div>
     </div>
 
@@ -842,6 +854,7 @@
 
     <div class="chat-input-zone">
       <div class="context-pills" id="context-pills"></div>
+      <div class="mini-suggestions" id="mini-suggestions"></div>
       <div class="chat-input-row">
         <button class="btn-attach" onclick="document.getElementById('file-input').click()" title="Ajouter un fichier">📎</button>
         <textarea id="chat-input" placeholder="Posez votre question…" rows="1" onkeydown="handleKeydown(event)"></textarea>
