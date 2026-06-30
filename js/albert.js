@@ -550,17 +550,22 @@ const SUGGESTION_TEMPLATES = {
 const SUGGESTION_KIND_PRIORITY = ['boursier', 'zone_basque', 'apprentissage', 'academie', 'formation', 'bac_series', 'departement', 'commune', 'sexe', 'admission', 'voeu'];
 
 function buildDynamicSuggestions(max = 6) {
-  if (!gristRecords || !gristRecords.length || typeof window.plannerColumnKind !== 'function') {
-    console.warn('[PR4.2 diag] fallback statique — gristRecords:', gristRecords?.length || 0, '· plannerColumnKind dispo:', typeof window.plannerColumnKind === 'function');
-    return null;
-  }
-  const fields = Object.keys(gristRecords[0] || {}).filter(f => f !== 'id' && f !== 'manualSort');
+  if (typeof window.plannerColumnKind !== 'function' || typeof buildGristQueryTable !== 'function') return null;
+  // Important : on passe par buildGristQueryTable() plutôt que gristRecords brut.
+  // Cas fréquent (Grist alimenté depuis un import Excel) : les clés réelles de
+  // gristRecords sont génériques ("A", "B", "C"...) et les vrais intitulés de
+  // colonnes vivent dans la première ligne de données. buildGristQueryTable()
+  // sait déjà reconstruire les bons en-têtes dans ce cas (voir documents.js) —
+  // le Data Engine s'en sert pour ses propres réponses, les suggestions doivent
+  // faire de même pour rester cohérentes avec ce que l'utilisateur voit ensuite.
+  const table = buildGristQueryTable();
+  if (!table || !table.headers || !table.headers.length) return null;
+  const fields = table.headers.filter(f => f !== 'id' && f !== 'manualSort');
   const seenKinds = new Map(); // kind -> nom de colonne (le premier rencontré dans l'ordre du schéma)
   fields.forEach(col => {
     const kind = window.plannerColumnKind(col);
     if (SUGGESTION_TEMPLATES[kind] && !seenKinds.has(kind)) seenKinds.set(kind, col);
   });
-  console.warn('[PR4.2 diag] colonnes analysées:', fields, '· kinds reconnus:', [...seenKinds.entries()]);
   if (!seenKinds.size) return null;
   const ordered = SUGGESTION_KIND_PRIORITY.filter(k => seenKinds.has(k));
   // Sécurité : si un kind reconnu n'est pas dans la liste de priorité (ajout futur
@@ -572,6 +577,7 @@ function buildDynamicSuggestions(max = 6) {
 
 function renderSuggestions() {
   const wrap = document.getElementById('suggestions');
+  if (!wrap) return; // #suggestions ne vit que dans l'empty-state (session sans messages) — voir sessions.js renderActiveSession
   wrap.innerHTML = '';
   const dynamic = buildDynamicSuggestions();
   const list = (dynamic && dynamic.length) ? dynamic : SUGGESTIONS;
