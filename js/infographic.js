@@ -616,157 +616,17 @@ function addInfographicMessage(html, title = 'Infographie adaptive générée', 
   }
 }
 
-/* ═══════════════════════ COMPOSITEUR MULTI-BLOCS (modal-ic) ═══════════════════════
-   Permet de sélectionner plusieurs résultats Data Engine (historique de session)
-   et de les fusionner en un seul contexte avant de générer l'infographie.
-   État partagé : _icState (défini dans config.js) = { blocks: [], theme: 'bordeaux', dragSrcIdx: null } */
+/* Le compositeur multi-blocs (openInfographicComposer, closeInfographicComposer,
+   _icRenderBlocks, _icRenderThemes, icToggleBlock, icSelectTheme, submitInfographicComposer)
+   est déjà implémenté de façon complète dans sessions.js — il gère en plus la fusion
+   des blocs globaux/session et le mode "Recomposer" (targetUid). Pas de redéfinition ici
+   pour éviter toute divergence entre deux implémentations concurrentes. */
 
-function _icBuildBlockLabel(entry) {
-  // entry vient de __DATA_ENGINE_STATE.history : {at, plan, kind, summary}
-  const p = entry.plan || {};
-  const filters = (p.filters || []).map(f => f.label || f.value).filter(Boolean);
-  const compare = (p.compareGroups || []).map(g => g.label).filter(Boolean);
-  const tags = [...filters, ...compare];
-  const kindLabel = { count: 'comptage', group_by: 'répartition', top: 'top', pivot: 'tableau croisé', stats: 'statistiques', compare: 'comparaison' }[entry.kind] || entry.kind;
-  const title = tags.length ? tags.join(' · ') : (p.targetCol || kindLabel);
-  return { title, subtitle: `${kindLabel}${p.targetCol ? ' · ' + p.targetCol : ''}` };
-}
-
-function openInfographicComposer(prefillQuestion = '') {
-  const modal = document.getElementById('modal-ic');
-  if (!modal) return;
-
-  const state = (typeof getDataEngineState === 'function') ? getDataEngineState() : { history: [] };
-  const history = (state.history || []).slice().reverse(); // plus récent en premier
-
-  _icState.blocks = history.map((entry, i) => ({
-    id: 'icb_' + i,
-    entry,
-    selected: true, // coché par défaut, comme observé dans l'UI existante
-  }));
-  _icState.question = prefillQuestion || '';
-  _icState.dragSrcIdx = null;
-
-  _icRenderBlocks();
-  _icRenderThemes();
-  _icUpdateSummary();
-
-  modal.style.display = 'flex';
-}
-
-function closeInfographicComposer() {
-  const modal = document.getElementById('modal-ic');
-  if (modal) modal.style.display = 'none';
-}
-
-function _icRenderBlocks() {
-  const container = document.getElementById('ic-blocks');
-  if (!container) return;
-
-  if (!_icState.blocks.length) {
-    container.innerHTML = '<p style="color:var(--muted,#6b6560);font-size:12px">Aucun résultat Data Engine en historique pour cette session.</p>';
-    return;
-  }
-
-  container.innerHTML = _icState.blocks.map((b, idx) => {
-    const { title, subtitle } = _icBuildBlockLabel(b.entry);
-    return `<div class="source-card${b.selected ? ' active' : ''}" draggable="true" data-icb-idx="${idx}" onclick="icToggleBlock(${idx})">
-      <div class="sc-head">
-        <span class="sc-title">${escapeHtml(title)}</span>
-        <input type="checkbox" ${b.selected ? 'checked' : ''} onclick="event.stopPropagation(); icToggleBlock(${idx})">
-      </div>
-      <div class="sc-detail">${escapeHtml(subtitle)}</div>
-    </div>`;
-  }).join('');
-
-  // Drag & drop pour réordonner
-  container.querySelectorAll('[data-icb-idx]').forEach(el => {
-    el.addEventListener('dragstart', () => { _icState.dragSrcIdx = Number(el.dataset.icbIdx); });
-    el.addEventListener('dragover', (e) => e.preventDefault());
-    el.addEventListener('drop', (e) => {
-      e.preventDefault();
-      const destIdx = Number(el.dataset.icbIdx);
-      if (_icState.dragSrcIdx === null || _icState.dragSrcIdx === destIdx) return;
-      const [moved] = _icState.blocks.splice(_icState.dragSrcIdx, 1);
-      _icState.blocks.splice(destIdx, 0, moved);
-      _icState.dragSrcIdx = null;
-      _icRenderBlocks();
-    });
-  });
-}
-
-function icToggleBlock(idx) {
-  if (!_icState.blocks[idx]) return;
-  _icState.blocks[idx].selected = !_icState.blocks[idx].selected;
-  _icRenderBlocks();
-  _icUpdateSummary();
-}
-
-function _icRenderThemes() {
-  const container = document.getElementById('ic-themes');
-  if (!container || typeof INFOGRAPH_THEMES === 'undefined') return;
-  container.innerHTML = INFOGRAPH_THEMES.map(t => `<button type="button"
-      class="source-action${_icState.theme === t.id ? ' primary' : ''}"
-      style="border-color:${t.accent}${_icState.theme === t.id ? ';background:' + t.accent : ''}"
-      onclick="icSelectTheme('${t.id}')">${escapeHtml(t.label)}</button>`).join('');
-}
-
-function icSelectTheme(themeId) {
-  _icState.theme = themeId;
-  _icRenderThemes();
-}
-
-function _icUpdateSummary() {
-  const summary = document.getElementById('ic-summary');
-  const submitBtn = document.getElementById('ic-submit');
-  const n = _icState.blocks.filter(b => b.selected).length;
-  if (summary) summary.textContent = n === 0 ? 'Aucun bloc sélectionné' : `${n} bloc${n > 1 ? 's' : ''} sélectionné${n > 1 ? 's' : ''}`;
-  if (submitBtn) submitBtn.disabled = (n === 0);
-}
-
-async function submitInfographicComposer() {
-  const selected = _icState.blocks.filter(b => b.selected);
-  if (!selected.length) return;
-
-  closeInfographicComposer();
-
-  const theme = INFOGRAPH_THEMES.find(t => t.id === _icState.theme) || INFOGRAPH_THEMES[0];
-
-  // IMPORTANT : __DATA_ENGINE_STATE.history ne conserve qu'un résumé texte par exécution
-  // (entry.summary), pas l'objet `exec` complet (lignes brutes, plan, etc.) — sauf pour
-  // la toute dernière exécution, accessible via state.lastExecution.
-  // On fusionne donc directement les résumés texte plutôt que de fabriquer de faux objets exec.
-  const state = (typeof getDataEngineState === 'function') ? getDataEngineState() : {};
-  const mergedContext = selected
-    .map((b, i) => {
-      const isLast = state.lastExecution && b.entry.plan === state.lastExecution.plan;
-      const text = isLast && typeof dataEngineResultToContext === 'function'
-        ? dataEngineResultToContext(state.lastExecution)
-        : (b.entry.summary || '');
-      return `--- BLOC ${i + 1}/${selected.length} ---\n${text}`;
-    })
-    .join('\n\n');
-
-  const question = _icState.question || 'Compose une infographie à partir des blocs sélectionnés.';
-  const localAnalysis = (typeof buildLocalAnalysis === 'function') ? buildLocalAnalysis() : {};
-
-  try {
-    const html = await generateInfographicWithAlbert(question, localAnalysis, null, theme, mergedContext);
-    addInfographicMessage(html, 'Infographie composée', { theme: theme.id });
-  } catch (e) {
-    addMessage('assistant', `<p style="color:var(--rouge)"><strong>Erreur pendant la génération de l'infographie composée</strong><br>${e.message}</p>`);
-  }
-}
-
-async function generateInfographicWithAlbert(question, localAnalysis, dataExecution = null, forcedTheme = null, rawMergedContext = null) {
+async function generateInfographicWithAlbert(question, localAnalysis, dataExecution = null) {
   // Si un résultat Data Engine est disponible (compare, group_by, pivot…), on l'injecte
   // en tête de contexte — il est plus structuré que la répartition locale et doit primer.
-  // dataExecution peut être un objet unique (cas historique, 1 bloc).
-  // rawMergedContext : texte déjà fusionné par le compositeur multi-blocs (prioritaire si fourni).
   let deContext = '';
-  if (rawMergedContext) {
-    deContext = rawMergedContext + '\n\n';
-  } else if (dataExecution && typeof dataEngineResultToContext === 'function') {
+  if (dataExecution && typeof dataEngineResultToContext === 'function') {
     try {
       const raw = dataEngineResultToContext(dataExecution);
       if (raw && raw.length > 20) deContext = raw + '\n\n';
@@ -861,10 +721,6 @@ ${context || '(Aucun contexte disponible)'}`;
   } catch(e) {
     console.warn('JSON infographie invalide, fallback local:', e, raw);
     spec = buildFallbackInfographicSpec(question, localAnalysis);
-  }
-  if (forcedTheme && forcedTheme.accent && forcedTheme.secondary) {
-    spec.accent = forcedTheme.accent;
-    spec.secondary = forcedTheme.secondary;
   }
   return renderAdaptiveInfographicHtml(spec, question);
 }

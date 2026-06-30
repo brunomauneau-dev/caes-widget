@@ -803,14 +803,18 @@ function currentExecutionToRows(exec) {
   return [];
 }
 
+function buildExportMeta(rows, meta = {}) {
+  const dateStr = new Date().toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const filtresStr = (meta.filters || []).map(f => `${f.col} ${f.op === 'neq' ? '≠' : '='} "${f.value}"`).join(' ; ') || 'Aucun filtre';
+  const perimetreStr = meta.perimetre || 'Ensemble';
+  return [`Exporté le : ${dateStr}`, `Filtres : ${filtresStr}`, `Périmètre : ${perimetreStr}`, `Lignes : ${(rows?.length || 0).toLocaleString('fr-FR')}`];
+}
+
 function downloadRowsAsFile(rows, filename, format, meta = {}) {
   if (!rows || !rows.length) return { ok: false, html: '<h4>Export impossible</h4><p>Aucune donnée à exporter.</p>' };
 
   // ── PR 3.1 fix : ligne de métadonnées en tête de fichier ──
-  const dateStr = new Date().toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-  const filtresStr = (meta.filters || []).map(f => `${f.col} ${f.op === 'neq' ? '≠' : '='} "${f.value}"`).join(' ; ') || 'Aucun filtre';
-  const perimetreStr = meta.perimetre || 'Ensemble';
-  const metaRow = [`Exporté le : ${dateStr}`, `Filtres : ${filtresStr}`, `Périmètre : ${perimetreStr}`, `Lignes : ${rows.length.toLocaleString('fr-FR')}`];
+  const metaRow = buildExportMeta(rows, meta);
 
   if (format === 'csv') {
     const ws = XLSX.utils.json_to_sheet(rows);

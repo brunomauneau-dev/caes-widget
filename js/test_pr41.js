@@ -128,8 +128,11 @@ test('cleanItems retire un item sans label/title/name', () => {
 });
 
 // ─── Suite 3 : prompt few-shot (sessions.js) ────────────────────────────────
-const fs = require('fs');
-const sessionsContent = fs.readFileSync('/home/claude/work/sessions.js', 'utf8');
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+import path from 'path';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const sessionsContent = fs.readFileSync(path.join(__dirname, 'sessions.js'), 'utf8');
 
 test('Prompt contient les exemples few-shot',       () => assert(sessionsContent.includes('EXEMPLES (à suivre strictement)')));
 test('Prompt contient exemple BON ranking',         () => assert(sessionsContent.includes('✅ BON — section ranking')));
@@ -157,7 +160,7 @@ test('"Comparaison boursiers / non-boursiers" NON détecté', () => assert(!isPl
 test('"Lycée Cantau · 349 candidats" NON détecté',  () => assert(!isPlaceholder_simple('Lycée Cantau · 349 candidats')));
 
 // ─── Suite 5 : prompt generateInfographicWithAlbert ────────────────────────
-const infContent = fs.readFileSync('/home/claude/work/infographic.js', 'utf8');
+const infContent = fs.readFileSync(path.join(__dirname, 'infographic.js'), 'utf8');
 
 test('Prompt infographic contient les exemples few-shot',     () => assert(infContent.includes('EXEMPLES OBLIGATOIRES')));
 test('Prompt infographic contient exemple BON eyebrow réel',  () => assert(infContent.includes('"eyebrow":"Parcoursup 2026')));
@@ -166,7 +169,7 @@ test('isPlaceholder_simple définie dans infographic.js',      () => assert(infC
 test('normalizeInfographicSpec filtre le champ eyebrow',      () => assert(infContent.includes('isPlaceholder_simple(spec.eyebrow)')));
 
 // ─── Suite 6 : albert.js — lastExecution fallback ──────────────────────────
-const albertContent = fs.readFileSync('/home/claude/work/albert_prod.js', 'utf8');
+const albertContent = fs.readFileSync(path.join(__dirname, 'albert.js'), 'utf8');
 
 test('albert.js passe lastExecution en fallback', () =>
   assert(albertContent.includes('getDataEngineState().lastExecution'), 'lastExecution fallback manquant'));
