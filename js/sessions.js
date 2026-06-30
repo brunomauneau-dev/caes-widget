@@ -417,7 +417,7 @@ function extractBlockTitle(exec, question) {
   }
   if (tool === 'compare') {
     const groups = (exec.plan?.compareGroups || []).map(g => g.label || '').filter(Boolean).join(' vs ');
-    return groups ? `Comparaison : ${groups}` : `Comparaison${fPart}`;
+    return groups ? `Comparaison : ${groups}${fPart}` : `Comparaison${fPart}`;
   }
   if (tool === 'pivot') {
     return `${_shortColName(col)} × ${_shortColName(col2)}${fPart}`;
