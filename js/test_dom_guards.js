@@ -70,6 +70,22 @@ describe('addInfographicMessage — early-return avant tout usage de wrap (régr
   }
 });
 
+// ─── RÉGRESSION RÉELLE (30/06) : envoi de message impossible sur une session
+// qui a déjà des messages, car #empty-state n'existe alors pas dans le DOM
+// (il n'est recréé par renderActiveSession que pour une session vide) — voir
+// sessions.js. sendMessage() accédait à .style.display sans vérifier que
+// l'élément existe, plantant silencieusement AVANT addMessage('user', question).
+describe('sendMessage — ne plante pas quand #empty-state est absent du DOM (session avec historique)', () => {
+  const fnMatch = albertSrc.match(/async function sendMessage\(\)[\s\S]{0,400}/);
+  assert(!!fnMatch, 'sendMessage trouvée dans albert.js');
+  if (fnMatch) {
+    assert(/const emptyState = document\.getElementById\('empty-state'\);\s*\n\s*if \(emptyState\)/.test(fnMatch[0]),
+      'garde-fou "if (emptyState)" présent avant .style.display (corrige le blocage d\'envoi observé en usage réel)');
+    assert(!/document\.getElementById\('empty-state'\)\.style\.display/.test(fnMatch[0]),
+      'plus aucun accès direct .style.display sans garde-fou sur empty-state');
+  }
+});
+
 console.log(`\n──────────────────────────────────────────────────`);
 console.log(`Résultat : ${passed} ✓  ${failed} ✗  (${passed + failed} tests)`);
 if (failed > 0) process.exit(1);

@@ -719,7 +719,8 @@ async function sendMessage() {
   const question = input.value.trim();
   if (!question) return;
 
-  document.getElementById('empty-state').style.display = 'none';
+  const emptyState = document.getElementById('empty-state');
+  if (emptyState) emptyState.style.display = 'none';
   input.value = '';
 
   addMessage('user', question);
