@@ -22,10 +22,10 @@ réconciliées en une base unique cohérente :
 - la lignée **PR1 → PR4.1** (roadmap v6, voir plus bas)
 - la lignée **T2 / T4 / compositeur multi-blocs** (architecture infographie)
 
-Suite de tests actuelle : **11 fichiers, 234 tests, tous verts.**
+Suite de tests actuelle : **12 fichiers, 243 tests, tous verts.**
 (`sessions.test.js`, `pr12.test.js`, `pr21.test.js`, `pr22.test.js`, `test_pr41.js`,
 `pr31.test.js`, `test_t4.js`, `test_action_bar.js`, `test_clear_titles.js`,
-`pr32.test.js`, `pr42.test.js`)
+`pr32.test.js`, `pr42.test.js`, `test_dom_guards.js`)
 
 ⚠️ Point de vigilance pour la suite : `test_t4.js` et `test_action_bar.js` ont dû
 être **recréés** lors de la réconciliation — les fichiers originaux écrits pendant
@@ -158,3 +158,40 @@ héritage silencieux du filtre — sur le même principe que PR2.1 qui distingue
 déjà "et pour les non-boursiers ?" (filtre, hérite) d'une vraie nouvelle paire.
 Jugée plus structurante mais plus risquée (faux positifs possibles sur la
 détection). Pas de décision de priorisation prise.
+
+## Chantier garde-fous DOM — accès Grist non confirmé (clos, 30/06)
+
+**Cause racine identifiée.** Quand le widget est rechargé, Grist affiche une
+demande de confirmation d'accès en lecture à la table ("Le widget a besoin de
+read la table actuelle" — boutons Accepter/Refuser). Le script JS s'exécute
+déjà à ce moment-là, mais tant que l'utilisateur n'a pas cliqué "Accepter",
+`gristRecords` est vide et certaines parties du DOM applicatif ne sont pas
+encore dans l'état attendu. Plusieurs fonctions du widget accédaient à des
+éléments DOM sans vérifier leur existence, provoquant des `TypeError`
+("... is null") visibles en console à chaque rechargement avant acceptation.
+
+**Trouvé et corrigé (suite à logs navigateur réels, 30/06) :**
+- `renderSuggestions` (`albert.js`) — `#suggestions` n'existe que dans
+  l'empty-state, absent du DOM si la session restaurée a déjà des messages
+- `updateChatSub` (`albert.js`) — `#chat-sub` non protégé
+- auto-resize du textarea `#chat-input` (`albert.js`, code top-level) — non
+  protégé, plantait dès le chargement du script si le DOM n'était pas encore
+  monté
+- `addMessage` (`albert.js`) et `addInfographicMessage` (`infographic.js`) —
+  `#chat-messages` non protégé (pas encore observé en crash réel à ce point,
+  mais même fragilité structurelle — corrigé par précaution)
+
+Toutes ces fonctions ont maintenant un garde-fou `if (!el) return`. Pas de
+changement de comportement pour l'utilisateur une fois l'accès accepté —
+uniquement suppression d'erreurs silencieuses (mais bruyantes en console)
+pendant la fenêtre d'attente de confirmation.
+
+Test dédié : `test_dom_guards.js` (9 tests) — vérifie statiquement la présence
+des garde-fous dans le code source et, pour `updateChatSub`, le comportement
+réel sans crash.
+
+**Point de vigilance pour la suite** : si de nouvelles fonctions DOM sont
+ajoutées au chemin `grist.ready()` → premier rendu, vérifier systématiquement
+qu'elles ont un garde-fou avant tout accès `document.getElementById(...)`,
+plutôt que de découvrir le crash en usage réel comme cette fois-ci.
+
