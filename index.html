@@ -16,8 +16,8 @@
 <script src="js/knowledge.js?v=27.5.6"></script>
 <script src="js/documents.js?v=27.5.6"></script>
 <script src="js/infographic.js?v=27.5.7"></script>
-<script src="js/sessions.js?v=27.5.8"></script>
-<script src="js/albert.js?v=27.6.6"></script>
+<script src="js/sessions.js?v=27.5.9"></script>
+<script src="js/albert.js?v=27.6.7"></script>
 <style>
   :root {
     --bleu:    #1a3a5c;
@@ -259,6 +259,7 @@
 
   .mini-suggestions {
     display: flex; flex-wrap: wrap; gap: 5px; padding: 0 0 6px;
+    width: 100%; box-sizing: border-box; overflow: hidden;
   }
   .mini-suggestions:empty { display: none; }
   .mini-sugg-chip {
