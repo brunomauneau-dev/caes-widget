@@ -427,6 +427,7 @@ grist.onRecords(function(records) {
   updateSourceHub();
   updateChatSub();
   renderSuggestions(); // PR4.2 : régénère les suggestions dynamiques maintenant que le schéma réel est connu
+  renderMiniSuggestions();
 });
 
 
@@ -590,7 +591,29 @@ function renderSuggestions() {
     wrap.appendChild(chip);
   });
 }
+
+// Bandeau compact d'exemples de questions, affiché en permanence sous la zone
+// de saisie (contrairement aux chips de l'empty-state qui disparaissent dès
+// la première question). Objectif : un utilisateur peu familier des données
+// peut toujours voir "comment formuler une question qui marche", même en
+// pleine conversation. Limité à 3 exemples pour rester discret.
+function renderMiniSuggestions() {
+  const wrap = document.getElementById('mini-suggestions');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  const dynamic = buildDynamicSuggestions(3);
+  const list = (dynamic && dynamic.length) ? dynamic : SUGGESTIONS.slice(0, 3);
+  list.forEach(s => {
+    const chip = document.createElement('div');
+    chip.className = 'mini-sugg-chip';
+    chip.textContent = s;
+    chip.title = s; // texte complet au survol si tronqué par max-width
+    chip.onclick = () => { document.getElementById('chat-input').value = s; sendMessage(); };
+    wrap.appendChild(chip);
+  });
+}
 renderSuggestions();
+renderMiniSuggestions();
 updateSourceHub();
 
 
@@ -702,7 +725,7 @@ async function sendMessage() {
   addMessage('user', question);
 
   const loadingId = 'loading_' + Date.now();
-  addLoadingMessage(loadingId);
+  addLoadingMessage(loadingId, question);
 
   const filterContextText = [...chatHistory.slice(-4).map(m => m.content), question].join('\n');
   let dataPlan = detectDataEnginePlan(question, filterContextText);
@@ -853,14 +876,34 @@ function addMessage(role, content, opts = {}) {
   }
 }
 
-function addLoadingMessage(id) {
+function addLoadingMessage(id, question = '') {
   const wrap = document.getElementById('chat-messages');
+  if (!wrap) return;
   const msg = document.createElement('div');
   msg.className = 'msg assistant';
   msg.id = id;
-  msg.innerHTML = `<div class="msg-bubble"><div class="loading-msg"><div class="spinner"></div>Albert analyse les documents…</div></div>`;
+  const label = buildLoadingLabel(question);
+  msg.innerHTML = `<div class="msg-bubble"><div class="loading-msg"><div class="spinner"></div>${escapeHtml(label)}</div></div>`;
   wrap.appendChild(msg);
   wrap.scrollTop = wrap.scrollHeight;
+}
+
+// Message de chargement adapté au type de question, pour que l'utilisateur
+// comprenne ce qui se passe pendant l'attente plutôt qu'un texte générique
+// figé ("Albert analyse les documents…") qui ne correspond pas toujours à
+// ce qui est réellement en train de se calculer.
+function buildLoadingLabel(question) {
+  if (typeof isInfographicRequest === 'function' && isInfographicRequest(question)) {
+    return 'Composition de l\'infographie…';
+  }
+  if (typeof isExportCurrentRequest === 'function' && isExportCurrentRequest(question)) {
+    return 'Préparation de l\'export…';
+  }
+  if (typeof isDataEngineQuestion === 'function' && isDataEngineQuestion(question)) {
+    const gristActive = gristRecords && gristRecords.length > 0;
+    return gristActive ? 'Calcul sur les données Grist…' : 'Analyse des données…';
+  }
+  return 'Albert analyse les documents…';
 }
 
 function removeLoadingMessage(id) {
