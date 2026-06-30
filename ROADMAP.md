@@ -22,7 +22,7 @@ réconciliées en une base unique cohérente :
 - la lignée **PR1 → PR4.1** (roadmap v6, voir plus bas)
 - la lignée **T2 / T4 / compositeur multi-blocs** (architecture infographie)
 
-Suite de tests actuelle : **11 fichiers, 227 tests, tous verts.**
+Suite de tests actuelle : **11 fichiers, 234 tests, tous verts.**
 (`sessions.test.js`, `pr12.test.js`, `pr21.test.js`, `pr22.test.js`, `test_pr41.js`,
 `pr31.test.js`, `test_t4.js`, `test_action_bar.js`, `test_clear_titles.js`,
 `pr32.test.js`, `pr42.test.js`)
@@ -56,21 +56,42 @@ seulement les fichiers de code patché.
     ce blocage en usage ("refait en barres" ne marche pas).
 - **PR4 — Qualité Albert + UX**
   - 4.1 ✓ validé — few-shot + anti-placeholder (44 tests)
-  - 4.2 ✓ validé (30/06) — questions guidées par catégorie métier. Choix de
-    conception, suite à discussion : pas de catégories codées en dur (jugées
-    trop rigides — "les catégories sont nombreuses et peuvent changer selon
-    les données qu'on traite"). À la place, les suggestions de questions sont
-    **générées dynamiquement depuis le schéma réel de la table Grist connectée**,
-    en réutilisant `columnKind()` du planner (exposée sur `window.plannerColumnKind`)
+  - 4.2 ✓ validé (30/06, corrigé le même jour suite à test réel en navigateur)
+    — questions guidées par catégorie métier. Choix de conception, suite à
+    discussion : pas de catégories codées en dur (jugées trop rigides — "les
+    catégories sont nombreuses et peuvent changer selon les données qu'on
+    traite"). À la place, les suggestions de questions sont **générées
+    dynamiquement depuis le schéma réel de la table Grist connectée**, en
+    réutilisant `columnKind()` du planner (exposée sur `window.plannerColumnKind`)
     plutôt que de dupliquer une logique de classification. Un gabarit de
     question par type de colonne (`SUGGESTION_TEMPLATES` dans albert.js),
-    avec ordre de priorité d'affichage et limite à 6 chips. Si la table connectée
-    change (autres colonnes), les suggestions s'adaptent automatiquement ;
-    fallback sur les 5 suggestions statiques génériques (`SUGGESTIONS`,
-    config.js) si aucune colonne métier n'est reconnue. Remplace les chips
-    existantes au même emplacement (pas de nouveau panneau). Régénérées à
-    chaque arrivée de nouvelles données Grist (`grist.onRecords`), pas
-    seulement au chargement initial. Test : `pr42.test.js` (12 tests).
+    avec ordre de priorité d'affichage et limite à 6 chips. Fallback sur les
+    5 suggestions statiques génériques (`SUGGESTIONS`, config.js) si aucune
+    colonne métier n'est reconnue. Remplace les chips existantes au même
+    emplacement. Régénérées à chaque arrivée de nouvelles données Grist
+    (`grist.onRecords`).
+
+    **Deux bugs réels trouvés en test navigateur (premier déploiement),
+    corrigés le jour même :**
+    1. `Uncaught TypeError: can't access property "innerHTML", wrap is null`
+       — `renderSuggestions()` plantait quand appelée sur une session qui a
+       déjà des messages : `#suggestions` ne vit que dans le bloc empty-state
+       (voir `sessions.js` → `renderActiveSession`), qui n'est reconstruit
+       dans le DOM que pour une session vide. Corrigé par un garde-fou
+       `if (!wrap) return`.
+    2. Suggestions systématiquement en fallback statique sur une vraie table
+       (35 287 lignes) — diagnostiqué via logs temporaires : les colonnes de
+       `gristRecords` étaient exposées comme "A", "B", "C"... (cas Grist
+       alimenté par import Excel, où les vrais intitulés vivent dans la
+       première ligne de données plutôt que dans les clés). `dataEngine.js`
+       gère déjà ce cas via `buildGristQueryTable()` (`documents.js`), mais
+       `buildDynamicSuggestions` lisait `gristRecords` brut sans passer par
+       cette reconstruction. Corrigé en réutilisant `buildGristQueryTable()`,
+       cohérent avec le chemin déjà emprunté par le Data Engine pour ses
+       propres réponses.
+
+    Tests : `pr42.test.js` (19 tests, incluant un cas dédié à chaque bug
+    pour éviter la régression).
   - 4.3 dashboards prédéfinis — non démarré
 - **PR5 — Architecture** — non démarré (intent detection LLM, connexion SAP PostgreSQL)
 
