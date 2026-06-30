@@ -651,7 +651,7 @@ async function sendMessage() {
 
   if (dataExecution && shouldAnswerLocallyWithoutAlbert(dataExecution) && !isInfographicRequest(question)) {
     removeLoadingMessage(loadingId);
-    addMessage('assistant', dataExecution.html);
+    addMessage('assistant', dataExecution.html, { dataExecution, question });
     chatHistory.push({ role: 'user', content: question });
     const deCtx = dataEngineResultToContext(dataExecution);
     chatHistory.push({ role: 'assistant', content: deCtx });
@@ -782,7 +782,7 @@ function addMessage(role, content, opts = {}) {
     bubble.innerHTML = content;
   }
   msg.appendChild(bubble);
-  if (role === 'assistant') msg.appendChild(buildCopilotActionBar(bubble));
+  if (role === 'assistant') msg.appendChild(buildCopilotActionBar(bubble, opts.dataExecution || null, opts.question || ''));
   wrap.appendChild(msg);
   wrap.scrollTop = wrap.scrollHeight;
   if (opts.record !== false) {

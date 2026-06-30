@@ -151,7 +151,7 @@ function addPersistentFilter(col, value, op = 'eq', label = null) {
 
 
 // ── buildCopilotActionBar ──
-function buildCopilotActionBar(bubble) {
+function buildCopilotActionBar(bubble, dataExecution = null, question = '') {
   const bar = document.createElement('div');
   bar.className = 'copilot-actions';
   const mk = (label, title, fn) => {
@@ -164,7 +164,27 @@ function buildCopilotActionBar(bubble) {
     return b;
   };
   bar.appendChild(mk('📊 Graphique', 'Afficher un graphique sur le résultat courant', () => quickAsk('Graphique')));
-  bar.appendChild(mk('🖼 Infographie', 'Composer une infographie depuis les résultats de la session', () => openInfographicComposer()));
+  bar.appendChild(mk('🖼 Infographie', 'Générer une infographie à partir de ce résultat uniquement', async (btn) => {
+    if (!dataExecution) {
+      // Pas de résultat Data Engine associé à ce message : on retombe sur l'ancien
+      // comportement (compositeur global), car il n'y a rien de local à utiliser.
+      openInfographicComposer();
+      return;
+    }
+    const originalLabel = btn.textContent;
+    btn.textContent = '⏳ Génération…';
+    btn.disabled = true;
+    try {
+      const localAnalysis = (typeof executeLocalDataQuery === 'function') ? executeLocalDataQuery(question, question) : {};
+      const html = await generateInfographicWithAlbert(question || 'Infographie de ce résultat', localAnalysis, dataExecution);
+      addInfographicMessage(html, 'Infographie de ce bloc');
+    } catch (e) {
+      addMessage('assistant', `<p style="color:var(--rouge)"><strong>Erreur pendant la génération de l'infographie</strong><br>${e.message}</p>`);
+    } finally {
+      btn.textContent = originalLabel;
+      btn.disabled = false;
+    }
+  }));
   bar.appendChild(mk('📄 Excel', 'Exporter le résultat courant en Excel', () => quickAsk('Exporte en Excel')));
   bar.appendChild(mk('🖨 PDF', 'Imprimer / exporter en PDF', () => window.print()));
   bar.appendChild(mk('📋 Copier', 'Copier le rapport', async () => {
