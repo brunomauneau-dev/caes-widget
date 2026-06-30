@@ -629,6 +629,10 @@
 
   /* ═══════════════════════ PUBLIC API ═══════════════════════ */
 
+  // Exposée pour PR4.2 (suggestions de questions guidées générées dynamiquement
+  // depuis le schéma de colonnes réel, sans dupliquer cette logique de classification).
+  window.plannerColumnKind = columnKind;
+
   window.buildPlannerPlan = function buildPlannerPlan(question, filterContextText, table, forcedTool = null) {
     if (!table || !table.objects || !table.objects.length) return null;
     // Le planner doit travailler sur la question utilisateur, pas sur le

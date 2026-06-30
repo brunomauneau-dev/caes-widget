@@ -426,6 +426,7 @@ grist.onRecords(function(records) {
   document.getElementById('grist-info').className = '';
   updateSourceHub();
   updateChatSub();
+  renderSuggestions(); // PR4.2 : régénère les suggestions dynamiques maintenant que le schéma réel est connu
 });
 
 
@@ -519,11 +520,58 @@ function updateChatSub() {
   document.getElementById('chat-sub').textContent = txt;
 }
 
-/* ═══════════════════════ SUGGESTIONS ═══════════════════════ */
+/* ═══════════════════════ SUGGESTIONS ═══════════════════════
+   PR4.2 — Les suggestions ne sont plus une liste statique : elles sont
+   générées à partir des colonnes réellement présentes dans la table Grist
+   connectée, via plannerColumnKind() (planner.js). Si les données changent
+   (autre table, autres colonnes), les suggestions s'adaptent automatiquement
+   au lieu de proposer des questions mortes ou hors-sujet.
+   Fallback sur SUGGESTIONS (config.js) si aucune table Grist n'est active. */
+
+// Un gabarit de question par type de colonne reconnu par le planner.
+// Une seule question par kind : on privilégie la diversité (couvrir les
+// dimensions disponibles) plutôt que la profondeur sur un seul axe.
+const SUGGESTION_TEMPLATES = {
+  zone_basque:  (col) => `Répartition par académie des candidats du Pays Basque`,
+  boursier:     (col) => `Compare les boursiers et les non-boursiers`,
+  bac_series:   (col) => `Répartition par ${col}`,
+  academie:     (col) => `Répartition par ${col}`,
+  departement:  (col) => `Répartition par ${col}`,
+  commune:      (col) => `Répartition par ${col}`,
+  formation:    (col) => `Répartition par ${col}`,
+  admission:    (col) => `Combien de candidats ont répondu favorablement ?`,
+  apprentissage:(col) => `Compare les candidats en apprentissage et les autres`,
+  sexe:         (col) => `Répartition par ${col}`,
+  voeu:         (col) => `Quelle est la moyenne de vœux confirmés ?`,
+};
+// Ordre de priorité d'affichage (les premiers kinds trouvés dans cet ordre
+// passent en premier) — reflète ce qui est le plus souvent demandé en usage
+// SAIO (publics, puis géo/formation, puis admission/vœux).
+const SUGGESTION_KIND_PRIORITY = ['boursier', 'zone_basque', 'apprentissage', 'academie', 'formation', 'bac_series', 'departement', 'commune', 'sexe', 'admission', 'voeu'];
+
+function buildDynamicSuggestions(max = 6) {
+  if (!gristRecords || !gristRecords.length || typeof window.plannerColumnKind !== 'function') return null;
+  const fields = Object.keys(gristRecords[0] || {}).filter(f => f !== 'id' && f !== 'manualSort');
+  const seenKinds = new Map(); // kind -> nom de colonne (le premier rencontré dans l'ordre du schéma)
+  fields.forEach(col => {
+    const kind = window.plannerColumnKind(col);
+    if (SUGGESTION_TEMPLATES[kind] && !seenKinds.has(kind)) seenKinds.set(kind, col);
+  });
+  if (!seenKinds.size) return null;
+  const ordered = SUGGESTION_KIND_PRIORITY.filter(k => seenKinds.has(k));
+  // Sécurité : si un kind reconnu n'est pas dans la liste de priorité (ajout futur
+  // dans planner.js oublié ici), on l'ajoute quand même en fin de liste plutôt
+  // que de le perdre silencieusement.
+  seenKinds.forEach((_, k) => { if (!ordered.includes(k)) ordered.push(k); });
+  return ordered.slice(0, max).map(kind => SUGGESTION_TEMPLATES[kind](seenKinds.get(kind)));
+}
+
 function renderSuggestions() {
   const wrap = document.getElementById('suggestions');
   wrap.innerHTML = '';
-  SUGGESTIONS.forEach(s => {
+  const dynamic = buildDynamicSuggestions();
+  const list = (dynamic && dynamic.length) ? dynamic : SUGGESTIONS;
+  list.forEach(s => {
     const chip = document.createElement('div');
     chip.className = 'sugg-chip';
     chip.textContent = s;
@@ -533,6 +581,7 @@ function renderSuggestions() {
 }
 renderSuggestions();
 updateSourceHub();
+
 
 /* ═══════════════════════ CHAT ═══════════════════════ */
 function handleKeydown(e) {
