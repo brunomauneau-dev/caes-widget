@@ -22,9 +22,10 @@ réconciliées en une base unique cohérente :
 - la lignée **PR1 → PR4.1** (roadmap v6, voir plus bas)
 - la lignée **T2 / T4 / compositeur multi-blocs** (architecture infographie)
 
-Suite de tests actuelle : **9 fichiers, 194 tests, tous verts.**
+Suite de tests actuelle : **11 fichiers, 227 tests, tous verts.**
 (`sessions.test.js`, `pr12.test.js`, `pr21.test.js`, `pr22.test.js`, `test_pr41.js`,
-`pr31.test.js`, `test_t4.js`, `test_action_bar.js`, `test_clear_titles.js`)
+`pr31.test.js`, `test_t4.js`, `test_action_bar.js`, `test_clear_titles.js`,
+`pr32.test.js`, `pr42.test.js`)
 
 ⚠️ Point de vigilance pour la suite : `test_t4.js` et `test_action_bar.js` ont dû
 être **recréés** lors de la réconciliation — les fichiers originaux écrits pendant
@@ -41,10 +42,35 @@ seulement les fichiers de code patché.
 - **PR3 — Export/visu**
   - 3.1 ✓ validé — export pivot Excel : bug métadonnées filtre/date corrigé
     (`buildExportMeta` extraite et testée, 18 tests)
-  - 3.2 graphique bar/pie depuis le pivot — statut à vérifier
+  - 3.2 ✓ validé (30/06) — graphique bar/pie depuis le pivot/résultat courant.
+    Code déjà présent (`renderMiniBarChart`, `renderMiniPieChart`,
+    `renderCurrentChartExecution`, `isPieChartRequest`) mais sans aucun test
+    avant cette session — comblé par `pr32.test.js` (21 tests). Aucune
+    modification du code de production, seulement ajout de couverture.
+    **Limite produit identifiée, non corrigée** : `isPieChartRequest` ne
+    reconnaît que les mots-clés "camembert / pie / donut / secteurs" pour
+    basculer en camembert ; il n'existe pas de mot-clé symétrique pour
+    redemander explicitement un graphique en barres après un camembert (le
+    système conserve alors le dernier type utilisé). Pas corrigé faute de
+    besoin réel constaté — à corriger si un agent rencontre concrètement
+    ce blocage en usage ("refait en barres" ne marche pas).
 - **PR4 — Qualité Albert + UX**
   - 4.1 ✓ validé — few-shot + anti-placeholder (44 tests)
-  - 4.2 questions guidées par catégorie métier — non démarré
+  - 4.2 ✓ validé (30/06) — questions guidées par catégorie métier. Choix de
+    conception, suite à discussion : pas de catégories codées en dur (jugées
+    trop rigides — "les catégories sont nombreuses et peuvent changer selon
+    les données qu'on traite"). À la place, les suggestions de questions sont
+    **générées dynamiquement depuis le schéma réel de la table Grist connectée**,
+    en réutilisant `columnKind()` du planner (exposée sur `window.plannerColumnKind`)
+    plutôt que de dupliquer une logique de classification. Un gabarit de
+    question par type de colonne (`SUGGESTION_TEMPLATES` dans albert.js),
+    avec ordre de priorité d'affichage et limite à 6 chips. Si la table connectée
+    change (autres colonnes), les suggestions s'adaptent automatiquement ;
+    fallback sur les 5 suggestions statiques génériques (`SUGGESTIONS`,
+    config.js) si aucune colonne métier n'est reconnue. Remplace les chips
+    existantes au même emplacement (pas de nouveau panneau). Régénérées à
+    chaque arrivée de nouvelles données Grist (`grist.onRecords`), pas
+    seulement au chargement initial. Test : `pr42.test.js` (12 tests).
   - 4.3 dashboards prédéfinis — non démarré
 - **PR5 — Architecture** — non démarré (intent detection LLM, connexion SAP PostgreSQL)
 
