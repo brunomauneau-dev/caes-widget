@@ -425,6 +425,19 @@ function resetEngineContext() {
 }
 window.resetEngineContext = resetEngineContext;
 
+// Version silencieuse (sans confirm) utilisée par le bouton Synthèse globale du
+// panneau Sources : vide aussi chatHistory pour que le LLM parte de zéro, sans
+// l'historique de conversation qui pourrait biaiser la réponse vers un filtre actif.
+function resetContextSilent() {
+  window.__DATA_ENGINE_STATE = { lastPlan: null, lastExecution: null, history: [] };
+  try { if (typeof chatHistory !== 'undefined') chatHistory.length = 0; } catch(e) {}
+  persistentFilters = [];
+  updateEngineContextBar();
+  if (typeof updateChatSub === 'function') updateChatSub();
+  if (typeof renderPersistentFiltersBar === 'function') renderPersistentFiltersBar();
+}
+window.resetContextSilent = resetContextSilent;
+
 // PR 3.2 — export image PNG d'un graphique SVG ou d'un bloc HTML de barres.
 // Sérialise le nœud DOM ciblé en SVG/Canvas puis déclenche un téléchargement PNG.
 function exportChartAsPng(btn, filename) {

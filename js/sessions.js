@@ -187,11 +187,6 @@ function buildCopilotActionBar(bubble, dataExecution = null, question = '') {
     const text = bubble.innerText || bubble.textContent || '';
     try { await navigator.clipboard.writeText(text); } catch(e) { console.warn(e); }
   }));
-  bar.appendChild(mk('🔁 Comparer…', 'Préremplir une comparaison', () => {
-    const input = document.getElementById('chat-input');
-    input.value = 'Compare les boursiers et les non-boursiers';
-    input.focus();
-  }));
   // Bouton épingler les filtres du résultat courant
   bar.appendChild(mk('📌 Filtres', 'Épingler les filtres de ce résultat pour toutes les prochaines questions', () => {
     const state = (typeof getDataEngineState === 'function') ? getDataEngineState() : null;

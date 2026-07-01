@@ -573,6 +573,44 @@ const SUGGESTION_TEMPLATES = {
 // SAIO (publics, puis géo/formation, puis admission/vœux).
 const SUGGESTION_KIND_PRIORITY = ['boursier', 'zone_basque', 'apprentissage', 'academie', 'formation', 'bac_series', 'departement', 'commune', 'sexe', 'admission', 'voeu'];
 
+// Construit une question de synthèse complète et structurée, adaptée aux
+// dimensions réellement présentes dans la table Grist connectée.
+// Au lieu de "Résume en 5 points" (trop générique, limite arbitraire),
+// on demande explicitement chaque axe d'analyse reconnu par le moteur,
+// avec le vrai nom des colonnes pour ancrer Albert sur la structure réelle.
+function buildSyntheseGlobaleQuestion() {
+  const table = (typeof buildGristQueryTable === 'function') ? buildGristQueryTable() : null;
+  if (!table || !table.headers || !table.headers.length) {
+    return 'Fais une synthèse complète de ce jeu de données : effectifs globaux, profil des candidats, répartition des formations et géographie.';
+  }
+
+  const headers = table.headers;
+  const kindFn = (typeof window.plannerColumnKind === 'function') ? window.plannerColumnKind : () => 'generic';
+
+  // Collecter les colonnes reconnues par axe
+  const axes = {};
+  headers.forEach(col => {
+    const kind = kindFn(col);
+    if (!axes[kind]) axes[kind] = col;
+  });
+
+  // Construire les axes de synthèse selon ce qui est disponible
+  const parts = [];
+  parts.push(`Effectifs globaux : nombre total de candidats et répartition principale.`);
+
+  if (axes.zone_basque) parts.push(`Candidats de la zone "${axes.zone_basque}" : effectif et part du total.`);
+  if (axes.formation) parts.push(`Répartition par "${axes.formation}" : les grands groupes et leurs parts.`);
+  if (axes.academie) parts.push(`Répartition géographique par "${axes.academie}" : les principales académies.`);
+  if (axes.boursier) parts.push(`Profil social : part des boursiers ("${axes.boursier}") et des non-boursiers.`);
+  if (axes.bac_series) parts.push(`Série du baccalauréat ("${axes.bac_series}") : répartition générale/professionnelle/technologique.`);
+  if (axes.apprentissage) parts.push(`Part des apprentis ("${axes.apprentissage}").`);
+  if (axes.voeu || axes.nb_voeux) parts.push(`Vœux confirmés ("${axes.voeu || axes.nb_voeux}") : moyenne et médiane.`);
+  if (axes.admission) parts.push(`Taux de réponse favorable ("${axes.admission}").`);
+  if (axes.sexe) parts.push(`Répartition par "${axes.sexe}".`);
+
+  return `Fais une synthèse complète et structurée de ce jeu de données Parcoursup, sans limite de points. Couvre chacun de ces axes dans l'ordre :\n${parts.map((p, i) => `${i + 1}. ${p}`).join('\n')}\nDonne des chiffres précis pour chaque axe. Ne te limite pas à 5 points : couvre tous les axes listés.`;
+}
+
 function buildDynamicSuggestions(max = 6) {
   if (typeof window.plannerColumnKind !== 'function' || typeof buildGristQueryTable !== 'function') return null;
   // Important : on passe par buildGristQueryTable() plutôt que gristRecords brut.
