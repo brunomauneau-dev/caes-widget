@@ -1,21 +1,58 @@
+/* ═══════════════════════════════════════════════════════════
+   CHARTE GRAPHIQUE DE L'ÉTAT — Typographie Marianne®
+   Chargée depuis un domaine .gouv.fr (ANCT) qui héberge les
+   fichiers DSFR versionnés en accès direct.
+   Licence : SIL Open Font License 1.1
+═══════════════════════════════════════════════════════════ */
+@font-face {
+  font-family: 'Marianne';
+  src: url('https://rdv.anct.gouv.fr/dsfr-v1.13.2/fonts/Marianne-Light.woff2') format('woff2');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Marianne';
+  src: url('https://rdv.anct.gouv.fr/dsfr-v1.13.2/fonts/Marianne-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Marianne';
+  src: url('https://rdv.anct.gouv.fr/dsfr-v1.13.2/fonts/Marianne-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Marianne';
+  src: url('https://rdv.anct.gouv.fr/dsfr-v1.13.2/fonts/Marianne-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
-    --bleu:    #1a3a5c;
-    --bleu2:   #2d5f8a;
-    --vert:    #2a7a4b;
-    --orange:  #b45309;
-    --rouge:   #b91c1c;
-    --gris0:   #f5f6f8;
-    --gris1:   #e8eaed;
-    --gris2:   #c8cdd5;
-    --gris3:   #6b7280;
-    --texte:   #1f2937;
+    /* ── Couleurs officielles de l'État (Charte graphique, p.46) ── */
+    --bleu:    #000091;  /* Bleu France */
+    --bleu2:   #1212ff;  /* Bleu France, variante claire/hover */
+    --vert:    #18753c;  /* Vert Emeraude (succès) */
+    --orange:  #b34000;  /* Orange Terre Battue (avertissement) */
+    --rouge:   #e1000f;  /* Rouge Marianne */
+    --gris0:   #f6f6f6;
+    --gris1:   #e5e5e5;
+    --gris2:   #dddddd;
+    --gris3:   #666666;
+    --texte:   #161616;
     --blanc:   #ffffff;
+    /* ── Accent Albert (IA) : conservé tel quel, hors charte de l'État ── */
     --albert:  #6d28d9;
     --albert2: #ede9fe;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
-    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-family: 'Marianne', 'Segoe UI', system-ui, sans-serif;
     background: var(--gris0);
     color: var(--texte);
     font-size: 13px;
