@@ -106,7 +106,7 @@ async function scenario1() {
   const bubble = makeFakeElement('div');
   const fakeExec = { plan: { filters: [{ col: 'Boursier', op: 'eq', value: 'Oui' }] } };
   const bar = ctx.buildCopilotActionBar(bubble, fakeExec, 'compare les boursiers et les non-boursiers');
-  const infoBtn = bar.children.find(b => b.textContent.includes('Infographie'));
+  const infoBtn = bar.children.find(b => b.textContent && b.textContent.toLowerCase().includes('infographie'));
   assert(!!infoBtn, 'le bouton Infographie existe dans la barre');
   infoBtn.onclick({ stopPropagation() {} });
   await new Promise(r => setTimeout(r, 10)); // mk() ne propage pas la Promise (fire-and-forget)
@@ -122,7 +122,7 @@ async function scenario2a() {
   const { ctx, calls } = makeSandbox({ dataBlocks: [], globalBlocks: [] });
   const bubble = makeFakeElement('div');
   const bar = ctx.buildCopilotActionBar(bubble, null, '');
-  const infoBtn = bar.children.find(b => b.textContent.includes('Infographie'));
+  const infoBtn = bar.children.find(b => b.textContent && b.textContent.toLowerCase().includes('infographie'));
   infoBtn.onclick({ stopPropagation() {} });
   await new Promise(r => setTimeout(r, 10)); // mk() ne propage pas la Promise (fire-and-forget)
   assert(calls.alert.length === 1, 'alert() appelée (fallback sans historique)');
@@ -136,7 +136,7 @@ async function scenario2b() {
   const { ctx, calls, registry } = makeSandbox({ dataBlocks: blocks });
   const bubble = makeFakeElement('div');
   const bar = ctx.buildCopilotActionBar(bubble, null, '');
-  const infoBtn = bar.children.find(b => b.textContent.includes('Infographie'));
+  const infoBtn = bar.children.find(b => b.textContent && b.textContent.toLowerCase().includes('infographie'));
   infoBtn.onclick({ stopPropagation() {} });
   await new Promise(r => setTimeout(r, 10)); // mk() ne propage pas la Promise (fire-and-forget)
   assert(calls.alert.length === 0, 'pas d\'alerte (des blocs existent)');

@@ -164,7 +164,11 @@ function buildCopilotActionBar(bubble, dataExecution = null, question = '') {
     return b;
   };
   bar.appendChild(mk('📊 Graphique', 'Afficher un graphique sur le résultat courant', () => quickAsk('Graphique')));
-  bar.appendChild(mk('🖼 Infographie', 'Générer une infographie à partir de ce résultat uniquement', async (btn) => {
+  const infoBtnLabel = dataExecution ? '🖼 Infographie' : '🖼 Composer une infographie';
+  const infoBtnTooltip = dataExecution
+    ? 'Générer une infographie à partir de ce résultat uniquement'
+    : 'Ouvrir le compositeur pour choisir les blocs à inclure (résultat non disponible après rechargement)';
+  bar.appendChild(mk(infoBtnLabel, infoBtnTooltip, async (btn) => {
     if (!dataExecution) {
       // Pas de résultat Data Engine associé à ce message : on retombe sur l'ancien
       // comportement (compositeur global), car il n'y a rien de local à utiliser.
