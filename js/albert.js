@@ -62,13 +62,7 @@ async function loadAlbertConfig() {
   }
 }
 loadAlbertConfig();
-console.warn('[DIAG] avant appel initSessions, typeof =', typeof initSessions);
-if (typeof initSessions === 'function') {
-  initSessions().then(() => console.warn('[DIAG] initSessions() terminée avec succès'))
-    .catch(e => console.error('[DIAG] initSessions() a rejeté :', e));
-} else {
-  console.error('[DIAG] initSessions n\'est PAS une fonction au moment de l\'appel — sessions.js mal chargé ?');
-}
+if (typeof initSessions === 'function') initSessions();
 
 function updateConfigStatusBadge() {
   const badge = document.querySelector('.albert-badge');

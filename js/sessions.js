@@ -489,9 +489,7 @@ async function loadSessionsFromStorage() {
     const res = await Storage.get(SESSIONS_STORAGE_KEY);
     const parsed = JSON.parse(res.value);
     if (Array.isArray(parsed)) sessions = parsed;
-    console.warn('[DIAG] loadSessionsFromStorage OK · sessions chargées :', sessions.length, sessions.map(s => ({ id: s.id, messages: s.messages?.length })));
   } catch (e) {
-    console.error('[DIAG] loadSessionsFromStorage a échoué :', e.message, e);
     sessions = [];
   }
 }
@@ -618,8 +616,7 @@ function removePersistentFilter(idx) {
 // ── renderActiveSession ──
 function renderActiveSession() {
   const session = getCurrentSession();
-  console.warn('[DIAG renderActiveSession] session:', session?.id, '· messages:', session?.messages?.length, '· currentSessionId:', currentSessionId, '· sessions.length:', sessions.length);
-  if (!session) { console.warn('[DIAG renderActiveSession] ABANDON : session introuvable'); return; }
+  if (!session) return;
 
   window.__DATA_ENGINE_STATE = {
     lastPlan: reattachTableToPlan(session.dataEngineState?.lastPlan),
@@ -637,7 +634,6 @@ function renderActiveSession() {
   renderPersistentFiltersBar();
 
   const wrap = document.getElementById('chat-messages');
-  console.warn('[DIAG renderActiveSession] wrap trouvé ?', !!wrap, '· session.messages.length:', session.messages.length);
   if (wrap) wrap.innerHTML = '';
 
   if (!session.messages.length) {
