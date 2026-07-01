@@ -431,7 +431,12 @@ window.resetEngineContext = resetEngineContext;
 function resetContextSilent() {
   window.__DATA_ENGINE_STATE = { lastPlan: null, lastExecution: null, history: [] };
   try { if (typeof chatHistory !== 'undefined') chatHistory.length = 0; } catch(e) {}
-  persistentFilters = [];
+  // Vider les filtres persistants globaux ET ceux de la session courante
+  if (typeof persistentFilters !== 'undefined') persistentFilters.length = 0;
+  if (typeof getCurrentSession === 'function') {
+    const s = getCurrentSession();
+    if (s) s.persistentFilters = [];
+  }
   updateEngineContextBar();
   if (typeof updateChatSub === 'function') updateChatSub();
   if (typeof renderPersistentFiltersBar === 'function') renderPersistentFiltersBar();
@@ -606,6 +611,8 @@ function renderCompareCharts(plan, result) {
 function isDataEngineQuestion(question) {
   const q = normalizeText(question || '');
   if (!q) return false;
+  // Exclusion : demandes de synthèse/résumé général → répondre via Albert narratif, pas Data Engine
+  if (/^(fais |donne|produis |r[eé]dige )?(une? )?(synth[eè]se|r[eé]sum[eé]|bilan|vue d'ensemble|portrait|analyse globale)/.test(q)) return false;
   return /compare|comparaison|comparer|versus| vs |combien|nombre|effectif|compte|compter|repartition|r[eé]partition|ventilation|par |groupe|group[eé]|top|classement|principa|plus frequen|plus fréquent|croise|crois[eé]|tableau crois[eé]|pivot|moyen|moyenne|median|m[eé]diane|minimum|maximum|min|max|export|excel|csv|liste|filtre|graphique|graphe|diagramme|histogramme|camembert|barres?|boursier|basque|hors|sauf|seulement|uniquement|visualis|repr[eé]sent|montre-?moi|dessine|trace|issus?\s+d[ue]|originaires?|venant\s+d[ue]|provenant|scolaris|scolarit/.test(q) || isFollowUpQuestion(question);
 }
 

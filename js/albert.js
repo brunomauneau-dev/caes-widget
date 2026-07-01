@@ -608,7 +608,27 @@ function buildSyntheseGlobaleQuestion() {
   if (axes.admission) parts.push(`Taux de réponse favorable ("${axes.admission}").`);
   if (axes.sexe) parts.push(`Répartition par "${axes.sexe}".`);
 
-  return `Fais une synthèse complète et structurée de ce jeu de données Parcoursup, sans limite de points. Couvre chacun de ces axes dans l'ordre :\n${parts.map((p, i) => `${i + 1}. ${p}`).join('\n')}\nDonne des chiffres précis pour chaque axe. Ne te limite pas à 5 points : couvre tous les axes listés.`;
+  // Ne pas inclure les noms de colonnes bruts dans la question affichée :
+  // le planner les reconnaîtrait comme des requêtes de données et intercepterait
+  // la question au lieu de la passer à Albert pour une réponse narrative.
+  // On décrit les axes en langage naturel générique, Albert saura les retrouver
+  // grâce au contexte de la table transmis séparément.
+  const axeLabels = [];
+  if (axes.zone_basque) axeLabels.push('candidats par zone géographique spécifique');
+  if (axes.formation) axeLabels.push('grands groupes de formation d\'accueil');
+  if (axes.academie) axeLabels.push('répartition par académie d\'accueil');
+  if (axes.boursier) axeLabels.push('profil social (boursiers / non-boursiers)');
+  if (axes.bac_series) axeLabels.push('série du baccalauréat');
+  if (axes.apprentissage) axeLabels.push('part des apprentis');
+  if (axes.voeu || axes.nb_voeux) axeLabels.push('nombre de vœux confirmés (moyenne et médiane)');
+  if (axes.admission) axeLabels.push('taux de réponse favorable');
+  if (axes.sexe) axeLabels.push('répartition par sexe');
+
+  const axesPart = axeLabels.length
+    ? ` en couvrant : effectifs globaux, ${axeLabels.join(', ')}.`
+    : ' en couvrant les principaux axes du jeu de données.';
+
+  return `Fais une synthèse complète de ce jeu de données Parcoursup${axesPart} Donne des chiffres précis pour chaque axe, sans te limiter à 5 points.`;
 }
 
 function buildDynamicSuggestions(max = 6) {
