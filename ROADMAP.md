@@ -22,10 +22,11 @@ réconciliées en une base unique cohérente :
 - la lignée **PR1 → PR4.1** (roadmap v6, voir plus bas)
 - la lignée **T2 / T4 / compositeur multi-blocs** (architecture infographie)
 
-Suite de tests actuelle : **13 fichiers, 271 tests, tous verts.**
+Suite de tests actuelle : **14 fichiers, 292 tests, tous verts.**
 (`sessions.test.js`, `pr12.test.js`, `pr21.test.js`, `pr22.test.js`, `test_pr41.js`,
 `pr31.test.js`, `test_t4.js`, `test_action_bar.js`, `test_clear_titles.js`,
-`pr32.test.js`, `pr42.test.js`, `test_dom_guards.js`, `test_copilot_feel.js`)
+`pr32.test.js`, `pr42.test.js`, `test_dom_guards.js`, `test_copilot_feel.js`,
+`test_script_timing.js`)
 
 ⚠️ Point de vigilance pour la suite : `test_t4.js` et `test_action_bar.js` ont dû
 être **recréés** lors de la réconciliation — les fichiers originaux écrits pendant
@@ -252,4 +253,45 @@ réel sans crash.
 ajoutées au chemin `grist.ready()` → premier rendu, vérifier systématiquement
 qu'elles ont un garde-fou avant tout accès `document.getElementById(...)`,
 plutôt que de découvrir le crash en usage réel comme cette fois-ci.
+
+## Bug de fond — timing de chargement des scripts (clos, 30/06)
+
+**Symptômes rapportés en usage réel** : au F5, une session affichant "18
+messages" dans le panneau Sessions montrait un chat vide à l'ouverture ; de
+plus, sur cette même session restaurée, l'envoi d'un nouveau message ne
+fonctionnait plus. Les deux symptômes partageaient la même cause de fond,
+diagnostiquée via logs temporaires ajoutés dans `initSessions`,
+`loadSessionsFromStorage` et `renderActiveSession`.
+
+**Cause trouvée.** Tous les `<script src="js/...">` étaient placés dans le
+`<head>` d'`index.html`, sans attribut `defer`. Un script classique sans
+`defer`/`async` s'exécute **immédiatement** dès que le parseur HTML l'atteint
+— donc `albert.js` (et son appel à `initSessions()`) s'exécutait avant que le
+navigateur n'ait commencé à construire le `<body>`. Logs de diagnostic en
+navigateur réel : `loadSessionsFromStorage` restaurait bien 2 sessions avec
+les bons effectifs de messages, mais `document.getElementById('chat-messages')`
+renvoyait `null` à ce moment précis — `renderActiveSession()` ne pouvait donc
+afficher aucun message, sans lever d'exception (les garde-fous `if (!wrap)
+return` ajoutés plus tôt dans la session masquaient l'échec au lieu de le
+révéler). Le même `#empty-state` manquant cassait ensuite l'envoi de message
+via `sendMessage()` (déjà corrigé séparément, voir plus haut).
+
+**Pourquoi ça n'était pas visible avant** : un script déjà en cache navigateur
+s'exécute quasi instantanément, ce qui masquait la course entre le parsing du
+`<head>` et celui du `<body>` la plupart du temps. Le bug devenait visible de
+façon intermittente selon le cache, la charge réseau, ou un F5 forcé sans
+cache.
+
+**Correctif.** Ajout de l'attribut `defer` sur les 14 balises `<script
+src="...">` du `<head>` (CDN externes + fichiers locaux `js/*.js`). `defer`
+retarde l'exécution jusqu'à ce que le DOM soit entièrement parsé, tout en
+conservant l'ordre d'exécution relatif entre les scripts — donc aucun
+changement de comportement applicatif, juste un timing correct.
+
+Test dédié : `test_script_timing.js` (18 tests) — vérifie statiquement que
+`defer` est présent sur tous les scripts et qu'aucun script inline ne vient
+casser l'ordre garanti par `defer`.
+
+Les logs de diagnostic temporaires ajoutés pendant l'investigation ont été
+retirés une fois la cause confirmée et corrigée.
 
