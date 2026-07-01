@@ -51,6 +51,7 @@ function _icMoveBlock(from, to) {
   const [moved] = _icState.blocks.splice(from, 1);
   _icState.blocks.splice(to, 0, moved);
   _icState.dragSrcIdx = null;
+  _icState.editingIdx = null;
   _icRenderBlocks();
 }
 
@@ -67,12 +68,23 @@ function _icRenderBlocks() {
   _icState.blocks.forEach((b, i) => {
     const el = document.createElement('div');
     el.className = 'ic-block';
-    el.draggable = true;
+    el.draggable = _icState.editingIdx !== i;
     el.dataset.idx = String(i);
+    const isEditing = _icState.editingIdx === i;
+    const titleHtml = isEditing
+      ? `<div class="ic-block-title ic-block-title-editing">
+           <input type="text" class="ic-block-title-input" id="ic-title-input-${i}" value="${escapeHtml(b.title)}"
+             onkeydown="_icTitleInputKeydown(event, ${i})" onblur="_icCommitRenameBlock(${i}, this.value)">
+         </div>`
+      : `<div class="ic-block-title">
+           <span class="ic-block-title-text">${escapeHtml(b.title)}</span>
+           <button type="button" class="ic-block-title-edit-btn" title="Renommer" onclick="_icStartRenameBlock(${i})">✎</button>
+           ${b.title !== b.originalTitle ? `<button type="button" class="ic-block-title-reset-btn" title="Revenir au titre original : « ${escapeHtml(b.originalTitle || '')} »" onclick="_icResetBlockTitle(${i})">↺</button>` : ''}
+         </div>`;
     el.innerHTML = `<span class="ic-block-handle" title="Glisser pour réordonner">⠿</span>
       <input class="ic-block-check" type="checkbox" ${b.checked ? 'checked' : ''} onchange="icToggleBlock(${i},this.checked)">
       <div class="ic-block-label">
-        <div class="ic-block-title">${escapeHtml(b.title)}</div>
+        ${titleHtml}
         <div class="ic-block-sub">${escapeHtml(b.question || '')}</div>
       </div>`;
     el.addEventListener('dragstart', e => { _icState.dragSrcIdx = i; el.classList.add('ic-dragging'); e.dataTransfer.effectAllowed = 'move'; });
@@ -83,6 +95,73 @@ function _icRenderBlocks() {
     container.appendChild(el);
   });
   _icUpdateSummary();
+  if (_icState.editingIdx !== null && _icState.editingIdx !== undefined) {
+    const input = document.getElementById(`ic-title-input-${_icState.editingIdx}`);
+    if (input) { input.focus(); input.select(); }
+  }
+}
+
+
+// ── _icStartRenameBlock ──
+function _icStartRenameBlock(idx) {
+  if (!_icState.blocks[idx]) return;
+  _icState.editingIdx = idx;
+  _icRenderBlocks();
+}
+
+
+// ── _icTitleInputKeydown ──
+function _icTitleInputKeydown(e, idx) {
+  if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); }
+  else if (e.key === 'Escape') { e.preventDefault(); _icCancelRenameBlock(idx); }
+}
+
+
+// ── _icCancelRenameBlock ──
+function _icCancelRenameBlock(idx) {
+  _icState.editingIdx = null;
+  _icRenderBlocks();
+}
+
+
+// ── _icCommitRenameBlock ──
+function _icCommitRenameBlock(idx, rawValue) {
+  const b = _icState.blocks[idx];
+  if (!b) { _icState.editingIdx = null; return; }
+  const cleaned = String(rawValue == null ? '' : rawValue).replace(/\s+/g, ' ').trim();
+  b.title = cleaned || b.title;
+  _icState.editingIdx = null;
+  _icPersistBlockTitle(b);
+  _icRenderBlocks();
+}
+
+
+// ── _icResetBlockTitle ──
+function _icResetBlockTitle(idx) {
+  const b = _icState.blocks[idx];
+  if (!b) return;
+  b.title = b.originalTitle || b.title;
+  _icState.editingIdx = null;
+  _icPersistBlockTitle(b);
+  _icRenderBlocks();
+}
+
+
+// ── _icPersistBlockTitle ──
+// Répercute le titre édité sur les sources du bloc (liste globale + session)
+// afin que le renommage survive à une réouverture du compositeur.
+function _icPersistBlockTitle(block) {
+  if (!block || !block.id) return;
+  if (Array.isArray(window._copilotDataBlocks)) {
+    const gb = window._copilotDataBlocks.find(x => x && x.id === block.id);
+    if (gb) gb.title = block.title;
+  }
+  const session = (typeof getCurrentSession === 'function') ? getCurrentSession() : null;
+  if (session && Array.isArray(session.dataBlocks)) {
+    const sb = session.dataBlocks.find(x => x && x.id === block.id);
+    if (sb) sb.title = block.title;
+  }
+  if (typeof scheduleSessionsSave === 'function') scheduleSessionsSave();
 }
 
 
@@ -502,13 +581,14 @@ function openInfographicComposer(targetUid = null) {
   const seen = new Set();
   const allBlocks = [...globalBlocks, ...sessionBlocks]
     .filter(b => b && b.id && !seen.has(b.id) && seen.add(b.id));
-  const blocks = allBlocks.map(b => ({ ...b, checked: true }));
+  const blocks = allBlocks.map(b => ({ ...b, checked: true, originalTitle: b.title }));
   if (!blocks.length) {
     alert('Aucun résultat Data Engine dans cette session.\nPosez d\'abord des questions d\'analyse (répartitions, comptages, comparaisons...).');
     return;
   }
   _icState.blocks = blocks;
   _icState.dragSrcIdx = null;
+  _icState.editingIdx = null;
   _icRenderBlocks();
   _icRenderThemes();
   document.getElementById('modal-ic').style.display = 'flex';
