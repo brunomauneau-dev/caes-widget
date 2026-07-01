@@ -164,17 +164,8 @@ function buildCopilotActionBar(bubble, dataExecution = null, question = '') {
     return b;
   };
   bar.appendChild(mk('📊 Graphique', 'Afficher un graphique sur le résultat courant', () => quickAsk('Graphique')));
-  const infoBtnLabel = dataExecution ? '🖼 Infographie' : '🖼 Composer une infographie';
-  const infoBtnTooltip = dataExecution
-    ? 'Générer une infographie à partir de ce résultat uniquement'
-    : 'Ouvrir le compositeur pour choisir les blocs à inclure (résultat non disponible après rechargement)';
-  bar.appendChild(mk(infoBtnLabel, infoBtnTooltip, async (btn) => {
-    if (!dataExecution) {
-      // Pas de résultat Data Engine associé à ce message : on retombe sur l'ancien
-      // comportement (compositeur global), car il n'y a rien de local à utiliser.
-      openInfographicComposer();
-      return;
-    }
+  if (dataExecution) {
+    bar.appendChild(mk('🖼 Infographie', 'Générer une infographie à partir de ce résultat uniquement', async (btn) => {
     const originalLabel = btn.textContent;
     btn.textContent = '⏳ Génération…';
     btn.disabled = true;
@@ -189,6 +180,7 @@ function buildCopilotActionBar(bubble, dataExecution = null, question = '') {
       btn.disabled = false;
     }
   }));
+  }
   bar.appendChild(mk('📄 Excel', 'Exporter le résultat courant en Excel', () => quickAsk('Exporte en Excel')));
   bar.appendChild(mk('🖨 PDF', 'Imprimer / exporter en PDF', () => window.print()));
   bar.appendChild(mk('📋 Copier', 'Copier le rapport', async () => {

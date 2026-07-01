@@ -369,46 +369,68 @@ function updateSourceHub() {
   const gristCard = document.getElementById('grist-source-card');
   const gristDetail = document.getElementById('grist-source-detail');
   const gristActions = document.getElementById('grist-source-actions');
-  const uploadCard = document.getElementById('upload-source-card');
-  const uploadDetail = document.getElementById('upload-source-detail');
-  const drop = document.getElementById('dropzone');
-  if (!gristCard || !uploadCard || !drop) return;
+  const columnsCard = document.getElementById('grist-columns-card');
+  const columnsDetail = document.getElementById('grist-columns-detail');
+  const filtersCard = document.getElementById('grist-filters-card');
+  const filtersDetail = document.getElementById('grist-filters-detail');
+  if (!gristCard) return;
 
   const gristActive = gristRecords && gristRecords.length > 0;
-  const uploadedRows = getUploadedRowsCount();
-  const uploadedDocs = documents.filter(d => d.status === 'ok').length;
 
   if (gristActive) {
-    const fields = Object.keys(gristRecords[0] || {}).filter(f => f !== 'id' && f !== 'manualSort');
+    // Résoudre les vrais noms de colonnes via buildGristQueryTable
+    const table = (typeof buildGristQueryTable === 'function') ? buildGristQueryTable() : null;
+    const headers = table ? table.headers : Object.keys(gristRecords[0] || {}).filter(f => f !== 'id' && f !== 'manualSort');
     gristCard.className = 'source-card active';
     gristCard.querySelector('.sc-badge').textContent = 'prioritaire';
-    gristDetail.innerHTML = `<strong>${gristRecords.length.toLocaleString('fr-FR')}</strong> lignes · <strong>${fields.length}</strong> colonnes. Le moteur utilise cette table en priorité pour les synthèses, calculs et infographies.`;
-    gristActions.style.display = 'flex';
-    drop.classList.add('compact');
-    drop.querySelector('.txt').innerHTML = '<strong>Ajouter un petit fichier complémentaire</strong><br>ou utiliser en secours hors Grist';
+    gristDetail.innerHTML = `<strong>${gristRecords.length.toLocaleString('fr-FR')}</strong> lignes · <strong>${headers.length}</strong> colonnes. Le moteur utilise cette table en priorité pour les calculs et infographies.`;
+    if (gristActions) gristActions.style.display = 'flex';
+
+    // Colonnes reconnues par le moteur (dimensions analysables)
+    if (columnsCard && columnsDetail && typeof window.plannerColumnKind === 'function') {
+      const kindLabels = {
+        zone_basque: '🗺 Zone Pays Basque', boursier: '💰 Statut boursier',
+        academie: '🏫 Académie', formation: '📚 Formation', bac_series: '🎓 Série de bac',
+        apprentissage: '🔧 Apprentissage', sexe: '👤 Sexe', admission: '✅ Admission',
+        departement: '📍 Département', commune: '📍 Commune', voeu: '📋 Vœux',
+        etablissement_accueil: '🏛 Établissement d\'accueil', nb_voeux: '🔢 Nb vœux'
+      };
+      const recognized = [];
+      headers.forEach(col => {
+        const kind = window.plannerColumnKind(col);
+        if (kindLabels[kind] && !recognized.find(r => r.kind === kind)) {
+          recognized.push({ kind, label: kindLabels[kind], col });
+        }
+      });
+      if (recognized.length) {
+        columnsCard.style.display = '';
+        columnsDetail.innerHTML = recognized.map(r =>
+          `<span style="display:inline-flex;align-items:center;gap:4px;margin:2px 4px 2px 0;font-size:11px">${r.label}</span>`
+        ).join('');
+      } else {
+        columnsCard.style.display = 'none';
+      }
+    }
   } else {
     gristCard.className = 'source-card';
     gristCard.querySelector('.sc-badge').textContent = 'inactive';
-    gristDetail.textContent = 'Aucune table connectée. Idéal pour les gros fichiers et les analyses récurrentes.';
-    gristActions.style.display = 'none';
-    drop.classList.remove('compact');
-    drop.querySelector('.txt').innerHTML = '<strong>Glissez vos fichiers</strong><br>ou cliquez pour parcourir';
+    gristDetail.textContent = 'Aucune table connectée.';
+    if (gristActions) gristActions.style.display = 'none';
+    if (columnsCard) columnsCard.style.display = 'none';
   }
 
-  const largeUploaded = uploadedRows >= 5000;
-  if (largeUploaded && !gristActive) {
-    uploadCard.className = 'source-card warn';
-    uploadCard.querySelector('.sc-badge').textContent = 'volumineux';
-    uploadDetail.innerHTML = `<strong>${uploadedRows.toLocaleString('fr-FR')}</strong> lignes chargées par drag & drop. Ça fonctionne, mais pour ce volume Grist est recommandé : importer le fichier dans une table Grist puis connecter le widget.`;
-  } else if (uploadedDocs) {
-    uploadCard.className = 'source-card' + (largeUploaded ? ' warn' : '');
-    uploadCard.querySelector('.sc-badge').textContent = largeUploaded ? 'volumineux' : 'actif';
-    uploadDetail.innerHTML = `<strong>${uploadedDocs}</strong> document${uploadedDocs>1?'s':''} prêt${uploadedDocs>1?'s':''}` + (uploadedRows ? ` · <strong>${uploadedRows.toLocaleString('fr-FR')}</strong> lignes tabulaires` : '') + (gristActive ? '. Ces fichiers sont secondaires car Grist est prioritaire.' : '. Mode analyse rapide actif.');
-  } else {
-    uploadCard.className = 'source-card';
-    uploadCard.querySelector('.sc-badge').textContent = 'analyse rapide';
-    uploadDetail.textContent = gristActive ? 'Optionnel : ajoutez un petit fichier complémentaire si besoin.' : 'Utile pour petits Excel, CSV, PDF ou Word ponctuels. Pour les gros volumes, préférez Grist.';
+  // Filtres persistants actifs
+  if (filtersCard && filtersDetail) {
+    if (persistentFilters && persistentFilters.length) {
+      filtersCard.style.display = '';
+      filtersDetail.innerHTML = persistentFilters.map(f =>
+        `<span style="display:block;font-size:11px;margin:2px 0">🔒 ${escapeHtml(f.label || f.value)}</span>`
+      ).join('');
+    } else {
+      filtersCard.style.display = 'none';
+    }
   }
+
   if (typeof updateKnowledgeStatusBadge === 'function') updateKnowledgeStatusBadge();
 }
 
