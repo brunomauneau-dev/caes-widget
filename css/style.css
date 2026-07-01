@@ -84,9 +84,48 @@
     background: var(--bleu);
     color: var(--blanc);
     padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
   }
   .docs-header .title { font-size: 13px; font-weight: 700; }
   .docs-header .sub { font-size: 10px; opacity: 0.6; margin-top: 2px; }
+  /* ── Logo Parcoursup (blanc, sur fond bleu) ── */
+  .docs-header .parcoursup-logo {
+    height: 18px;
+    width: auto;
+    flex-shrink: 0;
+    opacity: 0.9;
+  }
+
+  /* ── Logo Parcoursup à côté du titre "Parcoursup Data Copilot" ── */
+  .chat-header-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .chat-header-title .parcoursup-mark {
+    height: 24px;
+    width: auto;
+    flex-shrink: 0;
+  }
+
+  /* ── Filigrane dans l'état vide de la liste de documents ── */
+  .doc-list.empty {
+    position: relative;
+  }
+  .doc-list.empty::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: url('./logos/Parcoursup_signe_RVB.png');
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 90px;
+    opacity: 0.06;
+    pointer-events: none;
+  }
 
   .dropzone {
     margin: 12px;
