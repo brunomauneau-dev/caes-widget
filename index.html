@@ -755,6 +755,14 @@
   .ic-block-title-edit-btn, .ic-block-title-reset-btn { flex-shrink:0; border:none; background:transparent; cursor:pointer; font-size:11px; line-height:1; padding:2px 4px; border-radius:4px; color:var(--gris3); opacity:0; transition:opacity .1s, background .1s, color .1s; }
   .ic-block:hover .ic-block-title-edit-btn, .ic-block:hover .ic-block-title-reset-btn, .ic-block-title-edit-btn:focus-visible, .ic-block-title-reset-btn:focus-visible { opacity:1; }
   .ic-block-title-edit-btn:hover, .ic-block-title-reset-btn:hover { background:var(--gris1); color:var(--texte); }
+
+  .de-block-title, .ic-card-title { display:flex; align-items:center; gap:6px; min-width:0; }
+  .de-block-title-text, .ic-card-title-text { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  .de-block-title-edit-btn, .de-block-title-reset-btn, .ic-card-title-edit-btn, .ic-card-title-reset-btn { border:none; background:transparent; cursor:pointer; font-size:11px; line-height:1; padding:2px 4px; border-radius:4px; color:var(--gris3); opacity:0; transition:opacity .1s, background .1s, color .1s; }
+  .de-block-title:hover .de-block-title-edit-btn, .de-block-title:hover .de-block-title-reset-btn, .ic-card-title:hover .ic-card-title-edit-btn, .ic-card-title:hover .ic-card-title-reset-btn, .de-block-title-edit-btn:focus-visible, .de-block-title-reset-btn:focus-visible, .ic-card-title-edit-btn:focus-visible, .ic-card-title-reset-btn:focus-visible { opacity:1; }
+  .de-block-title-edit-btn:hover, .de-block-title-reset-btn:hover, .ic-card-title-edit-btn:hover, .ic-card-title-reset-btn:hover { background:var(--gris1); color:var(--texte); }
+  .de-block-title-input, .ic-card-title-input { min-width:220px; max-width:100%; font-size:12px; font-weight:700; color:var(--texte); font-family:inherit; border:1px solid var(--albert); border-radius:4px; padding:2px 6px; background:#fff; }
+
   .ic-block-title-editing { display:flex; }
   .ic-block-title-input { flex:1; min-width:0; font-size:12px; font-weight:700; color:var(--texte); font-family:inherit; border:1px solid var(--albert); border-radius:4px; padding:2px 6px; background:#fff; user-select:text; }
   .ic-block-sub { font-size:10px; color:var(--gris3); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
