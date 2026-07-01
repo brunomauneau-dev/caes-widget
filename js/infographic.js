@@ -551,6 +551,7 @@ function icApplyTitles(uid) {
     const v = get(`ict-${uid}-s${i}`);
     if (v !== null) s.title = v;
   });
+  if (newTitle !== null) _icPersistInfographicTitle(uid, newTitle, false);
   // Re-render
   const theme = (typeof INFOGRAPH_THEMES !== 'undefined' ? INFOGRAPH_THEMES : []).find(t => t.id === stored.themeId) || {};
   const newHtml = renderAdaptiveInfographicHtml(spec, spec.title);
@@ -573,6 +574,7 @@ function addInfographicMessage(html, title = 'Infographie adaptive générée', 
   const url = URL.createObjectURL(blob);
 
   const uid = ++_infogCounter;
+  const infogId = opts.messageId || ('info_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7));
   const specJson = opts.spec ? JSON.stringify(opts.spec) : null;
   const activeTheme = opts.themeId || 'bordeaux';
   if (opts.spec) window._infogSpecs[uid] = { spec: JSON.parse(JSON.stringify(opts.spec)), themeId: activeTheme };
@@ -600,7 +602,7 @@ function addInfographicMessage(html, title = 'Infographie adaptive générée', 
   const bubble = document.createElement('div');
   bubble.className = 'msg-bubble';
   bubble.innerHTML = `
-    <h4>${escapeHtml(title)}</h4>
+    <h4 class="ic-card-title" data-infog-id="${escapeAttr(infogId)}" data-original-title="${escapeAttr(title)}"><span class="ic-card-title-text">${escapeHtml(title)}</span><button type="button" class="ic-card-title-edit-btn" onclick="_icStartRenameCardTitle(this)" title="Renommer cette infographie">✎</button><button type="button" class="ic-card-title-reset-btn" onclick="_icResetCardTitle(this)" title="Revenir au titre original">↺</button></h4>
     ${rethemeHtml}
     <div style="display:flex;gap:8px;margin:10px 0;flex-wrap:wrap">
       <a id="ic-open-${uid}" href="${url}" target="_blank" rel="noopener" style="background:var(--albert);color:white;text-decoration:none;padding:7px 10px;border-radius:6px;font-size:12px;font-weight:600">Ouvrir l'infographie</a>
@@ -613,9 +615,96 @@ function addInfographicMessage(html, title = 'Infographie adaptive générée', 
   wrap.scrollTop = wrap.scrollHeight;
   chatHistory.push({ role: 'assistant', content: `[Infographie adaptive générée : ${title}]` });
   if (opts.record !== false && typeof recordSessionMessage === 'function') {
-    recordSessionMessage({ type: 'infographic', title, html: safeHtml, spec: opts.spec, themeId: activeTheme });
+    recordSessionMessage({ type: 'infographic', id: infogId, title, originalTitle: title, html: safeHtml, spec: opts.spec, themeId: activeTheme });
   }
 }
+
+function _icFindCardTitleEl(btn) {
+  return btn ? btn.closest('h4.ic-card-title') : null;
+}
+function _icCardTitleTextEl(h4) {
+  return h4 ? h4.querySelector('.ic-card-title-text') : null;
+}
+function _icPersistInfographicTitle(uidOrEl, title, resetToOriginal) {
+  let uid = uidOrEl;
+  let h4 = null;
+  if (uidOrEl && uidOrEl.nodeType === 1) {
+    h4 = uidOrEl;
+    const frame = h4.closest('.msg-bubble')?.querySelector('iframe[id^="ic-frame-"]');
+    uid = frame ? Number((frame.id || '').replace('ic-frame-', '')) : null;
+  } else if (uid) {
+    const frame = document.getElementById(`ic-frame-${uid}`);
+    h4 = frame?.closest('.msg-bubble')?.querySelector('h4.ic-card-title');
+  }
+  const infogId = h4?.getAttribute('data-infog-id') || null;
+  const originalTitle = h4?.getAttribute('data-original-title') || title;
+  if (h4) {
+    const txt = _icCardTitleTextEl(h4);
+    if (txt) txt.textContent = title;
+  }
+  if (uid && window._infogSpecs && window._infogSpecs[uid]?.spec) {
+    window._infogSpecs[uid].spec.title = title;
+    const input = document.getElementById(`ict-${uid}-title`);
+    if (input) input.value = title;
+  }
+  const session = (typeof getCurrentSession === 'function') ? getCurrentSession() : null;
+  if (session && Array.isArray(session.messages)) {
+    const msg = session.messages.find(m => m && m.type === 'infographic' && ((infogId && m.id === infogId) || (!infogId && m.title === originalTitle)));
+    if (msg) {
+      msg.title = title;
+      msg.originalTitle = msg.originalTitle || originalTitle;
+      if (msg.spec) msg.spec.title = title;
+      session.updatedAt = new Date().toISOString();
+    }
+  }
+  if (typeof scheduleSessionsSave === 'function') scheduleSessionsSave();
+}
+window._icPersistInfographicTitle = _icPersistInfographicTitle;
+
+function _icStartRenameCardTitle(btn) {
+  const h4 = _icFindCardTitleEl(btn);
+  const txt = _icCardTitleTextEl(h4);
+  if (!h4 || !txt || h4.querySelector('.ic-card-title-input')) return;
+  const current = txt.textContent.trim();
+  const input = document.createElement('input');
+  input.className = 'ic-card-title-input';
+  input.value = current;
+  txt.replaceWith(input);
+  input.focus();
+  input.select();
+  const commit = () => {
+    const value = input.value.replace(/\s+/g, ' ').trim() || current;
+    const span = document.createElement('span');
+    span.className = 'ic-card-title-text';
+    span.textContent = value;
+    input.replaceWith(span);
+    _icPersistInfographicTitle(h4, value, false);
+  };
+  input.addEventListener('keydown', ev => {
+    if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
+    if (ev.key === 'Escape') { ev.preventDefault(); input.value = current; commit(); }
+  });
+  input.addEventListener('blur', commit, { once: true });
+}
+window._icStartRenameCardTitle = _icStartRenameCardTitle;
+
+function _icResetCardTitle(btn) {
+  const h4 = _icFindCardTitleEl(btn);
+  if (!h4) return;
+  const original = h4.getAttribute('data-original-title') || 'Infographie Albert';
+  const input = h4.querySelector('.ic-card-title-input');
+  if (input) {
+    const span = document.createElement('span');
+    span.className = 'ic-card-title-text';
+    span.textContent = original;
+    input.replaceWith(span);
+  } else {
+    const txt = _icCardTitleTextEl(h4);
+    if (txt) txt.textContent = original;
+  }
+  _icPersistInfographicTitle(h4, original, true);
+}
+window._icResetCardTitle = _icResetCardTitle;
 
 /* Le compositeur multi-blocs (openInfographicComposer, closeInfographicComposer,
    _icRenderBlocks, _icRenderThemes, icToggleBlock, icSelectTheme, submitInfographicComposer)

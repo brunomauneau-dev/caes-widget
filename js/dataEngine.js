@@ -1337,7 +1337,7 @@ function renderCompareHtml(plan, result) {
   const detailsTables = `<details class="de-detail-tables" style="margin:16px 0;border:1px solid var(--gris2,#e5e7eb);border-radius:12px;background:#fff"><summary style="cursor:pointer;font-weight:800;padding:12px 14px">Afficher les tableaux détaillés</summary><div style="padding:0 14px 14px">${formationTable}${academieTable}${serieTable}</div></details>`;
   const debug = `<details class="msg-sources"><summary title="Détail technique du calcul (pour vérification ou support) — sans impact sur le résultat affiché ci-dessus">Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : compare<br><strong>Version</strong> : v27.6.0<br><strong>Source</strong> : ${escapeHtml(plan.table?.source || 'Données')} · ${escapeHtml(plan.table?.name || 'table')}<br><strong>Groupes</strong> : ${escapeHtml(rows.map(r => r.label).join(' / ') || '—')}</div></details>`;
   const clearTitle = (typeof extractBlockTitle === 'function') ? extractBlockTitle({ plan, result }, '') : 'Comparaison';
-  return `${deTitleHtml(clearTitle)}<p>Base comparée : <strong>${baseTotal.toLocaleString('fr-FR')}</strong> lignes.</p><section class="de-section de-population" style="margin:12px 0;padding:12px;border:1px solid var(--gris2,#e5e7eb);border-radius:10px;background:#fff"><div style="overflow:auto"><table style="border-collapse:separate;border-spacing:0;width:100%;font-size:12px;min-width:360px"><tbody><tr><th style="text-align:left;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Population</th><th style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Nombre</th><th style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Part</th></tr>${tableRows}</tbody></table></div>${missingNote}</section>${filtersHtml}${insights}${charts}${statsTable}${detailsTables}${debug}`;
+  return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p>Base comparée : <strong>${baseTotal.toLocaleString('fr-FR')}</strong> lignes.</p><section class="de-section de-population" style="margin:12px 0;padding:12px;border:1px solid var(--gris2,#e5e7eb);border-radius:10px;background:#fff"><div style="overflow:auto"><table style="border-collapse:separate;border-spacing:0;width:100%;font-size:12px;min-width:360px"><tbody><tr><th style="text-align:left;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Population</th><th style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Nombre</th><th style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Part</th></tr>${tableRows}</tbody></table></div>${missingNote}</section>${filtersHtml}${insights}${charts}${statsTable}${detailsTables}${debug}`;
 }
 
 function runDataEnginePlan(plan, persistentFiltersOverride) {
@@ -1580,8 +1580,12 @@ function dataEngineResultToContext(exec) {
 // Albert générique (interprétation IA, moins garantie sur les chiffres).
 const DE_EXACT_BADGE = '<span class="de-exact-badge" title="Ce résultat est calculé directement sur les données, pas une interprétation IA" style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;color:#15803d;background:#dcfce7;border-radius:999px;padding:2px 8px;margin-left:8px;vertical-align:middle">✓ Calcul exact</span>';
 
-function deTitleHtml(title) {
-  return `<h4>${escapeHtml(title)}${DE_EXACT_BADGE}</h4>`;
+function deTitleHtml(title, blockId = null, originalTitle = null) {
+  const safeTitle = escapeHtml(title);
+  if (!blockId) return `<h4>${safeTitle}${DE_EXACT_BADGE}</h4>`;
+  const safeId = escapeHtml(blockId);
+  const safeOriginal = escapeHtml(originalTitle || title);
+  return `<h4 class="de-block-title" data-block-id="${safeId}" data-original-title="${safeOriginal}"><span class="de-block-title-text">${safeTitle}</span>${DE_EXACT_BADGE}<button type="button" class="de-block-title-edit-btn" onclick="_deStartRenameBlockTitle(this)" title="Renommer ce bloc">✎</button><button type="button" class="de-block-title-reset-btn" onclick="_deResetBlockTitle(this)" title="Revenir au titre original">↺</button></h4>`;
 }
 
 function renderDataEngineResultHtml(tool, plan, result) {
@@ -1593,12 +1597,12 @@ function renderDataEngineResultHtml(tool, plan, result) {
   if (tool === 'count_rows') {
     const pct = result.total ? pctFr(result.count, result.total) : '—';
     const clearTitle = (typeof extractBlockTitle === 'function') ? extractBlockTitle({ plan, result }, '') : 'Comptage';
-    return `${deTitleHtml(clearTitle)}<p>Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ligne${result.count>1?'s':''} correspondant à la demande (${pct} du jeu de données).</p><p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
+    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p>Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ligne${result.count>1?'s':''} correspondant à la demande (${pct} du jeu de données).</p><p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
   }
   if (tool === 'group_by' || tool === 'top') {
     const rows = result.rows || [];
     const clearTitle = (typeof extractBlockTitle === 'function') ? extractBlockTitle({ plan, result }, '') : (tool === 'top' ? 'Top' : 'Répartition');
-    return `${deTitleHtml(clearTitle)}<p><strong>${result.total.toLocaleString('fr-FR')}</strong> ligne${result.total>1?'s':''} retenue${result.total>1?'s':''}. Analyse par <strong>${escapeHtml(plan.targetCol)}</strong>.</p><ul>${rows.slice(0,20).map(r => `<li>${escapeHtml(r.value)} : <strong>${r.count.toLocaleString('fr-FR')}</strong> (${r.pct.toFixed(1).replace('.', ',')} %)</li>`).join('')}</ul>${plan.renderChart ? (plan.chartType === 'pie' ? renderMiniPieChart(rows, result.total) : renderMiniBarChart(rows, result.total)) : ''}${filtersHtml}${debug}`;
+    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p><strong>${result.total.toLocaleString('fr-FR')}</strong> ligne${result.total>1?'s':''} retenue${result.total>1?'s':''}. Analyse par <strong>${escapeHtml(plan.targetCol)}</strong>.</p><ul>${rows.slice(0,20).map(r => `<li>${escapeHtml(r.value)} : <strong>${r.count.toLocaleString('fr-FR')}</strong> (${r.pct.toFixed(1).replace('.', ',')} %)</li>`).join('')}</ul>${plan.renderChart ? (plan.chartType === 'pie' ? renderMiniPieChart(rows, result.total) : renderMiniBarChart(rows, result.total)) : ''}${filtersHtml}${debug}`;
   }
   if (tool === 'pivot') {
     const cols = result.colValues || [];
@@ -1611,14 +1615,14 @@ function renderDataEngineResultHtml(tool, plan, result) {
     const colTotals = cols.map((_, i) => (result.matrix || []).reduce((s, r) => s + (r.cells[i] || 0), 0));
     const foot = `<tr style="background:var(--gris0,#f8fafc);font-weight:700"><td>Total</td>${colTotals.map(t => `<td style="text-align:right">${t.toLocaleString('fr-FR')}</td>`).join('')}<td style="text-align:right">${total.toLocaleString('fr-FR')}</td><td></td></tr>`;
     const clearTitle = `${_shortColName(plan.targetCol)} × ${_shortColName(plan.targetCol2)}`;
-    return `${deTitleHtml(clearTitle)}<p><strong>${total.toLocaleString('fr-FR')}</strong> lignes retenues. Croisement <strong>${escapeHtml(plan.targetCol)}</strong> × <strong>${escapeHtml(plan.targetCol2)}</strong>.</p><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%"><thead>${header}</thead><tbody>${body}${foot}</tbody></table></div>${filtersHtml}${debug}`;
+    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p><strong>${total.toLocaleString('fr-FR')}</strong> lignes retenues. Croisement <strong>${escapeHtml(plan.targetCol)}</strong> × <strong>${escapeHtml(plan.targetCol2)}</strong>.</p><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%"><thead>${header}</thead><tbody>${body}${foot}</tbody></table></div>${filtersHtml}${debug}`;
   }
   if (tool === 'stats') {
     const fmt = v => v === null || v === undefined ? '—' : Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 2 });
     const clearTitle = `Statistiques — ${_shortColName(plan.targetCol)}`;
-    return `${deTitleHtml(clearTitle)}<p>Colonne : <strong>${escapeHtml(plan.targetCol)}</strong></p><ul><li>Valeurs numériques : <strong>${result.numericCount.toLocaleString('fr-FR')}</strong> / ${result.total.toLocaleString('fr-FR')}</li><li>Moyenne : <strong>${fmt(result.avg)}</strong></li><li>Médiane : <strong>${fmt(result.median)}</strong></li><li>Min : <strong>${fmt(result.min)}</strong></li><li>Max : <strong>${fmt(result.max)}</strong></li></ul>${filtersHtml}${debug}`;
+    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p>Colonne : <strong>${escapeHtml(plan.targetCol)}</strong></p><ul><li>Valeurs numériques : <strong>${result.numericCount.toLocaleString('fr-FR')}</strong> / ${result.total.toLocaleString('fr-FR')}</li><li>Moyenne : <strong>${fmt(result.avg)}</strong></li><li>Médiane : <strong>${fmt(result.median)}</strong></li><li>Min : <strong>${fmt(result.min)}</strong></li><li>Max : <strong>${fmt(result.max)}</strong></li></ul>${filtersHtml}${debug}`;
   }
-  return `${deTitleHtml('Résultat')}${debug}`;
+  return `${deTitleHtml('Résultat', plan.blockId, plan.originalTitle || 'Résultat')}${debug}`;
 }
 
 function shouldAnswerLocallyWithoutAlbert(exec) {

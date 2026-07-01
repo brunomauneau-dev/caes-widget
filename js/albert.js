@@ -810,6 +810,8 @@ async function sendMessage() {
 
   const filterContextText = [...chatHistory.slice(-4).map(m => m.content), question].join('\n');
   let dataPlan = detectDataEnginePlan(question, filterContextText);
+  const dataBlockId = dataPlan ? ('blk_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7)) : null;
+  if (dataPlan && dataBlockId) dataPlan.blockId = dataBlockId;
   const dataExecution = dataPlan ? runDataEnginePlan(dataPlan) : null;
   const localAnalysis = executeLocalDataQuery(question, filterContextText);
 
@@ -828,7 +830,7 @@ async function sendMessage() {
         const blkTitle = (typeof extractBlockTitle === 'function')
           ? extractBlockTitle(dataExecution, question)
           : (question.length > 64 ? question.slice(0, 63) + '…' : question);
-        sDE.dataBlocks.push({ id: 'blk_' + Date.now(), title: blkTitle, question, dataContext: deCtx });
+        sDE.dataBlocks.push({ id: dataExecution.plan?.blockId || dataBlockId || ('blk_' + Date.now()), title: blkTitle, originalTitle: blkTitle, question, dataContext: deCtx });
         scheduleSessionsSave();
       } catch(e) {
         console.warn('[dataBlocks] Erreur lors de l\'enregistrement du bloc:', e);
@@ -917,7 +919,7 @@ ${context || "(Aucun document chargé)"}`;
         sAlbert.dataBlocks = sAlbert.dataBlocks || [];
         const plainCtx = answer.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
         const blkTitle = question.length > 64 ? question.slice(0, 63) + '…' : question;
-        sAlbert.dataBlocks.push({ id: 'blk_' + Date.now(), title: blkTitle, question, dataContext: plainCtx });
+        sAlbert.dataBlocks.push({ id: 'blk_' + Date.now(), title: blkTitle, originalTitle: blkTitle, question, dataContext: plainCtx });
         scheduleSessionsSave();
       } catch(e) {
         console.warn('[dataBlocks] Erreur lors de l\'enregistrement du bloc Albert:', e);
@@ -945,6 +947,7 @@ function addMessage(role, content, opts = {}) {
     bubble.textContent = content;
   } else {
     bubble.innerHTML = content;
+    if (typeof enhanceEditableDataTitles === 'function') enhanceEditableDataTitles(bubble);
   }
   msg.appendChild(bubble);
   if (role === 'assistant') msg.appendChild(buildCopilotActionBar(bubble, opts.dataExecution || null, opts.question || ''));
@@ -956,6 +959,99 @@ function addMessage(role, content, opts = {}) {
       : { type: 'html', role, html: content });
   }
 }
+
+function _deFindTitleEl(btn) {
+  return btn ? btn.closest('h4.de-block-title') : null;
+}
+
+function _deTitleTextEl(h4) {
+  return h4 ? h4.querySelector('.de-block-title-text') : null;
+}
+
+function _deLookupPersistedBlockTitle(blockId) {
+  const session = (typeof getCurrentSession === 'function') ? getCurrentSession() : null;
+  const override = session?.blockTitleOverrides?.[blockId];
+  if (override) return override;
+  const sb = session?.dataBlocks?.find(b => b && b.id === blockId);
+  if (sb?.title) return sb.title;
+  const gb = Array.isArray(window._copilotDataBlocks) ? window._copilotDataBlocks.find(b => b && b.id === blockId) : null;
+  return gb?.title || null;
+}
+
+function enhanceEditableDataTitles(root) {
+  if (!root) return;
+  root.querySelectorAll('h4.de-block-title[data-block-id]').forEach(h4 => {
+    const blockId = h4.getAttribute('data-block-id');
+    const txt = _deTitleTextEl(h4);
+    const persisted = _deLookupPersistedBlockTitle(blockId);
+    if (txt && persisted && txt.textContent !== persisted) txt.textContent = persisted;
+  });
+}
+window.enhanceEditableDataTitles = enhanceEditableDataTitles;
+
+function _dePersistBlockTitle(blockId, title, originalTitle) {
+  if (!blockId) return;
+  const session = (typeof getCurrentSession === 'function') ? getCurrentSession() : null;
+  if (session) {
+    session.blockTitleOverrides = session.blockTitleOverrides || {};
+    session.blockTitleOverrides[blockId] = title;
+    if (Array.isArray(session.dataBlocks)) {
+      const sb = session.dataBlocks.find(b => b && b.id === blockId);
+      if (sb) { sb.originalTitle = sb.originalTitle || originalTitle || sb.title; sb.title = title; }
+    }
+    session.updatedAt = new Date().toISOString();
+  }
+  if (Array.isArray(window._copilotDataBlocks)) {
+    const gb = window._copilotDataBlocks.find(b => b && b.id === blockId);
+    if (gb) { gb.originalTitle = gb.originalTitle || originalTitle || gb.title; gb.title = title; }
+  }
+  if (typeof scheduleSessionsSave === 'function') scheduleSessionsSave();
+}
+
+function _deStartRenameBlockTitle(btn) {
+  const h4 = _deFindTitleEl(btn);
+  const txt = _deTitleTextEl(h4);
+  if (!h4 || !txt || h4.querySelector('.de-block-title-input')) return;
+  const current = txt.textContent.trim();
+  const input = document.createElement('input');
+  input.className = 'de-block-title-input';
+  input.value = current;
+  txt.replaceWith(input);
+  input.focus();
+  input.select();
+  const commit = () => {
+    const value = input.value.replace(/\s+/g, ' ').trim() || current;
+    const span = document.createElement('span');
+    span.className = 'de-block-title-text';
+    span.textContent = value;
+    input.replaceWith(span);
+    _dePersistBlockTitle(h4.getAttribute('data-block-id'), value, h4.getAttribute('data-original-title') || current);
+  };
+  input.addEventListener('keydown', ev => {
+    if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
+    if (ev.key === 'Escape') { ev.preventDefault(); input.value = current; commit(); }
+  });
+  input.addEventListener('blur', commit, { once: true });
+}
+window._deStartRenameBlockTitle = _deStartRenameBlockTitle;
+
+function _deResetBlockTitle(btn) {
+  const h4 = _deFindTitleEl(btn);
+  if (!h4) return;
+  const original = h4.getAttribute('data-original-title') || 'Résultat';
+  const input = h4.querySelector('.de-block-title-input');
+  if (input) {
+    const span = document.createElement('span');
+    span.className = 'de-block-title-text';
+    span.textContent = original;
+    input.replaceWith(span);
+  } else {
+    const txt = _deTitleTextEl(h4);
+    if (txt) txt.textContent = original;
+  }
+  _dePersistBlockTitle(h4.getAttribute('data-block-id'), original, original);
+}
+window._deResetBlockTitle = _deResetBlockTitle;
 
 function addLoadingMessage(id, question = '') {
   const wrap = document.getElementById('chat-messages');

@@ -723,7 +723,7 @@ function renderActiveSession() {
       if (typeof addMessage !== 'function' && typeof addInfographicMessage !== 'function') return;
       if (entry.type === 'text' && typeof addMessage === 'function') addMessage(entry.role, entry.text, { record: false });
       else if (entry.type === 'html' && typeof addMessage === 'function') addMessage(entry.role, entry.html, { record: false });
-      else if (entry.type === 'infographic' && typeof addInfographicMessage === 'function') addInfographicMessage(entry.html, entry.title, { record: false });
+      else if (entry.type === 'infographic' && typeof addInfographicMessage === 'function') addInfographicMessage(entry.html, entry.title, { record: false, spec: entry.spec, themeId: entry.themeId, messageId: entry.id });
     });
   }
 
