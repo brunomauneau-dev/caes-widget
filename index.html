@@ -750,7 +750,13 @@
   .ic-block-handle { color:var(--gris3); font-size:15px; cursor:grab; flex-shrink:0; line-height:1; }
   .ic-block-check { width:16px; height:16px; flex-shrink:0; cursor:pointer; }
   .ic-block-label { flex:1; min-width:0; }
-  .ic-block-title { font-size:12px; font-weight:700; color:var(--texte); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ic-block-title { font-size:12px; font-weight:700; color:var(--texte); display:flex; align-items:center; gap:4px; min-width:0; }
+  .ic-block-title-text { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+  .ic-block-title-edit-btn, .ic-block-title-reset-btn { flex-shrink:0; border:none; background:transparent; cursor:pointer; font-size:11px; line-height:1; padding:2px 4px; border-radius:4px; color:var(--gris3); opacity:0; transition:opacity .1s, background .1s, color .1s; }
+  .ic-block:hover .ic-block-title-edit-btn, .ic-block:hover .ic-block-title-reset-btn, .ic-block-title-edit-btn:focus-visible, .ic-block-title-reset-btn:focus-visible { opacity:1; }
+  .ic-block-title-edit-btn:hover, .ic-block-title-reset-btn:hover { background:var(--gris1); color:var(--texte); }
+  .ic-block-title-editing { display:flex; }
+  .ic-block-title-input { flex:1; min-width:0; font-size:12px; font-weight:700; color:var(--texte); font-family:inherit; border:1px solid var(--albert); border-radius:4px; padding:2px 6px; background:#fff; user-select:text; }
   .ic-block-sub { font-size:10px; color:var(--gris3); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .ic-empty { font-size:12px; color:var(--gris3); text-align:center; padding:24px; border:1px dashed var(--gris2); border-radius:8px; }
   .ic-themes { display:flex; gap:8px; flex-wrap:wrap; }
