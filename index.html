@@ -16,8 +16,8 @@
 <script src="js/knowledge.js?v=27.5.6" defer></script>
 <script src="js/documents.js?v=27.5.6" defer></script>
 <script src="js/infographic.js?v=27.5.7" defer></script>
-<script src="js/sessions.js?v=27.5.12" defer></script>
-<script src="js/albert.js?v=27.6.9" defer></script>
+<script src="js/sessions.js?v=27.5.13" defer></script>
+<script src="js/albert.js?v=27.6.10" defer></script>
 <style>
   :root {
     --bleu:    #1a3a5c;
@@ -773,7 +773,7 @@
     <div class="docs-header">
       <div>
         <div class="title">📂 Sources d'analyse</div>
-        <div class="sub">Table Grist · fichiers complémentaires</div>
+        <div class="sub">Table Grist · état du moteur</div>
       </div>
       <button class="docs-close" onclick="closeSourcesPanel()" title="Fermer">×</button>
     </div>
@@ -785,31 +785,38 @@
           <div class="sc-title">Table Grist</div>
           <div class="sc-badge">inactive</div>
         </div>
-        <div class="sc-detail" id="grist-source-detail">Aucune table connectée. Idéal pour les gros fichiers et les analyses récurrentes.</div>
+        <div class="sc-detail" id="grist-source-detail">Aucune table connectée.</div>
         <div class="sc-actions" id="grist-source-actions" style="display:none">
-          <button class="source-action primary" onclick="quickAsk('Résume ce jeu de données en 5 points')">Synthèse</button>
+          <button class="source-action primary" onclick="resetEngineContext(); closeSourcesPanel(); quickAsk('Résume ce jeu de données en 5 points')" title="Synthèse globale du jeu de données (repart de zéro, sans filtre actif)">Synthèse globale</button>
         </div>
       </div>
-      <div class="source-card" id="upload-source-card">
-        <div class="sc-head">
-          <div class="sc-title">Drag & drop</div>
-          <div class="sc-badge">analyse rapide</div>
-        </div>
-        <div class="sc-detail" id="upload-source-detail">Utile pour petits Excel, CSV, PDF ou Word ponctuels. Si Grist est actif, ces fichiers servent en complément ou en secours.</div>
-      </div>
-    </div>
 
-    <div class="dropzone" id="dropzone" onclick="document.getElementById('file-input').click()">
-      <div class="icon">⬆️</div>
-      <div class="txt"><strong>Glissez vos fichiers</strong><br>ou cliquez pour parcourir</div>
-      <input type="file" id="file-input" multiple accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.md">
+      <!-- Colonnes reconnues par le moteur -->
+      <div class="source-card" id="grist-columns-card" style="display:none">
+        <div class="sc-head">
+          <div class="sc-title">Dimensions analysables</div>
+          <div class="sc-badge" style="background:#dcfce7;color:#15803d">détectées</div>
+        </div>
+        <div class="sc-detail" id="grist-columns-detail">—</div>
+      </div>
+
+      <!-- Filtres persistants actifs -->
+      <div class="source-card" id="grist-filters-card" style="display:none">
+        <div class="sc-head">
+          <div class="sc-title">Filtres actifs</div>
+          <div class="sc-badge" style="background:#fef9c3;color:#854d0e">périmètre restreint</div>
+        </div>
+        <div class="sc-detail" id="grist-filters-detail">—</div>
+        <div class="sc-actions" style="display:flex">
+          <button class="source-action" onclick="resetEngineContext(); closeSourcesPanel()" title="Effacer le contexte et les filtres actifs">Réinitialiser</button>
+        </div>
+      </div>
     </div>
 
     <div class="doc-list" id="doc-list"></div>
 
     <div class="grist-section">
-      <div class="gs-label">📊 Données Grist liées</div>
-      <div id="grist-info" class="grist-empty">Aucune table connectée.</div>
+      <div class="gs-label" id="grist-info" class="grist-empty">Aucune table connectée.</div>
     </div>
   </div>
 
@@ -857,7 +864,6 @@
       <div class="context-pills" id="context-pills"></div>
       <div class="mini-suggestions" id="mini-suggestions"></div>
       <div class="chat-input-row">
-        <button class="btn-attach" onclick="document.getElementById('file-input').click()" title="Ajouter un fichier">📎</button>
         <textarea id="chat-input" placeholder="Posez votre question…" rows="1" onkeydown="handleKeydown(event)"></textarea>
         <button class="btn-send" id="btn-send" onclick="sendMessage()">➤</button>
       </div>
