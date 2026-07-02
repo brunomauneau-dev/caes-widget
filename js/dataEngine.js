@@ -473,55 +473,34 @@ function exportChartAsPng(btn, filename) {
     img.src = url;
   } else {
     // Chemin barres HTML → Canvas via html2canvas non disponible : fallback SVG généré à la volée
-    const bars = Array.from(card.querySelectorAll('[data-bar-value]'));
+    const bars = card.querySelectorAll('[data-bar-value]');
     if (!bars.length) { alert('Export non disponible pour ce type de graphique.'); return; }
-    const W = 600, barH = 24, gap = 8, pad = 12, labelW = 220, groupH = 30;
-    // Regroupe les barres consécutives par data-bar-group (ex: graphique pivot
-    // qui combine "Total par Académies" + "Total par Spécialité" dans un même
-    // export) pour afficher un titre de section au-dessus de chaque groupe.
-    const groups = [];
-    let lastGroup;
-    bars.forEach(bar => {
-      const g = bar.dataset.barGroup || '';
-      if (groups.length === 0 || g !== lastGroup) { groups.push({ title: g, bars: [] }); lastGroup = g; }
-      groups[groups.length - 1].bars.push(bar);
-    });
-    const groupTitleCount = groups.filter(g => g.title).length;
-    const H = pad * 2 + bars.length * (barH + gap) + groupTitleCount * groupH;
+    const W = 600, barH = 24, gap = 8, pad = 12, labelW = 220;
+    const H = pad * 2 + bars.length * (barH + gap);
     const canvas = document.createElement('canvas');
     canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
-    let y = pad;
-    groups.forEach(group => {
-      if (group.title) {
-        ctx.fillStyle = '#374151'; ctx.font = 'bold 13px system-ui,sans-serif';
-        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-        ctx.fillText(group.title, pad, y + groupH / 2 - 2);
-        y += groupH;
-      }
-      group.bars.forEach(bar => {
-        const label = bar.dataset.barLabel || '';
-        const pct = parseFloat(bar.dataset.barValue) || 0;
-        const count = bar.dataset.barCount || '';
-        const color = bar.dataset.barColor || '#6d28d9';
-        // fond
-        ctx.fillStyle = '#f3f4f6';
-        ctx.beginPath(); ctx.roundRect(labelW + pad, y, W - labelW - pad * 2, barH, 6); ctx.fill();
-        // barre
-        ctx.fillStyle = color;
-        ctx.beginPath(); ctx.roundRect(labelW + pad, y, Math.max(4, (W - labelW - pad * 2) * pct / 100), barH, 6); ctx.fill();
-        // label
-        ctx.fillStyle = '#1f2937'; ctx.font = '12px system-ui,sans-serif';
-        ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
-        ctx.fillText(label.slice(0, 30), pad, y + barH / 2);
-        // count
-        ctx.fillStyle = '#374151'; ctx.font = 'bold 11px system-ui,sans-serif';
-        ctx.textAlign = 'right';
-        ctx.fillText(count, W - pad, y + barH / 2);
-        ctx.textAlign = 'left';
-        y += barH + gap;
-      });
+    bars.forEach((bar, i) => {
+      const y = pad + i * (barH + gap);
+      const label = bar.dataset.barLabel || '';
+      const pct = parseFloat(bar.dataset.barValue) || 0;
+      const count = bar.dataset.barCount || '';
+      // fond
+      ctx.fillStyle = '#f3f4f6';
+      ctx.beginPath(); ctx.roundRect(labelW + pad, y, W - labelW - pad * 2, barH, 6); ctx.fill();
+      // barre
+      ctx.fillStyle = '#6d28d9';
+      ctx.beginPath(); ctx.roundRect(labelW + pad, y, Math.max(4, (W - labelW - pad * 2) * pct / 100), barH, 6); ctx.fill();
+      // label
+      ctx.fillStyle = '#1f2937'; ctx.font = '12px system-ui,sans-serif';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label.slice(0, 30), pad, y + barH / 2);
+      // count
+      ctx.fillStyle = '#374151'; ctx.font = 'bold 11px system-ui,sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(count, W - pad, y + barH / 2);
+      ctx.textAlign = 'left';
     });
     const a = document.createElement('a');
     a.download = filename;
@@ -532,48 +511,6 @@ function exportChartAsPng(btn, filename) {
 
 function _chartExportBtn(filename) {
   return `<button onclick="exportChartAsPng(this,'${filename}')" style="margin-top:8px;border:1px solid var(--gris2,#e5e7eb);background:#fff;border-radius:7px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;color:var(--gris3,#6b7280)" title="Exporter le graphique en PNG">📷 Exporter l'image</button>`;
-}
-
-// Deux graphiques pour un pivot : totaux par ligne + barres stackées par colonne.
-// Deux graphiques de décomposition d'un tableau croisé :
-// - Graphique 1 : total par ligne (ex. académies)
-// - Graphique 2 : total par colonne (ex. spécialités)
-function renderPivotCharts(result, plan) {
-  const matrix = result?.matrix || [];
-  const colValues = result?.colValues || [];
-  const total = result?.total || 0;
-  if (!matrix.length || !colValues.length) return '';
-
-  const shortLabel1 = _shortColName(plan.targetCol || '');
-  const shortLabel2 = _shortColName(plan.targetCol2 || '');
-
-  // Graphique 1 — totaux par ligne (colonne de gauche du pivot)
-  const rowTotals = matrix.map(r => ({ value: r.value, count: r.total }));
-  const maxRow = Math.max(...rowTotals.map(r => r.count), 1);
-  const group1Title = `Total par ${shortLabel1}`;
-  const bars1 = rowTotals.map(r => {
-    const w = Math.max(2, Math.round(r.count / maxRow * 100));
-    const pct = total ? (r.count / total * 100).toFixed(1).replace('.', ',') : '0';
-    return `<div data-bar-label="${escapeHtml(r.value)}" data-bar-value="${total ? (r.count / total * 100).toFixed(2) : 0}" data-bar-count="${r.count.toLocaleString('fr-FR')}" data-bar-group="${escapeHtml(group1Title)}" data-bar-color="#6d28d9" style="display:grid;grid-template-columns:minmax(100px,180px) 1fr auto;gap:8px;align-items:center"><div style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(r.value)}">${escapeHtml(r.value)}</div><div style="height:10px;background:var(--gris1);border-radius:6px;overflow:hidden"><div style="height:10px;width:${w}%;background:var(--albert);border-radius:6px"></div></div><div style="font-size:11px;font-weight:700">${r.count.toLocaleString('fr-FR')} <span style="color:var(--gris3);font-weight:400">${pct} %</span></div></div>`;
-  }).join('');
-
-  // Graphique 2 — totaux par colonne (en-têtes du pivot), triés par effectif
-  const colTotals = colValues.map((col, i) => ({
-    value: col,
-    count: matrix.reduce((s, r) => s + (r.cells[i] || 0), 0)
-  })).sort((a, b) => b.count - a.count);
-  const maxCol = Math.max(...colTotals.map(r => r.count), 1);
-  const group2Title = `Total par ${shortLabel2}`;
-  const bars2 = colTotals.map(r => {
-    const w = Math.max(2, Math.round(r.count / maxCol * 100));
-    const pct = total ? (r.count / total * 100).toFixed(1).replace('.', ',') : '0';
-    return `<div data-bar-label="${escapeHtml(r.value)}" data-bar-value="${total ? (r.count / total * 100).toFixed(2) : 0}" data-bar-count="${r.count.toLocaleString('fr-FR')}" data-bar-group="${escapeHtml(group2Title)}" data-bar-color="#2a7a4b" style="display:grid;grid-template-columns:minmax(100px,220px) 1fr auto;gap:8px;align-items:center"><div style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(r.value)}">${escapeHtml(r.value)}</div><div style="height:10px;background:var(--gris1);border-radius:6px;overflow:hidden"><div style="height:10px;width:${w}%;background:var(--vert,#16a34a);border-radius:6px"></div></div><div style="font-size:11px;font-weight:700">${r.count.toLocaleString('fr-FR')} <span style="color:var(--gris3);font-weight:400">${pct} %</span></div></div>`;
-  }).join('');
-
-  const chart1 = `<div style="margin-bottom:20px"><div style="font-size:12px;font-weight:700;color:var(--gris4,#374151);margin-bottom:8px">${escapeHtml(group1Title)}</div><div style="display:grid;gap:5px;max-width:560px">${bars1}</div></div>`;
-  const chart2 = `<div><div style="font-size:12px;font-weight:700;color:var(--gris4,#374151);margin-bottom:8px">${escapeHtml(group2Title)}</div><div style="display:grid;gap:5px;max-width:560px">${bars2}</div></div>`;
-
-  return `<div class="de-chart-export-wrap" style="margin:10px 0">${chart1}${chart2}${_chartExportBtn('graphique_pivot.png')}</div>`;
 }
 
 function renderMiniBarChart(rows, total, filename) {
@@ -730,10 +667,38 @@ function columnMentionScore(col, q) {
   return score;
 }
 
+// ── RÈGLE D'OR — AUCUNE DONNÉE PERSONNELLE EXPLOITÉE ──
+// Un identifiant Parcoursup (numéro de dossier, numéro Parcoursup, INE...) ne
+// désigne qu'un seul candidat : il n'a aucun sens statistique (une "moyenne de
+// numéros de dossier" n'existe pas) et sa manipulation est une donnée à
+// caractère personnel. Ces colonnes ne doivent JAMAIS être retenues comme
+// colonne d'analyse (stats, group_by, top, pivot, compare), quelle que soit la
+// fonction qui les a proposées. Point d'application principal :
+// finalSanitizeAnalysisPlan(), appelé pour tout plan avant exécution.
+const PERSONAL_ID_COLUMN_PATTERNS = [
+  /num[eé]ro\s*(de\s*)?dossier/i,
+  /n[°ºo]\s*dossier/i,
+  /num[eé]ro\s*parcoursup/i,
+  /n[°ºo]\s*parcoursup/i,
+  /identifiant/i,
+  /\bine\b/i,
+  /id[_\s-]?candidat/i,
+  /id[_\s-]?dossier/i,
+  /id[_\s-]?parcoursup/i,
+  /^id$/i
+];
+
+function isPersonalIdentifierColumn(col) {
+  const name = String(col || '').trim();
+  if (!name) return false;
+  return PERSONAL_ID_COLUMN_PATTERNS.some(re => re.test(name));
+}
+window.isPersonalIdentifierColumn = isPersonalIdentifierColumn;
+
 function findMentionedColumns(headers, question, max = 3) {
   const q = normalizeText(question || '');
   return headers
-    .filter(h => h && !/^(id|manualSort)$/i.test(String(h)))
+    .filter(h => h && !/^(id|manualSort)$/i.test(String(h)) && !isPersonalIdentifierColumn(h))
     .map(h => ({ col: h, score: columnMentionScore(h, q) }))
     .filter(x => x.score > 0)
     .sort((a,b) => b.score - a.score)
@@ -852,20 +817,12 @@ function currentExecutionToRows(exec) {
   if (exec.kind === 'pivot') {
     const rowLabel = exec.result?.rowCol || p.targetCol || 'Ligne';
     const cols = exec.result?.colValues || [];
-    const matrix = exec.result?.matrix || [];
-    const rows = matrix.map(r => {
+    return (exec.result?.matrix || []).map(r => {
       const o = { [rowLabel]: r.value };
       cols.forEach((c, i) => { o[c] = r.cells[i] || 0; });
       o.Total = r.total;
       return o;
     });
-    const totalRow = { [rowLabel]: 'Total' };
-    cols.forEach((c, i) => {
-      totalRow[c] = matrix.reduce((s, r) => s + (r.cells[i] || 0), 0);
-    });
-    totalRow.Total = matrix.reduce((s, r) => s + (r.total || 0), 0);
-    rows.push(totalRow);
-    return rows;
   }
   if (exec.kind === 'stats') {
     return [{
@@ -943,14 +900,10 @@ function renderCurrentChartExecution(plan) {
     return { kind: 'compare', plan: comparePlan, result: prev.result, text: prev.text, html };
   }
   if (prev.kind === 'group_by' || prev.kind === 'top') {
+    const rows = prev.result?.rows || [];
     const clonedPlan = { ...(prev.plan || {}), renderChart: true, chartType: isPieChartRequest(plan.question || '') ? 'pie' : (prev.plan?.chartType || 'bar') };
     const html = renderDataEngineResultHtml(prev.plan?.tool || prev.kind, clonedPlan, prev.result);
     return { kind: prev.kind, plan: clonedPlan, result: prev.result, text: prev.text, html };
-  }
-  // Branche pivot : deux graphiques (totaux + stacké) depuis la matrix complète
-  if (prev.kind === 'pivot') {
-    const html = `${deTitleHtml(`${_shortColName(prev.plan?.targetCol||'')} × ${_shortColName(prev.plan?.targetCol2||'')}`, prev.plan?.blockId, prev.plan?.originalTitle)}${renderPivotCharts(prev.result, prev.plan||{})}`;
-    return { kind: 'pivot', plan: prev.plan, result: prev.result, text: prev.text, html };
   }
   // Si le dernier résultat n'est pas graphiquable, produire une répartition par la dernière dimension connue.
   const fallbackCol = prev.plan?.targetCol || 'Série de la Classe';
@@ -967,6 +920,18 @@ function renderCurrentChartExecution(plan) {
 // d'entraîner des filtres issus de colonnes détectées ou de valeurs exemples.
 function finalSanitizeAnalysisPlan(plan) {
   if (!plan) return plan;
+
+  // RÈGLE D'OR (voir isPersonalIdentifierColumn) — appliquée en premier, avant
+  // toute autre logique, pour garantir qu'aucune colonne d'identifiant
+  // personnel ne peut jamais atteindre un outil d'analyse (stats, group_by,
+  // top, pivot, compare), même si elle a été proposée par le planner externe
+  // ou héritée d'un plan précédent.
+  if (plan.targetCol && isPersonalIdentifierColumn(plan.targetCol)) plan.targetCol = null;
+  if (plan.targetCol2 && isPersonalIdentifierColumn(plan.targetCol2)) plan.targetCol2 = null;
+  if (Array.isArray(plan.mentionedCols)) {
+    plan.mentionedCols = plan.mentionedCols.filter(c => !isPersonalIdentifierColumn(c));
+  }
+
   const q = normalizeText(plan.question || '');
   const state = getDataEngineState();
   const prev = state.lastPlan;
@@ -1412,7 +1377,7 @@ function renderCompareHtml(plan, result) {
   const detailsTables = `<details class="de-detail-tables" style="margin:16px 0;border:1px solid var(--gris2,#e5e7eb);border-radius:12px;background:#fff"><summary style="cursor:pointer;font-weight:800;padding:12px 14px">Afficher les tableaux détaillés</summary><div style="padding:0 14px 14px">${formationTable}${academieTable}${serieTable}</div></details>`;
   const debug = `<details class="msg-sources"><summary title="Détail technique du calcul (pour vérification ou support) — sans impact sur le résultat affiché ci-dessus">Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : compare<br><strong>Version</strong> : v27.6.0<br><strong>Source</strong> : ${escapeHtml(plan.table?.source || 'Données')} · ${escapeHtml(plan.table?.name || 'table')}<br><strong>Groupes</strong> : ${escapeHtml(rows.map(r => r.label).join(' / ') || '—')}</div></details>`;
   const clearTitle = (typeof extractBlockTitle === 'function') ? extractBlockTitle({ plan, result }, '') : 'Comparaison';
-  return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p>Base comparée : <strong>${baseTotal.toLocaleString('fr-FR')}</strong> lignes.</p><section class="de-section de-population" style="margin:12px 0;padding:12px;border:1px solid var(--gris2,#e5e7eb);border-radius:10px;background:#fff"><div style="overflow:auto"><table style="border-collapse:separate;border-spacing:0;width:100%;font-size:12px;min-width:360px"><tbody><tr><th style="text-align:left;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Population</th><th style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Nombre</th><th style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Part</th></tr>${tableRows}</tbody></table></div>${missingNote}</section>${filtersHtml}${insights}${charts}${statsTable}${detailsTables}${debug}`;
+  return `${deTitleHtml(clearTitle)}<p>Base comparée : <strong>${baseTotal.toLocaleString('fr-FR')}</strong> lignes.</p><section class="de-section de-population" style="margin:12px 0;padding:12px;border:1px solid var(--gris2,#e5e7eb);border-radius:10px;background:#fff"><div style="overflow:auto"><table style="border-collapse:separate;border-spacing:0;width:100%;font-size:12px;min-width:360px"><tbody><tr><th style="text-align:left;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Population</th><th style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Nombre</th><th style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Part</th></tr>${tableRows}</tbody></table></div>${missingNote}</section>${filtersHtml}${insights}${charts}${statsTable}${detailsTables}${debug}`;
 }
 
 function runDataEnginePlan(plan, persistentFiltersOverride) {
@@ -1505,7 +1470,7 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     const rowCol = plan.targetCol || plan.mentionedCols?.[0];
     const colCol = plan.targetCol2 || plan.mentionedCols?.find(c => c !== rowCol);
     if (!rowCol || !colCol) return null;
-    const pivot = pivotRows(rows, rowCol, colCol, 12, 99);
+    const pivot = pivotRows(rows, rowCol, colCol, 12, 8);
     const exec = {
       kind: 'pivot',
       plan: { ...plan, targetCol: rowCol, targetCol2: colCol },
@@ -1577,7 +1542,7 @@ function numericStats(rows, col) {
 function inferNumericStatsColumn(table, question) {
   const q = normalizeText(question || '');
   const headers = table.headers || Object.keys(table.objects?.[0] || {});
-  const candidates = headers.filter(h => h && !/^(id|manualSort)$/i.test(String(h))).map(h => {
+  const candidates = headers.filter(h => h && !/^(id|manualSort)$/i.test(String(h)) && !isPersonalIdentifierColumn(h)).map(h => {
     const hn = normalizeText(h);
     let score = 0;
     if (/voeu|vœu|voeux|vœux/.test(q) && /voeu|vœu|voeux|vœux/.test(hn)) score += 120;
@@ -1655,12 +1620,8 @@ function dataEngineResultToContext(exec) {
 // Albert générique (interprétation IA, moins garantie sur les chiffres).
 const DE_EXACT_BADGE = '<span class="de-exact-badge" title="Ce résultat est calculé directement sur les données, pas une interprétation IA" style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;color:#15803d;background:#dcfce7;border-radius:999px;padding:2px 8px;margin-left:8px;vertical-align:middle">✓ Calcul exact</span>';
 
-function deTitleHtml(title, blockId = null, originalTitle = null) {
-  const safeTitle = escapeHtml(title);
-  if (!blockId) return `<h4>${safeTitle}${DE_EXACT_BADGE}</h4>`;
-  const safeId = escapeHtml(blockId);
-  const safeOriginal = escapeHtml(originalTitle || title);
-  return `<h4 class="de-block-title" data-block-id="${safeId}" data-original-title="${safeOriginal}"><span class="de-block-title-text">${safeTitle}</span>${DE_EXACT_BADGE}<button type="button" class="de-block-title-edit-btn" onclick="_deStartRenameBlockTitle(this)" title="Renommer ce bloc">✎</button><button type="button" class="de-block-title-reset-btn" onclick="_deResetBlockTitle(this)" title="Revenir au titre original">↺</button></h4>`;
+function deTitleHtml(title) {
+  return `<h4>${escapeHtml(title)}${DE_EXACT_BADGE}</h4>`;
 }
 
 function renderDataEngineResultHtml(tool, plan, result) {
@@ -1672,36 +1633,32 @@ function renderDataEngineResultHtml(tool, plan, result) {
   if (tool === 'count_rows') {
     const pct = result.total ? pctFr(result.count, result.total) : '—';
     const clearTitle = (typeof extractBlockTitle === 'function') ? extractBlockTitle({ plan, result }, '') : 'Comptage';
-    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p>Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ligne${result.count>1?'s':''} correspondant à la demande (${pct} du jeu de données).</p><p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
+    return `${deTitleHtml(clearTitle)}<p>Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ligne${result.count>1?'s':''} correspondant à la demande (${pct} du jeu de données).</p><p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
   }
   if (tool === 'group_by' || tool === 'top') {
     const rows = result.rows || [];
     const clearTitle = (typeof extractBlockTitle === 'function') ? extractBlockTitle({ plan, result }, '') : (tool === 'top' ? 'Top' : 'Répartition');
-    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p><strong>${result.total.toLocaleString('fr-FR')}</strong> ligne${result.total>1?'s':''} retenue${result.total>1?'s':''}. Analyse par <strong>${escapeHtml(plan.targetCol)}</strong>.</p><ul>${rows.slice(0,20).map(r => `<li>${escapeHtml(r.value)} : <strong>${r.count.toLocaleString('fr-FR')}</strong> (${r.pct.toFixed(1).replace('.', ',')} %)</li>`).join('')}</ul>${plan.renderChart ? (plan.chartType === 'pie' ? renderMiniPieChart(rows, result.total) : renderMiniBarChart(rows, result.total)) : ''}${filtersHtml}${debug}`;
+    return `${deTitleHtml(clearTitle)}<p><strong>${result.total.toLocaleString('fr-FR')}</strong> ligne${result.total>1?'s':''} retenue${result.total>1?'s':''}. Analyse par <strong>${escapeHtml(plan.targetCol)}</strong>.</p><ul>${rows.slice(0,20).map(r => `<li>${escapeHtml(r.value)} : <strong>${r.count.toLocaleString('fr-FR')}</strong> (${r.pct.toFixed(1).replace('.', ',')} %)</li>`).join('')}</ul>${plan.renderChart ? (plan.chartType === 'pie' ? renderMiniPieChart(rows, result.total) : renderMiniBarChart(rows, result.total)) : ''}${filtersHtml}${debug}`;
   }
   if (tool === 'pivot') {
     const cols = result.colValues || [];
     const total = result.total || 0;
-    // Tronquer les libellés de colonnes trop longs pour garder le tableau lisible
-    const truncCol = (s) => s && s.length > 18 ? s.slice(0, 16) + '…' : (s || '—');
-    const header = `<tr><th style="text-align:left;min-width:140px;padding:6px 8px">${escapeHtml(_shortColName(plan.targetCol))}</th>${cols.map(c => `<th style="text-align:right;padding:6px 8px;white-space:nowrap" title="${escapeHtml(c)}">${escapeHtml(truncCol(c))}</th>`).join('')}<th style="text-align:right;padding:6px 8px">Total</th><th style="text-align:right;padding:6px 8px">%</th></tr>`;
+    const header = `<tr><th style="text-align:left">${escapeHtml(plan.targetCol)}</th>${cols.map(c => `<th style="text-align:right">${escapeHtml(c)}</th>`).join('')}<th style="text-align:right">Total</th><th style="text-align:right">% total</th></tr>`;
     const body = (result.matrix || []).map(r => {
       const pct = total ? (r.total / total * 100).toFixed(1).replace('.', ',') : '—';
-      return `<tr><td style="padding:5px 8px">${escapeHtml(r.value)}</td>${r.cells.map(c => `<td style="text-align:right;padding:5px 8px">${c > 0 ? c.toLocaleString('fr-FR') : '<span style="color:var(--gris2)">—</span>'}</td>`).join('')}<td style="text-align:right;padding:5px 8px"><strong>${r.total.toLocaleString('fr-FR')}</strong></td><td style="text-align:right;padding:5px 8px">${pct} %</td></tr>`;
+      return `<tr><td>${escapeHtml(r.value)}</td>${r.cells.map(c => `<td style="text-align:right">${c > 0 ? c.toLocaleString('fr-FR') : '<span style="color:var(--gris2)">—</span>'}</td>`).join('')}<td style="text-align:right"><strong>${r.total.toLocaleString('fr-FR')}</strong></td><td style="text-align:right">${pct} %</td></tr>`;
     }).join('');
     const colTotals = cols.map((_, i) => (result.matrix || []).reduce((s, r) => s + (r.cells[i] || 0), 0));
-    const foot = `<tr style="background:var(--gris0,#f8fafc);font-weight:700"><td style="padding:5px 8px">Total</td>${colTotals.map(t => `<td style="text-align:right;padding:5px 8px">${t.toLocaleString('fr-FR')}</td>`).join('')}<td style="text-align:right;padding:5px 8px">${total.toLocaleString('fr-FR')}</td><td></td></tr>`;
+    const foot = `<tr style="background:var(--gris0,#f8fafc);font-weight:700"><td>Total</td>${colTotals.map(t => `<td style="text-align:right">${t.toLocaleString('fr-FR')}</td>`).join('')}<td style="text-align:right">${total.toLocaleString('fr-FR')}</td><td></td></tr>`;
     const clearTitle = `${_shortColName(plan.targetCol)} × ${_shortColName(plan.targetCol2)}`;
-    // width:auto (pas 100%) : laisse la table prendre sa largeur naturelle
-    // et le overflow:auto du container gère le scroll horizontal
-    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p><strong>${total.toLocaleString('fr-FR')}</strong> lignes retenues. Croisement <strong>${escapeHtml(plan.targetCol)}</strong> × <strong>${escapeHtml(plan.targetCol2)}</strong>.</p><div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--gris1);border-radius:8px;padding-bottom:14px"><table style="border-collapse:collapse;font-size:12px;width:auto;min-width:100%;margin-bottom:0"><thead style="background:var(--gris0)">${header}</thead><tbody>${body}${foot}</tbody></table></div>${filtersHtml}${debug}`;
+    return `${deTitleHtml(clearTitle)}<p><strong>${total.toLocaleString('fr-FR')}</strong> lignes retenues. Croisement <strong>${escapeHtml(plan.targetCol)}</strong> × <strong>${escapeHtml(plan.targetCol2)}</strong>.</p><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%"><thead>${header}</thead><tbody>${body}${foot}</tbody></table></div>${filtersHtml}${debug}`;
   }
   if (tool === 'stats') {
     const fmt = v => v === null || v === undefined ? '—' : Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 2 });
     const clearTitle = `Statistiques — ${_shortColName(plan.targetCol)}`;
-    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p>Colonne : <strong>${escapeHtml(plan.targetCol)}</strong></p><ul><li>Valeurs numériques : <strong>${result.numericCount.toLocaleString('fr-FR')}</strong> / ${result.total.toLocaleString('fr-FR')}</li><li>Moyenne : <strong>${fmt(result.avg)}</strong></li><li>Médiane : <strong>${fmt(result.median)}</strong></li><li>Min : <strong>${fmt(result.min)}</strong></li><li>Max : <strong>${fmt(result.max)}</strong></li></ul>${filtersHtml}${debug}`;
+    return `${deTitleHtml(clearTitle)}<p>Colonne : <strong>${escapeHtml(plan.targetCol)}</strong></p><ul><li>Valeurs numériques : <strong>${result.numericCount.toLocaleString('fr-FR')}</strong> / ${result.total.toLocaleString('fr-FR')}</li><li>Moyenne : <strong>${fmt(result.avg)}</strong></li><li>Médiane : <strong>${fmt(result.median)}</strong></li><li>Min : <strong>${fmt(result.min)}</strong></li><li>Max : <strong>${fmt(result.max)}</strong></li></ul>${filtersHtml}${debug}`;
   }
-  return `${deTitleHtml('Résultat', plan.blockId, plan.originalTitle || 'Résultat')}${debug}`;
+  return `${deTitleHtml('Résultat')}${debug}`;
 }
 
 function shouldAnswerLocallyWithoutAlbert(exec) {
