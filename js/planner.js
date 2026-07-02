@@ -16,6 +16,7 @@
     if (typeof normalizeText === 'function') return normalizeText(String(s ?? ''));
     return String(s ?? '')
       .toLowerCase()
+      .replace(/œ/g, 'oe').replace(/æ/g, 'ae')
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
       .replace(/[’']/g, ' ')
@@ -60,6 +61,9 @@
     const c = nrm(col);
     if (/zone.*pays.*basque|pays.*basque/.test(c)) return 'zone_basque';
     if (/boursier|bourse|bours[eé]/.test(c)) return 'boursier';
+    // nb_voeux AVANT voeu : "Nb total de vœux..." doit → nb_voeux et non voeu
+    if ((/nb|nombre|total/).test(c) && /v[oœ]ux|v[oœ]eu|voeux|voeu/.test(c)) return 'nb_voeux';
+    if (/voeu|voeux|vœu|vœux/.test(c)) return 'voeu';
     if (/serie.*classe|série.*classe|type.*classe|type.*bac|serie du bac|serie|série/.test(c)) return 'bac_series';
     if (/academie|académie/.test(c)) return 'academie';
     if (/departement|département/.test(c)) return 'departement';
@@ -67,16 +71,16 @@
     if (/grand.*groupe|groupe.*formation|formation|specialite|spécialité|mention|filiere|filière|diplome|diplôme/.test(c)) return 'formation';
     if (/proposition|favorable|admission|admis|repondu|répondu/.test(c)) return 'admission';
     if (/apprenti|apprentissage/.test(c)) return 'apprentissage';
-    if (/voeu|voeux|vœu|vœux/.test(c)) return 'voeu';
     if (/sexe|genre/.test(c)) return 'sexe';
-    if (/apprenti/.test(c)) return 'apprenti';
-    if ((/nb|nombre|total/).test(c) && /v[oœ]ux|v[oœ]eu/.test(c)) return 'nb_voeux';
+    if (/annee|année|session|campagne/.test(c)) return 'year';
+    // Colonnes techniques identifiant/code → generic (pas de valeur analytique directe)
+    if (/num[eé]ro|numero|code uai|uai|code postal|identifiant|minist[eè]re.*rattach|type.*contrat/.test(c)) return 'generic';
     if (/etablissement|établissement|lycee|lycée|universite|université|iut|cfa/.test(c)) {
+      if (/code|uai|minist|contrat/.test(c)) return 'generic';
       if (/accueil|accepte|acceptée/.test(c) && !/acad[eé]mie|commune|sp[eé]cialit|mention|groupe/.test(c)) return 'etablissement_accueil';
       if (/scolarit|origine/.test(c) && !/commune|d[eé]partement|code|minist|type|contrat/.test(c)) return 'etablissement_origine_nom';
       return 'etablissement';
     }
-    if (/annee|année|session|campagne/.test(c)) return 'year';
     return 'generic';
   }
 
