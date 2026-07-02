@@ -161,6 +161,10 @@ function _icPersistBlockTitle(block) {
     const sb = session.dataBlocks.find(x => x && x.id === block.id);
     if (sb) sb.title = block.title;
   }
+  // Répercuter immédiatement sur le h4 dans le chat (maillon manquant :
+  // la modale persistait le titre mais ne mettait pas à jour le bloc affiché)
+  const chatWrap = document.getElementById('chat-messages');
+  if (chatWrap && typeof enhanceEditableDataTitles === 'function') enhanceEditableDataTitles(chatWrap);
   if (typeof scheduleSessionsSave === 'function') scheduleSessionsSave();
 }
 
