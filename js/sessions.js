@@ -3,33 +3,15 @@
 
 /* ═══════════════ SESSIONS & FILTRES PERSISTANTS ═══════════════ */
 // ── _generateInfographicFromComposer ──
+// Utilise le même prompt de génération que le bouton "🖼 Infographie" d'un bloc
+// unique (buildInfographicSpecPrompt, défini dans infographic.js) : avant, ce
+// compositeur avait son propre prompt plus pauvre (pas de "scope" par section,
+// pas de pourcentage systématique sur les barres, moins de garde-fous anti-
+// redondance), ce qui produisait des infographies structurellement différentes
+// de celles générées depuis un bloc — alors même que les données sources étaient
+// identiques. Seuls le thème de couleurs et le contexte (multi-blocs ici) varient.
 async function _generateInfographicFromComposer(question, composerCtx, theme) {
-  const prompt = `Tu es un directeur artistique, data analyst et rédacteur institutionnel Parcoursup.
-Produis une SPECIFICATION JSON pour une infographie adaptive. Ne produis PAS de HTML. Réponds UNIQUEMENT par du JSON valide.
-Les couleurs DOIVENT être exactement : "accent":"${theme.accent}", "secondary":"${theme.secondary}".
-Schéma :
-{"title":"...","subtitle":"...","eyebrow":"...","accent":"${theme.accent}","secondary":"${theme.secondary}","metrics":[{"label":"...","value":"...","detail":"..."}],"narrative":["..."],"sections":[{"type":"ranking|bars|comparison|kpi_grid|insights|stacked","title":"...",...}],"footer":"..."}
-Règles ABSOLUES :
-- Infographie narrative avec fil conducteur clair, max 7 sections non redondantes.
-- N'invente aucun chiffre. Utilise SEULEMENT les données fournies ci-dessous.
-- INTERDIT ABSOLU : Ne jamais utiliser de label générique comme "Item 1", "Item 2", "Item 3", "Analyse 1", "Catégorie X", "Label", "Valeur", "Périmètre", "Section X". Chaque label doit être extrait LITTÉRALEMENT des données fournies (ex : "Bordeaux", "Toulouse", "CPGE - CPES"). Si tu ne trouves pas de label dans les données, omets l'item entier.
-- INTERDIT : champs vides (""), valeurs "...", titres génériques comme "À retenir" sans texte, cards insights sans contenu réel.
-- Chaque card insights DOIT avoir un champ "text" non vide (minimum 15 mots) avec une vraie analyse ou interprétation issue des données.
-- Si tu n'as pas assez de données pour remplir une section complètement, réduis le nombre d'items plutôt que de laisser des champs vides.
-- Toutes les sections doivent avoir uniquement des items avec titre ET texte/valeur réels.
-
-EXEMPLES (à suivre strictement) :
-
-✅ BON — section ranking avec labels issus des données :
-{"type":"ranking","title":"Académies d'accueil","items":[{"label":"Bordeaux","value":"1 789","percent":"75,5 %"},{"label":"Toulouse","value":"253","percent":"10,7 %"},{"label":"Paris","value":"68","percent":"2,9 %"}]}
-
-✅ BON — section insights avec vraie analyse (text > 15 mots) :
-{"type":"insights","title":"Points saillants","items":[{"title":"Concentration académique","text":"75,5 % des candidats du Pays Basque restent dans l'académie de Bordeaux, contre 10,7 % qui rejoignent Toulouse — un ancrage territorial marqué."}]}
-
-❌ MAUVAIS — ne jamais produire ceci :
-{"type":"ranking","title":"Répartition","items":[{"label":"Item 1","value":"..."},{"label":"Catégorie X","value":""},{"label":"Analyse 1","value":"N/A"}]}
-
-DONNÉES :\n${composerCtx}`;
+  const prompt = buildInfographicSpecPrompt(question, composerCtx, theme);
   const resp = await fetch(albertConfig.endpoint, {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ model: albertConfig.model, messages:[{role:'system',content:prompt},{role:'user',content:`Génère l'infographie : ${question}`}], temperature:0.2 })

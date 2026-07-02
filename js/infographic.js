@@ -714,18 +714,20 @@ window._icResetCardTitle = _icResetCardTitle;
    des blocs globaux/session et le mode "Recomposer" (targetUid). Pas de redéfinition ici
    pour éviter toute divergence entre deux implémentations concurrentes. */
 
-async function generateInfographicWithAlbert(question, localAnalysis, dataExecution = null) {
-  // Si un résultat Data Engine est disponible (compare, group_by, pivot…), on l'injecte
-  // en tête de contexte — il est plus structuré que la répartition locale et doit primer.
-  let deContext = '';
-  if (dataExecution && typeof dataEngineResultToContext === 'function') {
-    try {
-      const raw = dataEngineResultToContext(dataExecution);
-      if (raw && raw.length > 20) deContext = raw + '\n\n';
-    } catch(e) { console.warn('[infographic] dataEngineResultToContext error:', e); }
-  }
-  const context = deContext + buildContext(localAnalysis);
-  const specPrompt = `Tu es un directeur artistique, data analyst et rédacteur institutionnel.
+// ── buildInfographicSpecPrompt ──
+// Prompt UNIQUE de génération de spec d'infographie, partagé par les deux points
+// d'entrée : le bouton "🖼 Infographie" sur un bloc (generateInfographicWithAlbert)
+// et le compositeur multi-blocs (_generateInfographicFromComposer, sessions.js).
+// Avant cette factorisation, chaque chemin avait son propre prompt avec des règles
+// différentes (l'un exigeait un "scope" par section et un pourcentage systématique
+// sur les barres, l'autre non), ce qui produisait des infographies structurellement
+// différentes à partir des mêmes données selon le bouton cliqué. Un seul prompt
+// commun garantit un résultat cohérent quel que soit le point d'entrée ; seuls la
+// question, le contexte de données et le thème de couleurs varient.
+function buildInfographicSpecPrompt(question, context, theme) {
+  const accent = (theme && theme.accent) || '#003189';
+  const secondary = (theme && theme.secondary) || '#E1000F';
+  return `Tu es un directeur artistique, data analyst et rédacteur institutionnel.
 
 Tu dois produire une SPECIFICATION JSON pour une infographie adaptive. Le HTML sera généré ensuite par un moteur de rendu : ne renvoie donc PAS de HTML.
 
@@ -736,8 +738,8 @@ Schéma attendu :
   "title": "titre clair",
   "subtitle": "sous-titre avec périmètre et volume",
   "eyebrow": "contexte court",
-  "accent": "#003189",
-  "secondary": "#E1000F",
+  "accent": "${accent}",
+  "secondary": "${secondary}",
   "metrics": [ {"label":"...", "value":"...", "detail":"..."} ],
   "narrative": ["phrase analytique 1", "phrase analytique 2"],
   "sections": [
@@ -787,6 +789,23 @@ Demande utilisateur : ${question}
 
 CONTEXTE À UTILISER :
 ${context || '(Aucun contexte disponible)'}`;
+}
+
+
+async function generateInfographicWithAlbert(question, localAnalysis, dataExecution = null) {
+  // Si un résultat Data Engine est disponible (compare, group_by, pivot…), on l'injecte
+  // en tête de contexte — il est plus structuré que la répartition locale et doit primer.
+  let deContext = '';
+  if (dataExecution && typeof dataEngineResultToContext === 'function') {
+    try {
+      const raw = dataEngineResultToContext(dataExecution);
+      if (raw && raw.length > 20) deContext = raw + '\n\n';
+    } catch(e) { console.warn('[infographic] dataEngineResultToContext error:', e); }
+  }
+  const context = deContext + buildContext(localAnalysis);
+  // Thème par défaut du bouton bloc-unique : Bleu France (pas de sélecteur de thème
+  // sur ce point d'entrée) — même prompt que le compositeur, cf. buildInfographicSpecPrompt.
+  const specPrompt = buildInfographicSpecPrompt(question, context, null);
 
   const response = await fetch(albertConfig.endpoint, {
     method: 'POST',
