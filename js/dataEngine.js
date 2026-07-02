@@ -473,34 +473,55 @@ function exportChartAsPng(btn, filename) {
     img.src = url;
   } else {
     // Chemin barres HTML → Canvas via html2canvas non disponible : fallback SVG généré à la volée
-    const bars = card.querySelectorAll('[data-bar-value]');
+    const bars = Array.from(card.querySelectorAll('[data-bar-value]'));
     if (!bars.length) { alert('Export non disponible pour ce type de graphique.'); return; }
-    const W = 600, barH = 24, gap = 8, pad = 12, labelW = 220;
-    const H = pad * 2 + bars.length * (barH + gap);
+    const W = 600, barH = 24, gap = 8, pad = 12, labelW = 220, groupH = 30;
+    // Regroupe les barres consécutives par data-bar-group (ex: graphique pivot
+    // qui combine "Total par Académies" + "Total par Spécialité" dans un même
+    // export) pour afficher un titre de section au-dessus de chaque groupe.
+    const groups = [];
+    let lastGroup;
+    bars.forEach(bar => {
+      const g = bar.dataset.barGroup || '';
+      if (groups.length === 0 || g !== lastGroup) { groups.push({ title: g, bars: [] }); lastGroup = g; }
+      groups[groups.length - 1].bars.push(bar);
+    });
+    const groupTitleCount = groups.filter(g => g.title).length;
+    const H = pad * 2 + bars.length * (barH + gap) + groupTitleCount * groupH;
     const canvas = document.createElement('canvas');
     canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
-    bars.forEach((bar, i) => {
-      const y = pad + i * (barH + gap);
-      const label = bar.dataset.barLabel || '';
-      const pct = parseFloat(bar.dataset.barValue) || 0;
-      const count = bar.dataset.barCount || '';
-      // fond
-      ctx.fillStyle = '#f3f4f6';
-      ctx.beginPath(); ctx.roundRect(labelW + pad, y, W - labelW - pad * 2, barH, 6); ctx.fill();
-      // barre
-      ctx.fillStyle = '#6d28d9';
-      ctx.beginPath(); ctx.roundRect(labelW + pad, y, Math.max(4, (W - labelW - pad * 2) * pct / 100), barH, 6); ctx.fill();
-      // label
-      ctx.fillStyle = '#1f2937'; ctx.font = '12px system-ui,sans-serif';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(label.slice(0, 30), pad, y + barH / 2);
-      // count
-      ctx.fillStyle = '#374151'; ctx.font = 'bold 11px system-ui,sans-serif';
-      ctx.textAlign = 'right';
-      ctx.fillText(count, W - pad, y + barH / 2);
-      ctx.textAlign = 'left';
+    let y = pad;
+    groups.forEach(group => {
+      if (group.title) {
+        ctx.fillStyle = '#374151'; ctx.font = 'bold 13px system-ui,sans-serif';
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillText(group.title, pad, y + groupH / 2 - 2);
+        y += groupH;
+      }
+      group.bars.forEach(bar => {
+        const label = bar.dataset.barLabel || '';
+        const pct = parseFloat(bar.dataset.barValue) || 0;
+        const count = bar.dataset.barCount || '';
+        const color = bar.dataset.barColor || '#6d28d9';
+        // fond
+        ctx.fillStyle = '#f3f4f6';
+        ctx.beginPath(); ctx.roundRect(labelW + pad, y, W - labelW - pad * 2, barH, 6); ctx.fill();
+        // barre
+        ctx.fillStyle = color;
+        ctx.beginPath(); ctx.roundRect(labelW + pad, y, Math.max(4, (W - labelW - pad * 2) * pct / 100), barH, 6); ctx.fill();
+        // label
+        ctx.fillStyle = '#1f2937'; ctx.font = '12px system-ui,sans-serif';
+        ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+        ctx.fillText(label.slice(0, 30), pad, y + barH / 2);
+        // count
+        ctx.fillStyle = '#374151'; ctx.font = 'bold 11px system-ui,sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText(count, W - pad, y + barH / 2);
+        ctx.textAlign = 'left';
+        y += barH + gap;
+      });
     });
     const a = document.createElement('a');
     a.download = filename;
@@ -529,10 +550,11 @@ function renderPivotCharts(result, plan) {
   // Graphique 1 — totaux par ligne (colonne de gauche du pivot)
   const rowTotals = matrix.map(r => ({ value: r.value, count: r.total }));
   const maxRow = Math.max(...rowTotals.map(r => r.count), 1);
+  const group1Title = `Total par ${shortLabel1}`;
   const bars1 = rowTotals.map(r => {
     const w = Math.max(2, Math.round(r.count / maxRow * 100));
     const pct = total ? (r.count / total * 100).toFixed(1).replace('.', ',') : '0';
-    return `<div style="display:grid;grid-template-columns:minmax(100px,180px) 1fr auto;gap:8px;align-items:center"><div style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(r.value)}">${escapeHtml(r.value)}</div><div style="height:10px;background:var(--gris1);border-radius:6px;overflow:hidden"><div style="height:10px;width:${w}%;background:var(--albert);border-radius:6px"></div></div><div style="font-size:11px;font-weight:700">${r.count.toLocaleString('fr-FR')} <span style="color:var(--gris3);font-weight:400">${pct} %</span></div></div>`;
+    return `<div data-bar-label="${escapeHtml(r.value)}" data-bar-value="${total ? (r.count / total * 100).toFixed(2) : 0}" data-bar-count="${r.count.toLocaleString('fr-FR')}" data-bar-group="${escapeHtml(group1Title)}" data-bar-color="#6d28d9" style="display:grid;grid-template-columns:minmax(100px,180px) 1fr auto;gap:8px;align-items:center"><div style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(r.value)}">${escapeHtml(r.value)}</div><div style="height:10px;background:var(--gris1);border-radius:6px;overflow:hidden"><div style="height:10px;width:${w}%;background:var(--albert);border-radius:6px"></div></div><div style="font-size:11px;font-weight:700">${r.count.toLocaleString('fr-FR')} <span style="color:var(--gris3);font-weight:400">${pct} %</span></div></div>`;
   }).join('');
 
   // Graphique 2 — totaux par colonne (en-têtes du pivot), triés par effectif
@@ -541,14 +563,15 @@ function renderPivotCharts(result, plan) {
     count: matrix.reduce((s, r) => s + (r.cells[i] || 0), 0)
   })).sort((a, b) => b.count - a.count);
   const maxCol = Math.max(...colTotals.map(r => r.count), 1);
+  const group2Title = `Total par ${shortLabel2}`;
   const bars2 = colTotals.map(r => {
     const w = Math.max(2, Math.round(r.count / maxCol * 100));
     const pct = total ? (r.count / total * 100).toFixed(1).replace('.', ',') : '0';
-    return `<div style="display:grid;grid-template-columns:minmax(100px,220px) 1fr auto;gap:8px;align-items:center"><div style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(r.value)}">${escapeHtml(r.value)}</div><div style="height:10px;background:var(--gris1);border-radius:6px;overflow:hidden"><div style="height:10px;width:${w}%;background:var(--vert,#16a34a);border-radius:6px"></div></div><div style="font-size:11px;font-weight:700">${r.count.toLocaleString('fr-FR')} <span style="color:var(--gris3);font-weight:400">${pct} %</span></div></div>`;
+    return `<div data-bar-label="${escapeHtml(r.value)}" data-bar-value="${total ? (r.count / total * 100).toFixed(2) : 0}" data-bar-count="${r.count.toLocaleString('fr-FR')}" data-bar-group="${escapeHtml(group2Title)}" data-bar-color="#2a7a4b" style="display:grid;grid-template-columns:minmax(100px,220px) 1fr auto;gap:8px;align-items:center"><div style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(r.value)}">${escapeHtml(r.value)}</div><div style="height:10px;background:var(--gris1);border-radius:6px;overflow:hidden"><div style="height:10px;width:${w}%;background:var(--vert,#16a34a);border-radius:6px"></div></div><div style="font-size:11px;font-weight:700">${r.count.toLocaleString('fr-FR')} <span style="color:var(--gris3);font-weight:400">${pct} %</span></div></div>`;
   }).join('');
 
-  const chart1 = `<div style="margin-bottom:20px"><div style="font-size:12px;font-weight:700;color:var(--gris4,#374151);margin-bottom:8px">Total par ${escapeHtml(shortLabel1)}</div><div style="display:grid;gap:5px;max-width:560px">${bars1}</div></div>`;
-  const chart2 = `<div><div style="font-size:12px;font-weight:700;color:var(--gris4,#374151);margin-bottom:8px">Total par ${escapeHtml(shortLabel2)}</div><div style="display:grid;gap:5px;max-width:560px">${bars2}</div></div>`;
+  const chart1 = `<div style="margin-bottom:20px"><div style="font-size:12px;font-weight:700;color:var(--gris4,#374151);margin-bottom:8px">${escapeHtml(group1Title)}</div><div style="display:grid;gap:5px;max-width:560px">${bars1}</div></div>`;
+  const chart2 = `<div><div style="font-size:12px;font-weight:700;color:var(--gris4,#374151);margin-bottom:8px">${escapeHtml(group2Title)}</div><div style="display:grid;gap:5px;max-width:560px">${bars2}</div></div>`;
 
   return `<div class="de-chart-export-wrap" style="margin:10px 0">${chart1}${chart2}${_chartExportBtn('graphique_pivot.png')}</div>`;
 }
