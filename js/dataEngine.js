@@ -872,10 +872,19 @@ function renderCurrentChartExecution(plan) {
     return { kind: 'compare', plan: comparePlan, result: prev.result, text: prev.text, html };
   }
   if (prev.kind === 'group_by' || prev.kind === 'top') {
-    const rows = prev.result?.rows || [];
     const clonedPlan = { ...(prev.plan || {}), renderChart: true, chartType: isPieChartRequest(plan.question || '') ? 'pie' : (prev.plan?.chartType || 'bar') };
     const html = renderDataEngineResultHtml(prev.plan?.tool || prev.kind, clonedPlan, prev.result);
     return { kind: prev.kind, plan: clonedPlan, result: prev.result, text: prev.text, html };
+  }
+  // Branche pivot : graphique sur les totaux par ligne (colonne de gauche)
+  if (prev.kind === 'pivot') {
+    const matrix = prev.result?.matrix || [];
+    const total = prev.result?.total || 0;
+    const rows = matrix.map(r => ({ value: r.value, count: r.total, pct: total ? r.total / total * 100 : 0 }));
+    const clonedPlan = { ...(prev.plan || {}), tool: 'group_by', targetCol: prev.plan?.targetCol || '', renderChart: true, chartType: isPieChartRequest(plan.question || '') ? 'pie' : 'bar' };
+    const result = { total, rows, filled: rows.length, distinct: rows.length };
+    const html = renderDataEngineResultHtml('group_by', clonedPlan, result);
+    return { kind: 'group_by', plan: clonedPlan, result, text: prev.text, html };
   }
   // Si le dernier résultat n'est pas graphiquable, produire une répartition par la dernière dimension connue.
   const fallbackCol = prev.plan?.targetCol || 'Série de la Classe';
@@ -1430,7 +1439,7 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     const rowCol = plan.targetCol || plan.mentionedCols?.[0];
     const colCol = plan.targetCol2 || plan.mentionedCols?.find(c => c !== rowCol);
     if (!rowCol || !colCol) return null;
-    const pivot = pivotRows(rows, rowCol, colCol, 12, 5);
+    const pivot = pivotRows(rows, rowCol, colCol, 12, 99);
     const exec = {
       kind: 'pivot',
       plan: { ...plan, targetCol: rowCol, targetCol2: colCol },
@@ -1619,7 +1628,7 @@ function renderDataEngineResultHtml(tool, plan, result) {
     const clearTitle = `${_shortColName(plan.targetCol)} × ${_shortColName(plan.targetCol2)}`;
     // width:auto (pas 100%) : laisse la table prendre sa largeur naturelle
     // et le overflow:auto du container gère le scroll horizontal
-    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p><strong>${total.toLocaleString('fr-FR')}</strong> lignes retenues. Croisement <strong>${escapeHtml(plan.targetCol)}</strong> × <strong>${escapeHtml(plan.targetCol2)}</strong>. Top ${cols.length} valeurs affichées.</p><div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--gris1);border-radius:8px"><table style="border-collapse:collapse;font-size:12px;width:auto;min-width:100%"><thead style="background:var(--gris0)">${header}</thead><tbody>${body}${foot}</tbody></table></div>${filtersHtml}${debug}`;
+    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p><strong>${total.toLocaleString('fr-FR')}</strong> lignes retenues. Croisement <strong>${escapeHtml(plan.targetCol)}</strong> × <strong>${escapeHtml(plan.targetCol2)}</strong>.</p><div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--gris1);border-radius:8px"><table style="border-collapse:collapse;font-size:12px;width:auto;min-width:100%"><thead style="background:var(--gris0)">${header}</thead><tbody>${body}${foot}</tbody></table></div>${filtersHtml}${debug}`;
   }
   if (tool === 'stats') {
     const fmt = v => v === null || v === undefined ? '—' : Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 2 });

@@ -14,12 +14,63 @@ let sessions = [];
 let currentSessionId = null;
 let sessionsSaveTimer = null;
 const INFOGRAPH_THEMES = [
-  { id: 'bordeaux', label: 'Bordeaux', accent: '#c1440e', secondary: '#1a3a5c' },
-  { id: 'ocean',    label: 'Océan',    accent: '#0369a1', secondary: '#164e63' },
-  { id: 'foret',    label: 'Forêt',    accent: '#16a34a', secondary: '#14532d' },
-  { id: 'nuit',     label: 'Nuit',     accent: '#7c3aed', secondary: '#1e1b4b' },
+  // Charte graphique de l'État — juin 2021
+  // Couleurs officielles : Bleu France #003189 (Pantone 286 C), Rouge Marianne #E1000F
+  // Police : Marianne (https://gouvfr.atlassian.net/wiki/spaces/DB/pages/223019527/Marianne)
+  {
+    id: 'bleu-france',
+    label: 'Bleu France',
+    accent: '#003189',    // Bleu France officiel (Pantone 286 C)
+    secondary: '#E1000F', // Rouge Marianne
+    bg: '#f0f4fb',        // Fond bleu très clair
+    hero: '#003189',      // Fond héro bleu institutionnel
+    soft: '#e0eaf8',      // Surface douce
+    text: '#1a1a2e',      // Texte foncé
+    muted: '#4a5568',
+    line: '#c8d8f0',
+    card: '#ffffff',
+  },
+  {
+    id: 'rouge-marianne',
+    label: 'Rouge Marianne',
+    accent: '#E1000F',    // Rouge Marianne
+    secondary: '#003189', // Bleu France
+    bg: '#fff5f5',
+    hero: '#c9000e',      // Rouge légèrement assombri pour le héro
+    soft: '#fde8e8',
+    text: '#1a0000',
+    muted: '#6b4a4a',
+    line: '#f0c8c8',
+    card: '#ffffff',
+  },
+  {
+    id: 'clair',
+    label: 'Clair',
+    accent: '#003189',    // Bleu France
+    secondary: '#6b7280', // Gris neutre
+    bg: '#f7f8fa',        // Fond très clair
+    hero: '#1f2937',      // Fond héro gris anthracite sobre
+    soft: '#eef0f3',
+    text: '#1f2937',
+    muted: '#6b7280',
+    line: '#e2e8f0',
+    card: '#ffffff',
+  },
+  {
+    id: 'nuit',
+    label: 'Nuit',
+    accent: '#7bafd4',    // Bleu France pastel (sur fond sombre)
+    secondary: '#f4a0a0', // Rouge Marianne pastel
+    bg: '#0f172a',        // Fond nuit très sombre
+    hero: '#0a0f1e',      // Fond héro encore plus sombre
+    soft: '#1e2a3a',
+    text: '#e8edf5',
+    muted: '#94a3b8',
+    line: '#1e3a5f',
+    card: '#162032',
+  },
 ];
-let _icState = { blocks: [], theme: 'bordeaux', dragSrcIdx: null };
+let _icState = { blocks: [], theme: 'bleu-france', dragSrcIdx: null };
 
 let albertConfig = {
   key: '',
