@@ -310,6 +310,12 @@ function renderStacked(groups) {
   groups = Array.isArray(groups) ? groups.slice(0, 5) : [];
   if (!groups.length) return '';
   const palette = ['var(--accent)', 'var(--secondary)', '#4f7c3a', '#d4a017', '#8b4513', '#6b6560'];
+  // Couleur fixe (gris neutre) pour le segment résiduel "Autres" : il ne doit jamais
+  // reprendre une couleur de la palette cyclique, sinon il se confond visuellement
+  // avec le segment qui occupe cette position dans le cycle (ex. PCSI, 1er segment,
+  // même teinte que "Autres" ajouté en 7e position sur une palette de 6 couleurs).
+  const OTHER_COLOR = '#b7bcc4';
+  const segColor = (seg, i) => seg && seg._isOtherResidual ? OTHER_COLOR : palette[i % palette.length];
   return `<div class="stacked-list">${groups.map(g => {
     let segments = Array.isArray(g.segments) ? g.segments.slice(0, 6) : [];
     let values = segments.map(x => Number(x.value) || parseInfographicNumber(x.display || x.percent) || 0);
@@ -332,7 +338,7 @@ function renderStacked(groups) {
           const residual = realTotal - sum;
           const residualPct = residual / realTotal * 100;
           if (residualPct >= INFOGRAPHIC_STACKED_OTHER_MIN_PCT) {
-            segments = segments.concat([{ label: INFOGRAPHIC_STACKED_OTHER_LABEL, value: residual }]);
+            segments = segments.concat([{ label: INFOGRAPHIC_STACKED_OTHER_LABEL, value: residual, _isOtherResidual: true }]);
             values = values.concat([residual]);
             sum = realTotal;
           }
@@ -358,9 +364,9 @@ function renderStacked(groups) {
       <div class="stacked-title">${escapeHtml(g.label || '')}</div>
       <div class="stacked-bar">${segments.map((seg, i) => {
         const w = pcts[i];
-        return `<div class="stacked-seg" style="width:${w.toFixed(1)}%;background:${palette[i % palette.length]}">${w >= 10 ? escapeHtml(seg.shortLabel || seg.label || '') : ''}</div>`;
+        return `<div class="stacked-seg" style="width:${w.toFixed(1)}%;background:${segColor(seg, i)}">${w >= 10 ? escapeHtml(seg.shortLabel || seg.label || '') : ''}</div>`;
       }).join('')}</div>
-      <div class="stacked-legend">${segments.map((seg, i) => `<span><i style="background:${palette[i % palette.length]}"></i>${escapeHtml(seg.label || '')} ${pcts[i].toFixed(1).replace('.', ',')} %</span>`).join('')}</div>
+      <div class="stacked-legend">${segments.map((seg, i) => `<span><i style="background:${segColor(seg, i)}"></i>${escapeHtml(seg.label || '')} ${pcts[i].toFixed(1).replace('.', ',')} %</span>`).join('')}</div>
     </div>`;
   }).join('')}</div>`;
 }
@@ -432,6 +438,28 @@ function renderSection(section, idx) {
 
 function renderAdaptiveInfographicHtml(spec, question) {
   spec = normalizeInfographicSpec(spec, question);
+  // Filet de sécurité (pas un correctif automatique — cf. discussion) : on trace,
+  // sans rien changer à l'affichage, les cas où une section "stacked" apparaît sans
+  // section ranking/bars correspondante juste avant, ou avec un périmètre ("scope")
+  // différent de celle qui la précède. Un vrai doublon barres+stacked structurellement
+  // fusionné ou renommé par Albert reste un choix éditorial qu'on ne corrige pas ici
+  // (le risque de "deviner" un titre serait pire que le problème), mais au moins la
+  // trace permet de vérifier la fréquence du phénomène plutôt que de le découvrir par
+  // hasard en comparant deux captures d'écran.
+  spec.sections.forEach((s, i) => {
+    if ((s.type || '') !== 'stacked') return;
+    const prev = spec.sections[i - 1];
+    const prevIsRankingOrBars = prev && (prev.type === 'ranking' || prev.type === 'bars');
+    if (!prevIsRankingOrBars) {
+      console.warn('[infographic] section stacked sans ranking/bars juste avant', { index: i, title: s.title });
+      return;
+    }
+    const scopeA = (prev.scope || prev.perimeter || '').trim();
+    const scopeB = (s.scope || s.perimeter || '').trim();
+    if (scopeA && scopeB && scopeA !== scopeB) {
+      console.warn('[infographic] scope divergent entre section bars et section stacked adjacentes', { titleBars: prev.title, scopeBars: scopeA, titleStacked: s.title, scopeStacked: scopeB });
+    }
+  });
   const sections = spec.sections.map((s, i) => renderSection(s, i)).join('\n');
   const metrics = renderMetricCards(spec.metrics);
   const narrative = Array.isArray(spec.narrative) ? spec.narrative : (spec.narrative ? [spec.narrative] : []);
@@ -817,6 +845,7 @@ Règles d'adaptation éditoriale :
 - Utilise au plus 7 sections, chacune utile et non redondante.
 - Choisis le composant adapté : ranking/barres pour top catégories, comparison pour deux groupes, stacked pour répartitions qui totalisent 100 %, insights pour interprétation.
 - Pour chaque groupe d'une section "stacked", renseigne "total" avec l'effectif réel de la population de ce groupe (ex. 175 candidats), même si tu ne détailles pas tous les sous-effectifs en segments. Le widget calcule lui-même, si besoin, un segment résiduel pour les effectifs non détaillés : ne l'ajoute pas toi-même, ne l'omets pas non plus, indique juste le vrai total.
+- Quand une répartition (ex. par filière) apparaît à la fois en "ranking"/"bars" et en "stacked" : ce sont deux vues du même périmètre, jamais une fusion ou un remplacement. Garde les DEUX sections, dans le même ordre d'une génération à l'autre, avec EXACTEMENT le même texte de "scope" sur les deux (ex. "Périmètre : zone Pays Basque" partout, jamais "zone Pays Basque" sur l'une et "ensemble des candidats" sur l'autre pour les mêmes chiffres).
 - Évite les tableaux sauf si c'est indispensable ; préfère ranking, cartes ou insights. Ne termine jamais par un tableau : termine par des insights/conclusion. Exception : si le brief contient un TABLEAU EN CASCADE À INTÉGRER OBLIGATOIREMENT, crée une section dédiée cascade/tableau hiérarchique.
 - Pour les barres/rankings, fournis TOUJOURS une valeur numérique d'effectif dans "value". Le libellé affiché peut contenir "count" et "percent", mais "value" doit rester un nombre pur.
 - INTERDIT ABSOLU : Ne jamais utiliser de label générique comme "Item 1", "Item 2", "Item 3", "Catégorie X", "Label", "Valeur" ou tout autre placeholder. Chaque label doit être extrait LITTÉRALEMENT du contexte fourni (ex : "Bordeaux", "Toulouse", "CPGE - CPES", "L1"). Si tu ne trouves pas de label dans le contexte, omets l'item entier.
