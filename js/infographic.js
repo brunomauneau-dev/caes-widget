@@ -9,6 +9,19 @@
    calculs locaux Grist/Excel et une identité graphique cohérente. */
 let generatedInfographics = [];
 
+// ── Config du segment résiduel "Autres" pour les sections stacked ──
+// Voir renderStacked() : quand la somme des segments fournis par Albert
+// n'atteint pas le total réel de la population, on complète nous-mêmes
+// avec un segment résiduel plutôt que de compter sur Albert pour y penser
+// (une génération sur deux, il l'ajoutait spontanément ; l'autre non — d'où
+// des pourcentages incohérents entre sections stacked et bars sur les mêmes
+// données). Le libellé est ici un paramètre unique et modifiable, pas codé
+// en dur dans la fonction de rendu.
+const INFOGRAPHIC_STACKED_OTHER_LABEL = 'Autres';
+// En dessous de ce seuil (en % du total réel), l'écart est considéré comme
+// du bruit d'arrondi et on n'ajoute pas de segment résiduel visuel.
+const INFOGRAPHIC_STACKED_OTHER_MIN_PCT = 1;
+
 function isInfographicRequest(question) {
   const q = normalizeText(question);
   return /infographie|dataviz|visualisation|page html|rapport visuel|dashboard|tableau de bord|mise en forme visuelle|comme claude|artifact|visuel/.test(q);
@@ -298,12 +311,41 @@ function renderStacked(groups) {
   if (!groups.length) return '';
   const palette = ['var(--accent)', 'var(--secondary)', '#4f7c3a', '#d4a017', '#8b4513', '#6b6560'];
   return `<div class="stacked-list">${groups.map(g => {
-    const segments = Array.isArray(g.segments) ? g.segments.slice(0, 6) : [];
-    const values = segments.map(x => Number(x.value) || parseInfographicNumber(x.display || x.percent) || 0);
-    const sum = values.reduce((s, x) => s + x, 0);
+    let segments = Array.isArray(g.segments) ? g.segments.slice(0, 6) : [];
+    let values = segments.map(x => Number(x.value) || parseInfographicNumber(x.display || x.percent) || 0);
+    let sum = values.reduce((s, x) => s + x, 0);
     // Si Albert fournit déjà des pourcentages (somme proche de 100), on les utilise tels quels.
     // Sinon, on normalise sur la somme des effectifs.
     const valuesArePercents = sum > 85 && sum <= 105 && values.every(v => v >= 0 && v <= 100);
+
+    // Segment résiduel "Autres" : si Albert a transmis le total réel de la population
+    // du groupe (g.total, ex. 175 candidats) et que la somme des segments affichés ne
+    // l'atteint pas, on complète nous-mêmes en code — jamais laissé à l'initiative du
+    // modèle. C'est ce qui garantit qu'un même item (ex. PCSI) affiche le même % dans
+    // une section "bars" (sur le total réel) et une section "stacked" juste à côté
+    // (auparavant calculé sur la seule somme des segments affichés, d'où l'écart
+    // 26,3 % / 33,1 % observé sur les mêmes données).
+    if (!valuesArePercents) {
+      const realTotal = parseInfographicNumber(g.total ?? g.n ?? g.count);
+      if (realTotal && isFinite(realTotal) && realTotal > 0) {
+        if (realTotal >= sum) {
+          const residual = realTotal - sum;
+          const residualPct = residual / realTotal * 100;
+          if (residualPct >= INFOGRAPHIC_STACKED_OTHER_MIN_PCT) {
+            segments = segments.concat([{ label: INFOGRAPHIC_STACKED_OTHER_LABEL, value: residual }]);
+            values = values.concat([residual]);
+            sum = realTotal;
+          }
+        } else {
+          // Incohérence : le total annoncé par Albert est plus petit que la somme des
+          // segments qu'il a lui-même fournis. On ne casse pas l'affichage — on retombe
+          // sur la normalisation existante (sur la somme des segments) — mais on trace
+          // l'anomalie pour qu'elle ne reste pas invisible comme le bug initial.
+          console.warn('[infographic] stacked: total groupe incohérent (< somme des segments)', { label: g.label, total: realTotal, sum });
+        }
+      }
+    }
+
     const total = valuesArePercents ? 100 : (sum || 1);
     // Le pourcentage normalisé (utilisé pour la largeur ET la légende) — calculé une seule
     // fois ici, jamais repris du texte libre "display"/"percent" fourni par Albert. Avant ce
@@ -754,7 +796,7 @@ Schéma attendu :
     {"type":"ranking", "title":"...", "subtitle":"...", "items":[{"label":"...", "count":"...", "value":123, "percent":"..."}]},
     {"type":"bars", "title":"...", "items":[...]},
     {"type":"comparison", "title":"...", "items":[{"label":"...", "left":"...", "right":"...", "delta":"..."}]},
-    {"type":"stacked", "title":"...", "groups":[{"label":"...", "segments":[{"label":"...", "value":60, "display":"60 %"}]}]},
+    {"type":"stacked", "title":"...", "groups":[{"label":"...", "total":123, "segments":[{"label":"...", "value":60, "display":"60 %"}]}]},
     {"type":"insights", "title":"...", "items":[{"title":"...", "text":"..."}]},
     {"type":"table", "title":"...", "headers":[...], "rows":[...]},
     {"type":"text", "title":"...", "text":"..."},
@@ -774,6 +816,7 @@ Règles d'adaptation éditoriale :
 - Mets 3 à 6 grands KPI en hero, choisis pour ouvrir l'histoire.
 - Utilise au plus 7 sections, chacune utile et non redondante.
 - Choisis le composant adapté : ranking/barres pour top catégories, comparison pour deux groupes, stacked pour répartitions qui totalisent 100 %, insights pour interprétation.
+- Pour chaque groupe d'une section "stacked", renseigne "total" avec l'effectif réel de la population de ce groupe (ex. 175 candidats), même si tu ne détailles pas tous les sous-effectifs en segments. Le widget calcule lui-même, si besoin, un segment résiduel pour les effectifs non détaillés : ne l'ajoute pas toi-même, ne l'omets pas non plus, indique juste le vrai total.
 - Évite les tableaux sauf si c'est indispensable ; préfère ranking, cartes ou insights. Ne termine jamais par un tableau : termine par des insights/conclusion. Exception : si le brief contient un TABLEAU EN CASCADE À INTÉGRER OBLIGATOIREMENT, crée une section dédiée cascade/tableau hiérarchique.
 - Pour les barres/rankings, fournis TOUJOURS une valeur numérique d'effectif dans "value". Le libellé affiché peut contenir "count" et "percent", mais "value" doit rester un nombre pur.
 - INTERDIT ABSOLU : Ne jamais utiliser de label générique comme "Item 1", "Item 2", "Item 3", "Catégorie X", "Label", "Valeur" ou tout autre placeholder. Chaque label doit être extrait LITTÉRALEMENT du contexte fourni (ex : "Bordeaux", "Toulouse", "CPGE - CPES", "L1"). Si tu ne trouves pas de label dans le contexte, omets l'item entier.
