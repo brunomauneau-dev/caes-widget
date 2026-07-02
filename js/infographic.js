@@ -887,8 +887,10 @@ async function generateInfographicWithAlbert(question, localAnalysis, dataExecut
   // sources pouvaient diverger du résultat Data Engine sur le même indicateur et produisaient
   // des infographies non reproductibles selon le point d'entrée (bloc vs compositeur).
   const context = deContext + buildContext(localAnalysis, { suppressGlobalStats: !!deContext });
-  // Thème par défaut du bouton bloc-unique : Bleu France (pas de sélecteur de thème
-  // sur ce point d'entrée) — même prompt que le compositeur, cf. buildInfographicSpecPrompt.
+  // Thème par défaut du bouton bloc-unique : Bleu France. La spec est désormais
+  // retournée en plus du HTML (voir addInfographicMessage) pour que ce point d'entrée
+  // bénéficie des mêmes boutons post-génération (thème, titres, recomposer) que le
+  // compositeur multi-blocs, plutôt que d'être volontairement privé de ces réglages.
   const specPrompt = buildInfographicSpecPrompt(question, context, null);
 
   const response = await fetch(albertConfig.endpoint, {
@@ -917,6 +919,6 @@ async function generateInfographicWithAlbert(question, localAnalysis, dataExecut
     console.warn('JSON infographie invalide, fallback local:', e, raw);
     spec = buildFallbackInfographicSpec(question, localAnalysis);
   }
-  return renderAdaptiveInfographicHtml(spec, question);
+  return { html: renderAdaptiveInfographicHtml(spec, question), spec };
 }
 

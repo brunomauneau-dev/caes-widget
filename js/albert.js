@@ -859,9 +859,9 @@ async function sendMessage() {
       const _lastExec = typeof getDataEngineState === 'function' ? getDataEngineState().lastExecution : null;
       const _infExec = dataExecution ||
         (_isExecCompatibleWithQuestion(_lastExec, question) ? _lastExec : null);
-      const html = await generateInfographicWithAlbert(question, localAnalysis, _infExec);
+      const { html, spec } = await generateInfographicWithAlbert(question, localAnalysis, _infExec);
       removeLoadingMessage(loadingId);
-      addInfographicMessage(html, 'Infographie Albert');
+      addInfographicMessage(html, 'Infographie Albert', { spec });
       chatHistory.push({ role: 'user', content: question });
       return;
     } catch (e) {
