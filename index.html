@@ -776,6 +776,15 @@
   .ic-retheme-btn { display:inline-flex; align-items:center; gap:5px; padding:4px 9px; border-radius:6px; border:1px solid var(--gris2); background:var(--blanc); font-size:11px; font-weight:700; cursor:pointer; color:var(--gris4); transition:all .1s; }
   .ic-retheme-btn:hover { border-color:var(--albert); color:var(--albert); }
 
+  /* ── Impression PDF ciblée sur un seul bloc (bouton "🖨 PDF") ──
+     #de-print-root reçoit une copie du bloc à imprimer ; en mode print,
+     tout le reste de la page est masqué pour n'imprimer que ce bloc. */
+  #de-print-root { display: none; }
+  @media print {
+    body.de-printing > *:not(#de-print-root) { display: none !important; }
+    body.de-printing #de-print-root { display: block !important; padding: 24px; }
+  }
+
 </style>
 </head>
 <body>
@@ -1085,6 +1094,8 @@
   </div>
 </div>
 
+<!-- ═══════════════ CONTENEUR D'IMPRESSION PDF CIBLÉE (bloc unique) ═══════════════ -->
+<div id="de-print-root"></div>
 
 </body>
 </html>
