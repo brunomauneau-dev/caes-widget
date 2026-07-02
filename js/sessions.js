@@ -293,8 +293,8 @@ function buildCopilotActionBar(bubble, dataExecution = null, question = '') {
     btn.disabled = true;
     try {
       const localAnalysis = (typeof executeLocalDataQuery === 'function') ? executeLocalDataQuery(question, question) : {};
-      const html = await generateInfographicWithAlbert(question || 'Infographie de ce résultat', localAnalysis, dataExecution);
-      addInfographicMessage(html, 'Infographie de ce bloc');
+      const { html, spec } = await generateInfographicWithAlbert(question || 'Infographie de ce résultat', localAnalysis, dataExecution);
+      addInfographicMessage(html, 'Infographie de ce bloc', { spec });
     } catch (e) {
       addMessage('assistant', `<p style="color:var(--rouge)"><strong>Erreur pendant la génération de l'infographie</strong><br>${e.message}</p>`);
     } finally {
