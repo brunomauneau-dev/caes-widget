@@ -322,6 +322,10 @@ function pctFr(n, d, digits = 1) {
   return (n / d * 100).toFixed(digits).replace('.', ',') + ' %';
 }
 
+function isNumericKey(k) {
+  return /^-?\d+([.,]\d+)?$/.test(String(k).trim());
+}
+
 function topCountsForRows(rows, col, max = 12) {
   const counts = new Map();
   let filled = 0;
@@ -332,10 +336,42 @@ function topCountsForRows(rows, col, max = 12) {
     const key = String(v).trim();
     counts.set(key, (counts.get(key) || 0) + 1);
   });
-  const top = [...counts.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'fr'))
-    .slice(0, max)
-    .map(([value, count]) => ({ value, count, pct: filled ? count / filled * 100 : 0 }));
+
+  const distinctKeys = [...counts.keys()];
+  // PR fix : une colonne numérique (ex. "Nb de voeux confirmés") doit être
+  // triée par valeur croissante pour représenter une distribution lisible.
+  // Le tri par fréquence décroissante n'a de sens que pour des colonnes
+  // catégorielles (établissements, filières, etc.).
+  const numericRatio = distinctKeys.length
+    ? distinctKeys.filter(isNumericKey).length / distinctKeys.length
+    : 0;
+  const isNumericCol = numericRatio > 0.9;
+
+  let entries = [...counts.entries()];
+
+  if (isNumericCol) {
+    entries.sort((a, b) => parseFloat(a[0].replace(',', '.')) - parseFloat(b[0].replace(',', '.')));
+
+    if (entries.length > max && max > 1) {
+      // Trop de valeurs distinctes pour tenir dans l'affichage : on regroupe
+      // la fin de la distribution (la longue traîne) en une tranche unique,
+      // au lieu de tronquer arbitrairement les valeurs les plus élevées
+      // (ce qui masquait par exemple les gros scores de voeux confirmés).
+      const keep = max - 1;
+      const head = entries.slice(0, keep);
+      const tail = entries.slice(keep);
+      const tailCount = tail.reduce((s, [, c]) => s + c, 0);
+      const tailFrom = tail[0][0];
+      const tailTo = tail[tail.length - 1][0];
+      const tailLabel = tailFrom === tailTo ? `${tailFrom}` : `${tailFrom}–${tailTo}`;
+      entries = [...head, [`${tailLabel} et plus`, tailCount]];
+    }
+  } else {
+    entries.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'fr'));
+    entries = entries.slice(0, max);
+  }
+
+  const top = entries.map(([value, count]) => ({ value, count, pct: filled ? count / filled * 100 : 0 }));
   return { filled, distinct: counts.size, top };
 }
 

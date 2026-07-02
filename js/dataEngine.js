@@ -513,10 +513,25 @@ function _chartExportBtn(filename) {
   return `<button onclick="exportChartAsPng(this,'${filename}')" style="margin-top:8px;border:1px solid var(--gris2,#e5e7eb);background:#fff;border-radius:7px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;color:var(--gris3,#6b7280)" title="Exporter le graphique en PNG">📷 Exporter l'image</button>`;
 }
 
+// PR fix : au lieu de tronquer brutalement à N lignes (ce qui, combiné au
+// nouveau tri croissant des colonnes numériques, aurait simplement déplacé
+// le problème en coupant la fin de la distribution), on regroupe la queue
+// dans une ligne "Autres" qui conserve le total exact.
+function capRowsForDisplay(rows, cap) {
+  if (!rows || rows.length <= cap) return rows || [];
+  const keep = Math.max(1, cap - 1);
+  const head = rows.slice(0, keep);
+  const tail = rows.slice(keep);
+  const tailCount = tail.reduce((s, r) => s + (r.count || 0), 0);
+  const tailPct = tail.reduce((s, r) => s + (r.pct || 0), 0);
+  return [...head, { value: 'Autres', count: tailCount, pct: tailPct }];
+}
+
 function renderMiniBarChart(rows, total, filename) {
   if (!rows || !rows.length) return '';
-  const max = Math.max(...rows.map(r => r.count || 0), 1);
-  const bars = rows.slice(0,12).map(r => {
+  const displayRows = capRowsForDisplay(rows, 12);
+  const max = Math.max(...displayRows.map(r => r.count || 0), 1);
+  const bars = displayRows.map(r => {
     const w = Math.max(2, Math.round((r.count || 0) / max * 100));
     const pct = total ? ((r.count || 0) / total * 100).toFixed(1) : '0';
     return `<div data-bar-label="${escapeHtml(r.value)}" data-bar-value="${pct}" data-bar-count="${(r.count||0).toLocaleString('fr-FR')}" style="display:grid;grid-template-columns:minmax(120px,220px) 1fr auto;gap:8px;align-items:center"><div style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(r.value)}">${escapeHtml(r.value)}</div><div style="height:12px;background:var(--gris1);border-radius:6px;overflow:hidden"><div style="height:12px;width:${w}%;background:var(--albert);border-radius:6px"></div></div><div style="font-size:11px;font-weight:700">${(r.count || 0).toLocaleString('fr-FR')}</div></div>`;
