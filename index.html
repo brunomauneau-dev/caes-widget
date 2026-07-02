@@ -777,12 +777,59 @@
   .ic-retheme-btn:hover { border-color:var(--albert); color:var(--albert); }
 
   /* ── Impression PDF ciblée sur un seul bloc (bouton "🖨 PDF") ──
-     #de-print-root reçoit une copie du bloc à imprimer ; en mode print,
-     tout le reste de la page est masqué pour n'imprimer que ce bloc. */
+     #de-print-root reçoit une copie nettoyée du bloc à imprimer (boutons et
+     détails techniques retirés en JS) ; en mode print, tout le reste de la
+     page est masqué pour n'imprimer que ce bloc, avec une mise en page propre. */
   #de-print-root { display: none; }
   @media print {
+    @page { margin: 16mm 14mm; }
     body.de-printing > *:not(#de-print-root) { display: none !important; }
-    body.de-printing #de-print-root { display: block !important; padding: 24px; }
+    body.de-printing {
+      background: var(--blanc) !important;
+      height: auto !important;
+      overflow: visible !important;
+    }
+    body.de-printing #de-print-root {
+      display: block !important;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      color: var(--texte);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    /* Force l'impression des couleurs (barres de graphique, badges, etc.) */
+    body.de-printing #de-print-root,
+    body.de-printing #de-print-root * {
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+      color-adjust: exact !important;
+    }
+    body.de-printing #de-print-root .de-print-header {
+      display: flex; align-items: baseline; justify-content: space-between;
+      gap: 12px; margin-bottom: 16px; padding-bottom: 10px;
+      border-bottom: 2px solid var(--albert2);
+    }
+    body.de-printing #de-print-root .de-print-header .de-print-brand {
+      font-size: 11px; font-weight: 700; color: var(--albert); letter-spacing: .02em;
+    }
+    body.de-printing #de-print-root .de-print-header .de-print-date {
+      font-size: 10px; color: var(--gris3);
+    }
+    body.de-printing #de-print-root h4 {
+      font-size: 15px; font-weight: 700; color: var(--albert); margin-bottom: 12px;
+    }
+    body.de-printing #de-print-root p { margin-bottom: 7px; }
+    body.de-printing #de-print-root ul { margin: 0 0 10px 18px; }
+    body.de-printing #de-print-root li { margin-bottom: 3px; }
+    body.de-printing #de-print-root table { border-collapse: collapse; width: 100%; }
+    body.de-printing #de-print-root th,
+    body.de-printing #de-print-root td { border: 1px solid var(--gris2); padding: 5px 8px; }
+    /* Interactif ou technique : inutile sur papier */
+    body.de-printing #de-print-root button,
+    body.de-printing #de-print-root details.msg-sources,
+    body.de-printing #de-print-root .de-block-title-edit-btn,
+    body.de-printing #de-print-root .de-block-title-reset-btn {
+      display: none !important;
+    }
   }
 
 </style>
