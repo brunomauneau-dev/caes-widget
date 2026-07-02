@@ -637,8 +637,15 @@ function inferMeasureIntent(question) {
     if ((_isF(d1) && _isA(d2)) || (_isA(d1) && _isF(d2)) || (_isF(d1) && _isS(d2)) || (_isS(d1) && _isF(d2))) return 'pivot';
   }
   if (/moyen|moyenne|median|m[eé]diane|minimum|maximum|\bmin\b|\bmax\b/.test(q)) return 'stats';
+  // Total/somme d'une grandeur numérique connue (ex: « combien de vœux confirmés par les basques »)
+  // — pas une demande de répartition, malgré le "par" ou le "combien".
+  if (/voeu|vœu|voeux|vœux/.test(q) && /confirm/.test(q) && !/repartition|r[eé]partition|ventilation/.test(q)) return 'stats';
   if (/top|classement|principales?|plus frequentes?|plus fréquentes?|les plus/.test(q)) return 'top';
-  if (/repartition|r[eé]partition|ventilation|par |groupe|group[eé]|pourcentage|proportion/.test(q)) return 'group_by';
+  // "par " ne déclenche une répartition que s'il n'est pas immédiatement suivi d'une simple
+  // mention de population/filtre (basques, boursiers, apprentis...) — sinon "combien de X par les
+  // basques" est mal interprété comme "réparti par la dimension basques".
+  const parTriggersGroupBy = /\bpar\s+(?!(?:les\s+|des\s+)?(?:basques?|non[- ]?basques?|boursiers?|non[- ]?boursiers?|apprentis?|neo[- ]?bacheliers?|filles?|gar[cç]ons?)\b)/.test(q);
+  if (/repartition|r[eé]partition|ventilation|groupe|group[eé]|pourcentage|proportion/.test(q) || parTriggersGroupBy) return 'group_by';
   if (/combien|nombre|effectif|compte|compter|total/.test(q)) return 'count_rows';
   if (isFollowUpQuestion(question)) return getDataEngineState().lastPlan?.tool || 'count_rows';
   if (isFilterOnlyFollowUp(question) && getDataEngineState().lastPlan) return getDataEngineState().lastPlan.tool || 'count_rows';
@@ -660,45 +667,17 @@ function columnMentionScore(col, q) {
     [/departement|d[eé]partement/i, /d[eé]partement/i, 40],
     [/formation|fili[eè]re|specialite|sp[eé]cialit[eé]|mention|bts|but|licence|cpge|l1/i, /formation|fili[eè]re|sp[eé]cialit[eé]|mention|groupe/i, 40],
     [/admis|accept|favorable|proposition/i, /favorable|accept|proposition|admission/i, 45],
-    [/voeu|vœu|voeux|vœux/i, /voeu|vœu|confirm|class/i, 35],
+    [/voeu|vœu|voeux|vœux/i, /voeu|vœu|confirm/i, 35],
     [/sexe|femme|homme|feminin|masculin/i, /sexe/i, 40]
   ];
   aliases.forEach(([qre, cre, pts]) => { if (qre.test(q) && cre.test(col)) score += pts; });
   return score;
 }
 
-// ── RÈGLE D'OR — AUCUNE DONNÉE PERSONNELLE EXPLOITÉE ──
-// Un identifiant Parcoursup (numéro de dossier, numéro Parcoursup, INE...) ne
-// désigne qu'un seul candidat : il n'a aucun sens statistique (une "moyenne de
-// numéros de dossier" n'existe pas) et sa manipulation est une donnée à
-// caractère personnel. Ces colonnes ne doivent JAMAIS être retenues comme
-// colonne d'analyse (stats, group_by, top, pivot, compare), quelle que soit la
-// fonction qui les a proposées. Point d'application principal :
-// finalSanitizeAnalysisPlan(), appelé pour tout plan avant exécution.
-const PERSONAL_ID_COLUMN_PATTERNS = [
-  /num[eé]ro\s*(de\s*)?dossier/i,
-  /n[°ºo]\s*dossier/i,
-  /num[eé]ro\s*parcoursup/i,
-  /n[°ºo]\s*parcoursup/i,
-  /identifiant/i,
-  /\bine\b/i,
-  /id[_\s-]?candidat/i,
-  /id[_\s-]?dossier/i,
-  /id[_\s-]?parcoursup/i,
-  /^id$/i
-];
-
-function isPersonalIdentifierColumn(col) {
-  const name = String(col || '').trim();
-  if (!name) return false;
-  return PERSONAL_ID_COLUMN_PATTERNS.some(re => re.test(name));
-}
-window.isPersonalIdentifierColumn = isPersonalIdentifierColumn;
-
 function findMentionedColumns(headers, question, max = 3) {
   const q = normalizeText(question || '');
   return headers
-    .filter(h => h && !/^(id|manualSort)$/i.test(String(h)) && !isPersonalIdentifierColumn(h))
+    .filter(h => h && !/^(id|manualSort)$/i.test(String(h)))
     .map(h => ({ col: h, score: columnMentionScore(h, q) }))
     .filter(x => x.score > 0)
     .sort((a,b) => b.score - a.score)
@@ -920,18 +899,6 @@ function renderCurrentChartExecution(plan) {
 // d'entraîner des filtres issus de colonnes détectées ou de valeurs exemples.
 function finalSanitizeAnalysisPlan(plan) {
   if (!plan) return plan;
-
-  // RÈGLE D'OR (voir isPersonalIdentifierColumn) — appliquée en premier, avant
-  // toute autre logique, pour garantir qu'aucune colonne d'identifiant
-  // personnel ne peut jamais atteindre un outil d'analyse (stats, group_by,
-  // top, pivot, compare), même si elle a été proposée par le planner externe
-  // ou héritée d'un plan précédent.
-  if (plan.targetCol && isPersonalIdentifierColumn(plan.targetCol)) plan.targetCol = null;
-  if (plan.targetCol2 && isPersonalIdentifierColumn(plan.targetCol2)) plan.targetCol2 = null;
-  if (Array.isArray(plan.mentionedCols)) {
-    plan.mentionedCols = plan.mentionedCols.filter(c => !isPersonalIdentifierColumn(c));
-  }
-
   const q = normalizeText(plan.question || '');
   const state = getDataEngineState();
   const prev = state.lastPlan;
@@ -1490,7 +1457,7 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
       kind: 'stats',
       plan: { ...plan, targetCol: col },
       result: stats,
-      text: `Stats ${col}: moyenne ${stats.avg}`,
+      text: `Stats ${col}: total ${stats.sum}, moyenne ${stats.avg}`,
       html: renderDataEngineResultHtml('stats', { ...plan, targetCol: col }, stats)
     };
     rememberDataEngineExecution(exec);
@@ -1542,7 +1509,7 @@ function numericStats(rows, col) {
 function inferNumericStatsColumn(table, question) {
   const q = normalizeText(question || '');
   const headers = table.headers || Object.keys(table.objects?.[0] || {});
-  const candidates = headers.filter(h => h && !/^(id|manualSort)$/i.test(String(h)) && !isPersonalIdentifierColumn(h)).map(h => {
+  const candidates = headers.filter(h => h && !/^(id|manualSort)$/i.test(String(h))).map(h => {
     const hn = normalizeText(h);
     let score = 0;
     if (/voeu|vœu|voeux|vœux/.test(q) && /voeu|vœu|voeux|vœux/.test(hn)) score += 120;
@@ -1579,7 +1546,7 @@ function dataEngineResultToContext(exec) {
     }
   }
   if (exec.kind === 'stats') {
-    out += `Colonne statistique : ${p.targetCol}\nValeurs numériques : ${exec.result.numericCount}/${exec.result.total}\nMoyenne : ${exec.result.avg} · Médiane : ${exec.result.median} · Min : ${exec.result.min} · Max : ${exec.result.max}\n`;
+    out += `Colonne statistique : ${p.targetCol}\nValeurs numériques : ${exec.result.numericCount}/${exec.result.total}\nTotal : ${exec.result.sum} · Moyenne : ${exec.result.avg} · Médiane : ${exec.result.median} · Min : ${exec.result.min} · Max : ${exec.result.max}\n`;
   }
   if (exec.kind === 'compare') {
     const rows = exec.result?.rows || [];
@@ -1656,7 +1623,7 @@ function renderDataEngineResultHtml(tool, plan, result) {
   if (tool === 'stats') {
     const fmt = v => v === null || v === undefined ? '—' : Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 2 });
     const clearTitle = `Statistiques — ${_shortColName(plan.targetCol)}`;
-    return `${deTitleHtml(clearTitle)}<p>Colonne : <strong>${escapeHtml(plan.targetCol)}</strong></p><ul><li>Valeurs numériques : <strong>${result.numericCount.toLocaleString('fr-FR')}</strong> / ${result.total.toLocaleString('fr-FR')}</li><li>Moyenne : <strong>${fmt(result.avg)}</strong></li><li>Médiane : <strong>${fmt(result.median)}</strong></li><li>Min : <strong>${fmt(result.min)}</strong></li><li>Max : <strong>${fmt(result.max)}</strong></li></ul>${filtersHtml}${debug}`;
+    return `${deTitleHtml(clearTitle)}<p>Colonne : <strong>${escapeHtml(plan.targetCol)}</strong></p><ul><li>Valeurs numériques : <strong>${result.numericCount.toLocaleString('fr-FR')}</strong> / ${result.total.toLocaleString('fr-FR')}</li><li>Total : <strong>${fmt(result.sum)}</strong></li><li>Moyenne : <strong>${fmt(result.avg)}</strong></li><li>Médiane : <strong>${fmt(result.median)}</strong></li><li>Min : <strong>${fmt(result.min)}</strong></li><li>Max : <strong>${fmt(result.max)}</strong></li></ul>${filtersHtml}${debug}`;
   }
   return `${deTitleHtml('Résultat')}${debug}`;
 }
