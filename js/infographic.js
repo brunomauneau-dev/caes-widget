@@ -588,28 +588,63 @@ let _infogCounter = 0;
 window._infogSpecs = window._infogSpecs || {};
 
 function _icBuildTitlesEditorHtml(spec, uid) {
-  const fields = [
+  const baseFields = [
     { id: `ict-${uid}-title`,    label: 'Titre principal',  val: spec.title    || '' },
-    { id: `ict-${uid}-subtitle`, label: 'Sous-titre',       val: spec.subtitle || '' },
-    ...(spec.sections || []).map((s, i) => ({
-      id:    `ict-${uid}-s${i}`,
-      label: `Section ${i+1} — ${s.type}`,
-      val:   s.title || ''
-    }))
+    { id: `ict-${uid}-subtitle`, label: 'Sous-titre',       val: spec.subtitle || '' }
   ];
-  const inputs = fields.map(f =>
+  const baseInputs = baseFields.map(f =>
     `<div style="display:flex;flex-direction:column;gap:3px">
        <label style="font-size:10px;font-weight:700;color:var(--gris3);text-transform:uppercase">${escapeHtml(f.label)}</label>
        <input id="${f.id}" value="${escapeAttr(f.val)}" style="border:1px solid var(--gris1);border-radius:6px;padding:5px 8px;font-size:12px;width:100%">
      </div>`
   ).join('');
-  return `<div style="display:grid;gap:8px;padding:12px 0">${inputs}
+  // Chaque section a sa propre ligne éditable + une petite croix rouge pour la
+  // retirer de l'infographie. On ne supprime rien du DOM au clic (juste masqué
+  // + marqué data-del="1") : ça permet un "Annuler la suppression" avant de
+  // valider, et ça garde les index de section stables pour icApplyTitles.
+  const sectionRows = (spec.sections || []).map((s, i) => {
+    const label = `Section ${i+1} — ${s.type}`;
+    return `<div id="ict-${uid}-row-s${i}" data-del="0" style="display:flex;align-items:flex-end;gap:6px">
+       <div style="display:flex;flex-direction:column;gap:3px;flex:1">
+         <label data-original-label="${escapeAttr(label)}" style="font-size:10px;font-weight:700;color:var(--gris3);text-transform:uppercase">${escapeHtml(label)}</label>
+         <input id="ict-${uid}-s${i}" value="${escapeAttr(s.title || '')}" style="border:1px solid var(--gris1);border-radius:6px;padding:5px 8px;font-size:12px;width:100%">
+       </div>
+       <button type="button" class="ic-section-del-btn" title="Retirer cette section de l'infographie"
+         onclick="_icMarkSectionDeleted(${uid},${i})"
+         style="flex-shrink:0;width:26px;height:26px;border-radius:50%;border:1px solid #f3c2c2;background:#fdecec;color:#c0392b;font-size:13px;line-height:1;cursor:pointer">✕</button>
+     </div>`;
+  }).join('');
+  return `<div style="display:grid;gap:8px;padding:12px 0">${baseInputs}${sectionRows}
     <div style="display:flex;gap:8px;margin-top:4px">
       <button class="ic-retheme-btn" onclick="icApplyTitles(${uid})" style="background:var(--albert);color:white;border-color:var(--albert)">✅ Mettre à jour</button>
       <button class="ic-retheme-btn" onclick="icToggleTitlesEditor(${uid})">Annuler</button>
     </div>
   </div>`;
 }
+
+function _icMarkSectionDeleted(uid, i) {
+  const row = document.getElementById(`ict-${uid}-row-s${i}`);
+  if (!row) return;
+  const labelEl = row.querySelector('label');
+  const btn = row.querySelector('.ic-section-del-btn');
+  const input = row.querySelector('input');
+  const originalLabel = labelEl ? labelEl.getAttribute('data-original-label') || labelEl.textContent : '';
+  const deleted = row.getAttribute('data-del') === '1';
+  if (!deleted) {
+    row.setAttribute('data-del', '1');
+    row.style.opacity = '.5';
+    if (input) input.disabled = true;
+    if (labelEl) labelEl.innerHTML = `<s>${escapeHtml(originalLabel)}</s> — sera retirée`;
+    if (btn) { btn.textContent = '↺'; btn.title = 'Annuler la suppression'; btn.style.background = '#eef1f4'; btn.style.color = 'var(--texte)'; btn.style.borderColor = 'var(--gris1)'; }
+  } else {
+    row.setAttribute('data-del', '0');
+    row.style.opacity = '1';
+    if (input) input.disabled = false;
+    if (labelEl) labelEl.textContent = originalLabel;
+    if (btn) { btn.textContent = '✕'; btn.title = 'Retirer cette section de l\'infographie'; btn.style.background = '#fdecec'; btn.style.color = '#c0392b'; btn.style.borderColor = '#f3c2c2'; }
+  }
+}
+window._icMarkSectionDeleted = _icMarkSectionDeleted;
 
 function icToggleTitlesEditor(uid) {
   const te = document.getElementById(`ic-te-${uid}`);
@@ -626,10 +661,15 @@ function icApplyTitles(uid) {
   const newSubtitle = get(`ict-${uid}-subtitle`);
   if (newTitle    !== null) spec.title    = newTitle;
   if (newSubtitle !== null) spec.subtitle = newSubtitle;
+  const keptSections = [];
   (spec.sections || []).forEach((s, i) => {
+    const row = document.getElementById(`ict-${uid}-row-s${i}`);
+    if (row && row.getAttribute('data-del') === '1') return; // section retirée par l'utilisateur
     const v = get(`ict-${uid}-s${i}`);
     if (v !== null) s.title = v;
+    keptSections.push(s);
   });
+  spec.sections = keptSections;
   if (newTitle !== null) _icPersistInfographicTitle(uid, newTitle, false);
   // Re-render
   const theme = (typeof INFOGRAPH_THEMES !== 'undefined' ? INFOGRAPH_THEMES : []).find(t => t.id === stored.themeId) || {};
@@ -642,6 +682,10 @@ function icApplyTitles(uid) {
   if (openLink) openLink.href = newUrl;
   const dlLink = document.getElementById(`ic-dl-${uid}`);
   if (dlLink) dlLink.href = newUrl;
+  // Reconstruit l'éditeur (les indices de section ont changé si des sections
+  // ont été supprimées) pour que la prochaine ouverture reste cohérente.
+  const te = document.getElementById(`ic-te-${uid}`);
+  if (te) te.innerHTML = _icBuildTitlesEditorHtml(spec, uid);
   icToggleTitlesEditor(uid);
 }
 window.icApplyTitles = icApplyTitles;

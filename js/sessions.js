@@ -272,6 +272,41 @@ function printCopilotBlock(bubble) {
 }
 
 
+// ── Spinner de chargement pour les boutons copilot-action ──
+// Un simple changement de texte ("⏳ Génération…") passe facilement inaperçu :
+// même police, même couleur, aucun mouvement. Un petit spinner animé + libellé
+// grisé rend l'état "en cours" visible du coin de l'œil, sans dépendre d'une
+// feuille de style externe (le <style> est injecté une seule fois, à la demande).
+function _ensureCopilotSpinnerStyle() {
+  if (document.getElementById('copilot-spinner-style')) return;
+  const style = document.createElement('style');
+  style.id = 'copilot-spinner-style';
+  style.textContent = `
+    .copilot-action-spinner {
+      display:inline-block;width:11px;height:11px;margin-right:6px;vertical-align:-1px;
+      border-radius:50%;border:2px solid rgba(0,0,0,0.15);border-top-color:currentColor;
+      animation:copilot-spin .6s linear infinite;
+    }
+    .copilot-action.is-loading { opacity:.7;cursor:progress;pointer-events:none; }
+    @keyframes copilot-spin { to { transform:rotate(360deg); } }
+  `;
+  document.head.appendChild(style);
+}
+// Bascule un bouton copilot-action en état "chargement" (spinner + libellé),
+// et retourne une fonction à appeler pour le restaurer.
+function _setCopilotActionLoading(btn, loadingLabel) {
+  _ensureCopilotSpinnerStyle();
+  const originalHTML = btn.innerHTML;
+  btn.classList.add('is-loading');
+  btn.innerHTML = `<span class="copilot-action-spinner"></span>${escapeHtml(loadingLabel)}`;
+  btn.disabled = true;
+  return () => {
+    btn.innerHTML = originalHTML;
+    btn.classList.remove('is-loading');
+    btn.disabled = false;
+  };
+}
+
 // ── buildCopilotActionBar ──
 function buildCopilotActionBar(bubble, dataExecution = null, question = '') {
   const bar = document.createElement('div');
@@ -288,9 +323,7 @@ function buildCopilotActionBar(bubble, dataExecution = null, question = '') {
   bar.appendChild(mk('📊 Graphique', 'Afficher un graphique sur le résultat courant', () => quickAsk('Graphique')));
   if (dataExecution) {
     bar.appendChild(mk('🖼 Infographie', 'Générer une infographie à partir de ce résultat uniquement', async (btn) => {
-    const originalLabel = btn.textContent;
-    btn.textContent = '⏳ Génération…';
-    btn.disabled = true;
+    const restore = _setCopilotActionLoading(btn, 'Génération…');
     try {
       const localAnalysis = (typeof executeLocalDataQuery === 'function') ? executeLocalDataQuery(question, question) : {};
       const { html, spec } = await generateInfographicWithAlbert(question || 'Infographie de ce résultat', localAnalysis, dataExecution);
@@ -298,8 +331,7 @@ function buildCopilotActionBar(bubble, dataExecution = null, question = '') {
     } catch (e) {
       addMessage('assistant', `<p style="color:var(--rouge)"><strong>Erreur pendant la génération de l'infographie</strong><br>${e.message}</p>`);
     } finally {
-      btn.textContent = originalLabel;
-      btn.disabled = false;
+      restore();
     }
   }));
   }
