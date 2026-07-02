@@ -238,10 +238,24 @@ function addPersistentFilter(col, value, op = 'eq', label = null) {
 // Sans ça, window.print() imprimait tout le fil de discussion tel qu'affiché
 // à l'écran, ce qui faisait sortir n'importe quel autre bloc (souvent celui
 // du dessus) au lieu du bloc sur lequel l'utilisateur avait cliqué "PDF".
+// On retire aussi tout ce qui n'a de sens qu'à l'écran (boutons d'action,
+// "Exporter l'image" des graphiques, détail technique du plan de calcul)
+// pour un rendu PDF propre plutôt qu'un simple dump de l'interface.
 function printCopilotBlock(bubble) {
   const root = document.getElementById('de-print-root');
   if (!root || !bubble) { window.print(); return; }
-  root.innerHTML = bubble.innerHTML;
+  const clone = bubble.cloneNode(true);
+  clone.querySelectorAll('button').forEach(el => el.remove());
+  clone.querySelectorAll('details.msg-sources').forEach(el => el.remove());
+
+  const header = document.createElement('div');
+  header.className = 'de-print-header';
+  const dateStr = new Date().toLocaleString('fr-FR', { dateStyle: 'long', timeStyle: 'short' });
+  header.innerHTML = `<span class="de-print-brand">Parcoursup Data Copilot</span><span class="de-print-date">Exporté le ${dateStr}</span>`;
+
+  root.innerHTML = '';
+  root.appendChild(header);
+  root.appendChild(clone);
   document.body.classList.add('de-printing');
   const cleanup = () => {
     document.body.classList.remove('de-printing');
