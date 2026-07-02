@@ -51,6 +51,8 @@ function makeDocument(registry) {
     createElement: (tag) => makeFakeElement(tag),
     getElementById: (id) => registry[id] || null,
     body: { classList: { add() {}, remove() {} } },
+    // document.head requis par _ensureCopilotSpinnerStyle (sessions.js)
+    head: { appendChild() {}, querySelector() { return null; } },
   };
 }
 
@@ -116,34 +118,28 @@ async function scenario1() {
   assert(registry['modal-ic'].style.display !== 'flex', 'le compositeur global n\'a pas été ouvert (pas de fallback)');
 }
 
-// ─── Scénario 2a : pas de dataExecution, pas d'historique → alert ──────────
+// ─── Scénario 2a : pas de dataExecution → bouton absent de la barre ────────
 async function scenario2a() {
-  console.log('\nScénario 2a — bouton local sans dataExecution, sans historique : alerte');
+  console.log('\nScénario 2a — bouton local sans dataExecution : absent de la barre (message restauré)');
   const { ctx, calls } = makeSandbox({ dataBlocks: [], globalBlocks: [] });
   const bubble = makeFakeElement('div');
   const bar = ctx.buildCopilotActionBar(bubble, null, '');
   const infoBtn = bar.children.find(b => b.textContent && b.textContent.toLowerCase().includes('infographie'));
-  infoBtn.onclick({ stopPropagation() {} });
-  await new Promise(r => setTimeout(r, 10)); // mk() ne propage pas la Promise (fire-and-forget)
-  assert(calls.alert.length === 1, 'alert() appelée (fallback sans historique)');
+  assert(!infoBtn, 'le bouton Infographie est absent quand dataExecution est null (message restauré depuis session)');
+  assert(calls.alert.length === 0, 'aucune alerte — le bouton n\'existe pas, donc rien ne peut s\'ouvrir');
   assert(calls.generateInfographicWithAlbert.length === 0, 'generateInfographicWithAlbert PAS appelé');
 }
 
-// ─── Scénario 2b : pas de dataExecution, mais historique en session → modale ─
+// ─── Scénario 2b : pas de dataExecution, même avec historique → bouton absent
 async function scenario2b() {
-  console.log('\nScénario 2b — bouton local sans dataExecution, avec historique : ouvre la modale');
+  console.log('\nScénario 2b — bouton local sans dataExecution, même avec historique : toujours absent');
   const blocks = [{ id: 'b1', title: 'Boursiers vs non-boursiers', dataContext: 'résumé...' }];
-  const { ctx, calls, registry } = makeSandbox({ dataBlocks: blocks });
+  const { ctx, calls } = makeSandbox({ dataBlocks: blocks });
   const bubble = makeFakeElement('div');
   const bar = ctx.buildCopilotActionBar(bubble, null, '');
   const infoBtn = bar.children.find(b => b.textContent && b.textContent.toLowerCase().includes('infographie'));
-  infoBtn.onclick({ stopPropagation() {} });
-  await new Promise(r => setTimeout(r, 10)); // mk() ne propage pas la Promise (fire-and-forget)
-  assert(calls.alert.length === 0, 'pas d\'alerte (des blocs existent)');
-  const icBlocksContainer = registry['ic-blocks'];
-  const renderedTitles = icBlocksContainer.children.map(c => c.innerHTML).join(' ');
-  assert(icBlocksContainer.children.length === 1 && renderedTitles.includes('Boursiers vs non-boursiers'), 'le compositeur est peuplé avec le bloc de la session (rendu DOM réel)');
-  assert(registry['modal-ic'].style.display === 'flex', 'la modale modal-ic est bien affichée');
+  assert(!infoBtn, 'bouton Infographie absent même avec historique (message restauré — utiliser le bouton global en haut)');
+  assert(calls.alert.length === 0, 'aucune alerte — pas de bouton, pas d\'appel');
 }
 
 async function main() {

@@ -127,20 +127,22 @@ test('cleanItems retire un item sans label/title/name', () => {
   assertEqual(r.length, 1, 'item sans identifiant → rejeté');
 });
 
-// ─── Suite 3 : prompt few-shot (sessions.js) ────────────────────────────────
+// ─── Suite 3 : prompt few-shot (infographic.js) ──────────────────────────────
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const sessionsContent = fs.readFileSync(path.join(__dirname, 'sessions.js'), 'utf8');
+// Note : les exemples few-shot ont été déplacés de sessions.js vers infographic.js
+// lors de la refactorisation du générateur d'infographies (juin 2026).
+const infographicContent = fs.readFileSync(path.join(__dirname, 'infographic.js'), 'utf8');
 
-test('Prompt contient les exemples few-shot',       () => assert(sessionsContent.includes('EXEMPLES (à suivre strictement)')));
-test('Prompt contient exemple BON ranking',         () => assert(sessionsContent.includes('✅ BON — section ranking')));
-test('Prompt contient exemple BON insights',        () => assert(sessionsContent.includes('✅ BON — section insights')));
-test('Prompt contient exemple MAUVAIS',             () => assert(sessionsContent.includes('❌ MAUVAIS')));
-test('Prompt contient INTERDIT ABSOLU (régression)',() => assert(sessionsContent.includes('INTERDIT ABSOLU')));
-test('Labels réels dans les exemples (Bordeaux)',   () => assert(sessionsContent.includes('"Bordeaux"')));
-test('Exemple MAUVAIS cite "Item 1"',               () => assert(sessionsContent.includes('"Item 1"')));
+test('Prompt contient les exemples few-shot',       () => assert(infographicContent.includes('EXEMPLES OBLIGATOIRES À SUIVRE')));
+test('Prompt contient exemple BON ranking',         () => assert(infographicContent.includes('✅ BON — eyebrow et ranking avec labels réels')));
+test('Prompt contient exemple BON insights',        () => assert(infographicContent.includes('✅ BON — insight avec analyse chiffrée')));
+test('Prompt contient exemple MAUVAIS',             () => assert(infographicContent.includes('❌ MAUVAIS')));
+test('Prompt contient INTERDIT ABSOLU (régression)',() => assert(infographicContent.includes('INTERDIT ABSOLU')));
+test('Labels réels dans les exemples (Bordeaux)',   () => assert(infographicContent.includes('"Bordeaux"')));
+test('Exemple MAUVAIS cite "Item 1"',               () => assert(infographicContent.includes('"Item 1"')));
 
 // ─── Suite 4 : isPlaceholder_simple (eyebrow / titre global) ──────────────
 // Simule la fonction de infographic.js
