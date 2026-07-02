@@ -305,13 +305,20 @@ function renderStacked(groups) {
     // Sinon, on normalise sur la somme des effectifs.
     const valuesArePercents = sum > 85 && sum <= 105 && values.every(v => v >= 0 && v <= 100);
     const total = valuesArePercents ? 100 : (sum || 1);
+    // Le pourcentage normalisé (utilisé pour la largeur ET la légende) — calculé une seule
+    // fois ici, jamais repris du texte libre "display"/"percent" fourni par Albert. Avant ce
+    // correctif, la légende affichait `seg.display` tel quel : rien ne garantissait qu'il
+    // corresponde à `seg.value`, et Albert a déjà produit les deux pour un même segment
+    // (ex. largeur 33,8 % / légende "26,7 %") — un désaccord interne à sa propre réponse,
+    // impossible à détecter côté widget tant que les deux champs restaient indépendants.
+    const pcts = values.map(v => clampNum(v / total * 100, 0, 100));
     return `<div class="stacked-block">
       <div class="stacked-title">${escapeHtml(g.label || '')}</div>
       <div class="stacked-bar">${segments.map((seg, i) => {
-        const w = clampNum(values[i] / total * 100, 0, 100);
+        const w = pcts[i];
         return `<div class="stacked-seg" style="width:${w.toFixed(1)}%;background:${palette[i % palette.length]}">${w >= 10 ? escapeHtml(seg.shortLabel || seg.label || '') : ''}</div>`;
       }).join('')}</div>
-      <div class="stacked-legend">${segments.map((seg, i) => `<span><i style="background:${palette[i % palette.length]}"></i>${escapeHtml(seg.label || '')} ${escapeHtml(seg.display || seg.percent || '')}</span>`).join('')}</div>
+      <div class="stacked-legend">${segments.map((seg, i) => `<span><i style="background:${palette[i % palette.length]}"></i>${escapeHtml(seg.label || '')} ${pcts[i].toFixed(1).replace('.', ',')} %</span>`).join('')}</div>
     </div>`;
   }).join('')}</div>`;
 }
