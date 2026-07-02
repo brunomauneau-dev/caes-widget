@@ -1430,7 +1430,7 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     const rowCol = plan.targetCol || plan.mentionedCols?.[0];
     const colCol = plan.targetCol2 || plan.mentionedCols?.find(c => c !== rowCol);
     if (!rowCol || !colCol) return null;
-    const pivot = pivotRows(rows, rowCol, colCol, 12, 8);
+    const pivot = pivotRows(rows, rowCol, colCol, 12, 5);
     const exec = {
       kind: 'pivot',
       plan: { ...plan, targetCol: rowCol, targetCol2: colCol },
@@ -1607,15 +1607,19 @@ function renderDataEngineResultHtml(tool, plan, result) {
   if (tool === 'pivot') {
     const cols = result.colValues || [];
     const total = result.total || 0;
-    const header = `<tr><th style="text-align:left">${escapeHtml(plan.targetCol)}</th>${cols.map(c => `<th style="text-align:right">${escapeHtml(c)}</th>`).join('')}<th style="text-align:right">Total</th><th style="text-align:right">% total</th></tr>`;
+    // Tronquer les libellés de colonnes trop longs pour garder le tableau lisible
+    const truncCol = (s) => s && s.length > 18 ? s.slice(0, 16) + '…' : (s || '—');
+    const header = `<tr><th style="text-align:left;min-width:140px;padding:6px 8px">${escapeHtml(_shortColName(plan.targetCol))}</th>${cols.map(c => `<th style="text-align:right;padding:6px 8px;white-space:nowrap" title="${escapeHtml(c)}">${escapeHtml(truncCol(c))}</th>`).join('')}<th style="text-align:right;padding:6px 8px">Total</th><th style="text-align:right;padding:6px 8px">%</th></tr>`;
     const body = (result.matrix || []).map(r => {
       const pct = total ? (r.total / total * 100).toFixed(1).replace('.', ',') : '—';
-      return `<tr><td>${escapeHtml(r.value)}</td>${r.cells.map(c => `<td style="text-align:right">${c > 0 ? c.toLocaleString('fr-FR') : '<span style="color:var(--gris2)">—</span>'}</td>`).join('')}<td style="text-align:right"><strong>${r.total.toLocaleString('fr-FR')}</strong></td><td style="text-align:right">${pct} %</td></tr>`;
+      return `<tr><td style="padding:5px 8px">${escapeHtml(r.value)}</td>${r.cells.map(c => `<td style="text-align:right;padding:5px 8px">${c > 0 ? c.toLocaleString('fr-FR') : '<span style="color:var(--gris2)">—</span>'}</td>`).join('')}<td style="text-align:right;padding:5px 8px"><strong>${r.total.toLocaleString('fr-FR')}</strong></td><td style="text-align:right;padding:5px 8px">${pct} %</td></tr>`;
     }).join('');
     const colTotals = cols.map((_, i) => (result.matrix || []).reduce((s, r) => s + (r.cells[i] || 0), 0));
-    const foot = `<tr style="background:var(--gris0,#f8fafc);font-weight:700"><td>Total</td>${colTotals.map(t => `<td style="text-align:right">${t.toLocaleString('fr-FR')}</td>`).join('')}<td style="text-align:right">${total.toLocaleString('fr-FR')}</td><td></td></tr>`;
+    const foot = `<tr style="background:var(--gris0,#f8fafc);font-weight:700"><td style="padding:5px 8px">Total</td>${colTotals.map(t => `<td style="text-align:right;padding:5px 8px">${t.toLocaleString('fr-FR')}</td>`).join('')}<td style="text-align:right;padding:5px 8px">${total.toLocaleString('fr-FR')}</td><td></td></tr>`;
     const clearTitle = `${_shortColName(plan.targetCol)} × ${_shortColName(plan.targetCol2)}`;
-    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p><strong>${total.toLocaleString('fr-FR')}</strong> lignes retenues. Croisement <strong>${escapeHtml(plan.targetCol)}</strong> × <strong>${escapeHtml(plan.targetCol2)}</strong>.</p><div style="overflow:auto"><table style="border-collapse:collapse;font-size:12px;width:100%"><thead>${header}</thead><tbody>${body}${foot}</tbody></table></div>${filtersHtml}${debug}`;
+    // width:auto (pas 100%) : laisse la table prendre sa largeur naturelle
+    // et le overflow:auto du container gère le scroll horizontal
+    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p><strong>${total.toLocaleString('fr-FR')}</strong> lignes retenues. Croisement <strong>${escapeHtml(plan.targetCol)}</strong> × <strong>${escapeHtml(plan.targetCol2)}</strong>. Top ${cols.length} valeurs affichées.</p><div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--gris1);border-radius:8px"><table style="border-collapse:collapse;font-size:12px;width:auto;min-width:100%"><thead style="background:var(--gris0)">${header}</thead><tbody>${body}${foot}</tbody></table></div>${filtersHtml}${debug}`;
   }
   if (tool === 'stats') {
     const fmt = v => v === null || v === undefined ? '—' : Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 2 });
