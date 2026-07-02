@@ -256,10 +256,31 @@ function printCopilotBlock(bubble) {
   root.innerHTML = '';
   root.appendChild(header);
   root.appendChild(clone);
+
+  // Les tableaux croisés (pivot) peuvent avoir beaucoup de colonnes ; sans
+  // ajustement, elles dépassaient la largeur de la page et étaient tronquées
+  // (le conteneur overflow-x:auto ne s'imprime pas comme un scroll, il coupe).
+  // On bascule en paysage et on réduit la police en fonction du nombre de
+  // colonnes du tableau le plus large présent dans le bloc.
+  let maxCols = 0;
+  clone.querySelectorAll('table').forEach(t => {
+    const headerRow = t.querySelector('thead tr') || t.querySelector('tr');
+    if (headerRow) maxCols = Math.max(maxCols, headerRow.children.length);
+  });
+  const pageStyleTag = document.getElementById('de-print-page-style');
+  if (maxCols > 6) {
+    const fontSize = maxCols > 14 ? '7px' : maxCols > 10 ? '8px' : '9.5px';
+    clone.querySelectorAll('table').forEach(t => { t.style.fontSize = fontSize; });
+    if (pageStyleTag) pageStyleTag.textContent = '@media print { @page { size: landscape; } }';
+  } else if (pageStyleTag) {
+    pageStyleTag.textContent = '';
+  }
+
   document.body.classList.add('de-printing');
   const cleanup = () => {
     document.body.classList.remove('de-printing');
     root.innerHTML = '';
+    if (pageStyleTag) pageStyleTag.textContent = '';
     window.removeEventListener('afterprint', cleanup);
   };
   window.addEventListener('afterprint', cleanup);
