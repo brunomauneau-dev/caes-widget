@@ -829,12 +829,20 @@ function currentExecutionToRows(exec) {
   if (exec.kind === 'pivot') {
     const rowLabel = exec.result?.rowCol || p.targetCol || 'Ligne';
     const cols = exec.result?.colValues || [];
-    return (exec.result?.matrix || []).map(r => {
+    const matrix = exec.result?.matrix || [];
+    const rows = matrix.map(r => {
       const o = { [rowLabel]: r.value };
       cols.forEach((c, i) => { o[c] = r.cells[i] || 0; });
       o.Total = r.total;
       return o;
     });
+    const totalRow = { [rowLabel]: 'Total' };
+    cols.forEach((c, i) => {
+      totalRow[c] = matrix.reduce((s, r) => s + (r.cells[i] || 0), 0);
+    });
+    totalRow.Total = matrix.reduce((s, r) => s + (r.total || 0), 0);
+    rows.push(totalRow);
+    return rows;
   }
   if (exec.kind === 'stats') {
     return [{

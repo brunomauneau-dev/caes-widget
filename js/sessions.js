@@ -233,6 +233,28 @@ function addPersistentFilter(col, value, op = 'eq', label = null) {
 }
 
 
+// ── printCopilotBlock ──
+// Imprime uniquement le bloc de résultat courant (bubble), pas toute la page.
+// Sans ça, window.print() imprimait tout le fil de discussion tel qu'affiché
+// à l'écran, ce qui faisait sortir n'importe quel autre bloc (souvent celui
+// du dessus) au lieu du bloc sur lequel l'utilisateur avait cliqué "PDF".
+function printCopilotBlock(bubble) {
+  const root = document.getElementById('de-print-root');
+  if (!root || !bubble) { window.print(); return; }
+  root.innerHTML = bubble.innerHTML;
+  document.body.classList.add('de-printing');
+  const cleanup = () => {
+    document.body.classList.remove('de-printing');
+    root.innerHTML = '';
+    window.removeEventListener('afterprint', cleanup);
+  };
+  window.addEventListener('afterprint', cleanup);
+  // Filet de sécurité si 'afterprint' ne se déclenche pas (ex : certains webviews)
+  setTimeout(cleanup, 20000);
+  window.print();
+}
+
+
 // ── buildCopilotActionBar ──
 function buildCopilotActionBar(bubble, dataExecution = null, question = '') {
   const bar = document.createElement('div');
@@ -265,7 +287,7 @@ function buildCopilotActionBar(bubble, dataExecution = null, question = '') {
   }));
   }
   bar.appendChild(mk('📄 Excel', 'Exporter le résultat courant en Excel', () => quickAsk('Exporte en Excel')));
-  bar.appendChild(mk('🖨 PDF', 'Imprimer / exporter en PDF', () => window.print()));
+  bar.appendChild(mk('🖨 PDF', 'Imprimer / exporter en PDF', () => printCopilotBlock(bubble)));
   bar.appendChild(mk('📋 Copier', 'Copier le rapport', async () => {
     const text = bubble.innerText || bubble.textContent || '';
     try { await navigator.clipboard.writeText(text); } catch(e) { console.warn(e); }
