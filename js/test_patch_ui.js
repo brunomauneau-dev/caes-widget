@@ -115,7 +115,7 @@ describe('infographic.js — police Marianne et variables CSS thème dynamiques'
 describe('index.html — cache-busting à jour', () => {
   assert(/config\.js\?v=27\.5\.7/.test(indexSrc), 'config.js bumpé v27.5.7');
   assert(/infographic\.js\?v=27\.5\.9/.test(indexSrc), 'infographic.js bumpé v27.5.9');
-  assert(/dataEngine\.js\?v=27\.5\.16/.test(indexSrc), 'dataEngine.js bumpé v27.5.16');
+  assert(/dataEngine\.js\?v=27.5.18/.test(indexSrc), 'dataEngine.js bumpé v27.5.18');
   assert(/sessions\.js\?v=27\.5\.15/.test(indexSrc), 'sessions.js bumpé v27.5.15');
 });
 
@@ -140,8 +140,8 @@ describe('Bug 3 — métriques héro lisibles sur fond sombre (plus de bleu sur 
 
 // ─── (8) Bug 1 — scrollbar tableau pivot ───────────────────────────────────
 describe('Bug 1 — scrollbar ne mange plus la ligne Total (padding-bottom)', () => {
-  assert(/overflow-x:auto.*padding-bottom:2px/.test(dataEngineSrc) ||
-         /padding-bottom:2px.*overflow-x:auto/.test(dataEngineSrc),
+  assert(/overflow-x:auto.*padding-bottom:14px/.test(dataEngineSrc) ||
+         /padding-bottom:14px.*overflow-x:auto/.test(dataEngineSrc),
     'padding-bottom ajouté sur le container overflow-x:auto du pivot');
 });
 
