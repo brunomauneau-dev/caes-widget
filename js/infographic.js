@@ -802,7 +802,12 @@ async function generateInfographicWithAlbert(question, localAnalysis, dataExecut
       if (raw && raw.length > 20) deContext = raw + '\n\n';
     } catch(e) { console.warn('[infographic] dataEngineResultToContext error:', e); }
   }
-  const context = deContext + buildContext(localAnalysis);
+  // Quand deContext existe déjà, c'est la seule source à faire autorité pour les chiffres :
+  // on n'ajoute plus le group-by local (localAnalysis, filtres détectés séparément) ni la
+  // synthèse pleine table (top valeurs par colonne sur données NON filtrées) — ces deux
+  // sources pouvaient diverger du résultat Data Engine sur le même indicateur et produisaient
+  // des infographies non reproductibles selon le point d'entrée (bloc vs compositeur).
+  const context = deContext + buildContext(localAnalysis, { suppressGlobalStats: !!deContext });
   // Thème par défaut du bouton bloc-unique : Bleu France (pas de sélecteur de thème
   // sur ce point d'entrée) — même prompt que le compositeur, cf. buildInfographicSpecPrompt.
   const specPrompt = buildInfographicSpecPrompt(question, context, null);

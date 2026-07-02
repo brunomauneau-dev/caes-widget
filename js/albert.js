@@ -705,7 +705,18 @@ function handleKeydown(e) {
   }
 }
 
-function buildContext(localAnalysis = null) {
+// opts.suppressGlobalStats : à activer quand un résultat Data Engine déjà filtré/croisé
+// (deContext) est injecté en amont — ex. génération d'infographie depuis un bloc ou le
+// compositeur. Sans ça, buildContext ajoute EN PLUS deux autres sources de comptage :
+// localAnalysis (son propre group-by mono-colonne, filtres détectés séparément) et
+// buildFullTableSynthesis (top valeurs par colonne calculées sur TOUTE la table, non
+// filtrée). Les trois sources peuvent diverger sur le même indicateur (périmètres et
+// granularités différents), et rien ne dit au modèle laquelle privilégier — ce qui a
+// produit des infographies non reproductibles et des sections inventées par recombinaison
+// de stats globales non liées. Quand un résultat Data Engine fait déjà autorité, on ne
+// fournit plus que lui + les documents éventuels : une seule source, pas d'arbitrage à
+// faire faire au modèle.
+function buildContext(localAnalysis = null, opts = {}) {
   const selected = documents.filter(d => selectedDocIds.has(d.id) && d.status === 'ok');
   // Si Grist est actif, il est prioritaire : les fichiers déposés ne sont inclus
   // dans le contexte que s'ils ont été explicitement sélectionnés à gauche.
@@ -722,7 +733,7 @@ function buildContext(localAnalysis = null) {
     context += `\n\n=== DOCUMENT: ${doc.name} ===\n${content}`;
   });
 
-  if (localAnalysis && localAnalysis.text) {
+  if (!opts.suppressGlobalStats && localAnalysis && localAnalysis.text) {
     context += `
 
 ${localAnalysis.text}
@@ -730,9 +741,11 @@ ${localAnalysis.text}
   }
 
   if (gristRecords.length) {
-    const gristTable = buildGristQueryTable();
-    const fullSynthesis = buildFullTableSynthesis(gristTable, localAnalysis?.question || '');
-    context += `\n\n${fullSynthesis}`;
+    if (!opts.suppressGlobalStats) {
+      const gristTable = buildGristQueryTable();
+      const fullSynthesis = buildFullTableSynthesis(gristTable, localAnalysis?.question || '');
+      context += `\n\n${fullSynthesis}`;
+    }
 
     const fields = Object.keys(gristRecords[0]);
     const preview = gristRecords.slice(0, 12).map(r => fields.map(f => r[f]).join(' | ')).join('\n');
