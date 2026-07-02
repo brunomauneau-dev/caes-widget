@@ -513,6 +513,53 @@ function _chartExportBtn(filename) {
   return `<button onclick="exportChartAsPng(this,'${filename}')" style="margin-top:8px;border:1px solid var(--gris2,#e5e7eb);background:#fff;border-radius:7px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;color:var(--gris3,#6b7280)" title="Exporter le graphique en PNG">📷 Exporter l'image</button>`;
 }
 
+// Deux graphiques pour un pivot : totaux par ligne + barres stackées par colonne.
+// Objectif : l'utilisateur retrouve dans les graphiques exactement les données
+// affichées dans le tableau croisé, sans perte d'information.
+function renderPivotCharts(result, plan) {
+  const matrix = result?.matrix || [];
+  const colValues = result?.colValues || [];
+  const total = result?.total || 0;
+  if (!matrix.length || !colValues.length) return '';
+
+  // Graphique 1 — totaux par ligne (vue synthétique)
+  const rowsForBar = matrix.map(r => ({ value: r.value, count: r.total, pct: total ? r.total / total * 100 : 0 }));
+  const maxCount = Math.max(...rowsForBar.map(r => r.count), 1);
+  const barRows = rowsForBar.map(r => {
+    const w = Math.max(2, Math.round(r.count / maxCount * 100));
+    const pct = (r.pct).toFixed(1).replace('.', ',');
+    return `<div style="display:grid;grid-template-columns:minmax(100px,180px) 1fr auto;gap:8px;align-items:center"><div style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(r.value)}">${escapeHtml(r.value)}</div><div style="height:10px;background:var(--gris1);border-radius:6px;overflow:hidden"><div style="height:10px;width:${w}%;background:var(--albert);border-radius:6px"></div></div><div style="font-size:11px;font-weight:700">${r.count.toLocaleString('fr-FR')}</div></div>`;
+  }).join('');
+  const chart1 = `<div style="margin-bottom:18px"><div style="font-size:12px;font-weight:700;color:var(--gris4,#374151);margin-bottom:8px">Total par ${escapeHtml(_shortColName(plan.targetCol || ''))}</div><div style="display:grid;gap:5px;max-width:560px">${barRows}</div></div>`;
+
+  // Graphique 2 — barres stackées : une barre par ligne, segments = colonnes du pivot
+  const top5cols = colValues.slice(0, 8); // max 8 segments pour lisibilité
+  const maxRow = Math.max(...matrix.map(r => r.total), 1);
+  const stackRows = matrix.map(r => {
+    const segments = top5cols.map((col, i) => {
+      const val = r.cells[i] || 0;
+      if (!val) return '';
+      const w = (val / r.total * 100).toFixed(1);
+      const color = DE_PIE_COLORS[i % DE_PIE_COLORS.length];
+      return `<div title="${escapeHtml(col)} : ${val.toLocaleString('fr-FR')}" style="width:${w}%;background:${color};height:100%;min-width:${val ? '2px' : '0'}"></div>`;
+    }).join('');
+    const barW = Math.max(2, Math.round(r.total / maxRow * 100));
+    return `<div style="display:grid;grid-template-columns:minmax(100px,180px) 1fr auto;gap:8px;align-items:center;margin-bottom:4px">
+      <div style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(r.value)}">${escapeHtml(r.value)}</div>
+      <div style="height:14px;background:var(--gris1);border-radius:4px;overflow:hidden;width:${barW}%;min-width:20px"><div style="display:flex;height:100%;width:100%">${segments}</div></div>
+      <div style="font-size:11px;font-weight:700">${r.total.toLocaleString('fr-FR')}</div>
+    </div>`;
+  }).join('');
+  const legend = top5cols.map((col, i) => {
+    const color = DE_PIE_COLORS[i % DE_PIE_COLORS.length];
+    return `<span style="display:inline-flex;align-items:center;gap:5px;font-size:10px;white-space:nowrap"><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${color};flex:0 0 auto"></i>${escapeHtml(col)}</span>`;
+  }).join('');
+  const truncNote = colValues.length > top5cols.length ? ` <span style="color:var(--gris3)">(+${colValues.length - top5cols.length} autres)</span>` : '';
+  const chart2 = `<div><div style="font-size:12px;font-weight:700;color:var(--gris4,#374151);margin-bottom:8px">Composition par ${escapeHtml(_shortColName(plan.targetCol2 || ''))}</div><div style="margin-bottom:10px">${stackRows}</div><div style="display:flex;flex-wrap:wrap;gap:6px 12px">${legend}${truncNote}</div></div>`;
+
+  return `<div class="de-chart-export-wrap" style="margin:10px 0">${chart1}${chart2}${_chartExportBtn('graphique_pivot.png')}</div>`;
+}
+
 function renderMiniBarChart(rows, total, filename) {
   if (!rows || !rows.length) return '';
   const max = Math.max(...rows.map(r => r.count || 0), 1);
@@ -876,15 +923,10 @@ function renderCurrentChartExecution(plan) {
     const html = renderDataEngineResultHtml(prev.plan?.tool || prev.kind, clonedPlan, prev.result);
     return { kind: prev.kind, plan: clonedPlan, result: prev.result, text: prev.text, html };
   }
-  // Branche pivot : graphique sur les totaux par ligne (colonne de gauche)
+  // Branche pivot : deux graphiques (totaux + stacké) depuis la matrix complète
   if (prev.kind === 'pivot') {
-    const matrix = prev.result?.matrix || [];
-    const total = prev.result?.total || 0;
-    const rows = matrix.map(r => ({ value: r.value, count: r.total, pct: total ? r.total / total * 100 : 0 }));
-    const clonedPlan = { ...(prev.plan || {}), tool: 'group_by', targetCol: prev.plan?.targetCol || '', renderChart: true, chartType: isPieChartRequest(plan.question || '') ? 'pie' : 'bar' };
-    const result = { total, rows, filled: rows.length, distinct: rows.length };
-    const html = renderDataEngineResultHtml('group_by', clonedPlan, result);
-    return { kind: 'group_by', plan: clonedPlan, result, text: prev.text, html };
+    const html = `${deTitleHtml(`${_shortColName(prev.plan?.targetCol||'')} × ${_shortColName(prev.plan?.targetCol2||'')}`, prev.plan?.blockId, prev.plan?.originalTitle)}${renderPivotCharts(prev.result, prev.plan||{})}`;
+    return { kind: 'pivot', plan: prev.plan, result: prev.result, text: prev.text, html };
   }
   // Si le dernier résultat n'est pas graphiquable, produire une répartition par la dernière dimension connue.
   const fallbackCol = prev.plan?.targetCol || 'Série de la Classe';
@@ -1628,7 +1670,7 @@ function renderDataEngineResultHtml(tool, plan, result) {
     const clearTitle = `${_shortColName(plan.targetCol)} × ${_shortColName(plan.targetCol2)}`;
     // width:auto (pas 100%) : laisse la table prendre sa largeur naturelle
     // et le overflow:auto du container gère le scroll horizontal
-    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p><strong>${total.toLocaleString('fr-FR')}</strong> lignes retenues. Croisement <strong>${escapeHtml(plan.targetCol)}</strong> × <strong>${escapeHtml(plan.targetCol2)}</strong>.</p><div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--gris1);border-radius:8px"><table style="border-collapse:collapse;font-size:12px;width:auto;min-width:100%"><thead style="background:var(--gris0)">${header}</thead><tbody>${body}${foot}</tbody></table></div>${filtersHtml}${debug}`;
+    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p><strong>${total.toLocaleString('fr-FR')}</strong> lignes retenues. Croisement <strong>${escapeHtml(plan.targetCol)}</strong> × <strong>${escapeHtml(plan.targetCol2)}</strong>.</p><div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--gris1);border-radius:8px;padding-bottom:2px"><table style="border-collapse:collapse;font-size:12px;width:auto;min-width:100%"><thead style="background:var(--gris0)">${header}</thead><tbody>${body}${foot}</tbody></table></div>${filtersHtml}${debug}`;
   }
   if (tool === 'stats') {
     const fmt = v => v === null || v === undefined ? '—' : Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 2 });
