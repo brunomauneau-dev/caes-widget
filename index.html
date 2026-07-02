@@ -18,6 +18,7 @@
 <script src="js/infographic.js?v=27.5.9" defer></script>
 <script src="js/sessions.js?v=27.5.15" defer></script>
 <script src="js/albert.js?v=27.6.12" defer></script>
+<style id="de-print-page-style"></style>
 <style>
   :root {
     --bleu:    #1a3a5c;
@@ -823,6 +824,27 @@
     body.de-printing #de-print-root table { border-collapse: collapse; width: 100%; }
     body.de-printing #de-print-root th,
     body.de-printing #de-print-root td { border: 1px solid var(--gris2); padding: 5px 8px; }
+    /* Les tableaux larges (croisements) sont dans un conteneur overflow-x:auto pour
+       le scroll à l'écran ; à l'impression ça coupe les colonnes qui dépassent.
+       On désactive le scroll et on laisse le tableau prendre toute la largeur —
+       la police et l'orientation (portrait/paysage) sont ajustées en JS selon le
+       nombre de colonnes (voir printCopilotBlock dans sessions.js). */
+    body.de-printing #de-print-root div[style*="overflow-x"] {
+      overflow: visible !important;
+      width: auto !important;
+      max-width: 100% !important;
+      padding-bottom: 0 !important;
+    }
+    body.de-printing #de-print-root table[style*="min-width"] {
+      width: 100% !important;
+      min-width: 0 !important;
+      table-layout: auto !important;
+    }
+    body.de-printing #de-print-root table[style*="min-width"] th,
+    body.de-printing #de-print-root table[style*="min-width"] td {
+      white-space: nowrap;
+      padding: 3px 6px;
+    }
     /* Interactif ou technique : inutile sur papier */
     body.de-printing #de-print-root button,
     body.de-printing #de-print-root details.msg-sources,
