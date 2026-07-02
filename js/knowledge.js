@@ -28,7 +28,18 @@ const PARCOURSUP_GLOSSAIRE = `Lexique Parcoursup (à utiliser pour interpréter 
 - "Démissionnaire" (démission) = un candidat qui renonce explicitement à une proposition ou à la procédure, distinct d'un candidat "sans proposition" qui n'a simplement encore rien reçu.
 - "CAES" (Commission d'Accès à l'Enseignement Supérieur) = dispositif d'accompagnement pour les candidats sans proposition ou en difficulté dans la procédure — un statut CAES n'implique pas automatiquement une proposition obtenue.
 - "Apprentissage" en tant que filière de formation est différent du statut "Apprenti" du candidat (qui peut désigner sa situation scolaire actuelle, hors Parcoursup).
-- Quand une question évoque un pourcentage ou une proportion ("quelle part de...", "combien de %..."), vérifie toujours sur quelle population de référence (tous les candidats ? seulement ceux ayant une proposition ? seulement les boursiers ?) le calcul doit porter — ne jamais supposer la population totale par défaut sans le vérifier dans le contexte fourni.`;
+- Quand une question évoque un pourcentage ou une proportion ("quelle part de...", "combien de %..."), vérifie toujours sur quelle population de référence (tous les candidats ? seulement ceux ayant une proposition ? seulement les boursiers ?) le calcul doit porter — ne jamais supposer la population totale par défaut sans le vérifier dans le contexte fourni.
+
+Contexte SAIO Bordeaux — précisions métier :
+- "Zone du Pays Basque" dans cette BDD = sous-ensemble de candidats dont l'établissement de scolarité est situé en zone Pays Basque (défini à partir des codes postaux et communes des dossiers). Ce n'est PAS une zone administrative officielle, c'est un découpage spécifique à l'académie de Bordeaux pour les analyses SAIO.
+- Le scope géographique habituel des analyses SAIO est l'académie (le plus courant), puis le département, puis la commune (rare). La Zone Pays Basque est un cas particulier de cette BDD.
+- L'académie de Bordeaux couvre 5 départements : Gironde (33), Dordogne (24), Lot-et-Garonne (47), Landes (40), Pyrénées-Atlantiques (64). La zone Pays Basque relève principalement des Pyrénées-Atlantiques (64).
+- "CAES" (Commission d'Accès à l'Enseignement Supérieur) = procédure d'accompagnement parallèle à Parcoursup, traitée par des commissions académiques. IMPORTANT : les dossiers CAES ne sont PAS dans cette BDD — ils font l'objet d'analyses séparées. Si une question porte sur les CAES, indiquer qu'ils ne sont pas présents dans ce jeu de données.
+- Acronymes courants dans l'Éducation nationale à reconnaître : SAIO (Service Académique d'Information et d'Orientation), CAES, PP (phase principale), PC (phase complémentaire), UAI (code établissement), BDD (base de données).
+- "Candidater" = formuler un vœu sur Parcoursup. Synonyme opérationnel de "faire un vœu", "soumettre une candidature".
+- "Vœux formulés" = tous les vœux saisis par le candidat, qu'il les ait maintenus ou non.
+- "Vœux confirmés" = vœux que le candidat a explicitement validés/maintenus — c'est la colonne "Nb total de vœux confirmés en phase principale" dans cette BDD. C'est cette valeur qu'on utilise dans les analyses.
+- "Proposition d'admission" = offre faite au candidat par Parcoursup ; elle peut être acceptée (= le candidat a répondu favorablement) ou non encore acceptée. Ne pas confondre "avoir une proposition" et "avoir accepté une proposition".`;
 
 /* Associe certains intitulés de colonnes à leur signification en langage
    courant. Le matching se fait par mot-clé (insensible à la casse), pas par
@@ -51,7 +62,12 @@ const COLUMN_ALIASES = [
   { match: /hors d[ée]lai/i, alias: 'soumis après échéance réglementaire (≠ dérogatoire)' },
   { match: /hors secteur|\bsecteur\b/i, alias: 'zone de recrutement géographique du candidat (sans lien avec un secteur économique)' },
   { match: /d[ée]mission(naire)?/i, alias: 'a renoncé explicitement (≠ candidat simplement sans proposition)' },
-  { match: /\bcaes\b/i, alias: 'dispositif d\'accompagnement (statut ≠ garantie d\'obtenir une proposition)' },
+  { match: /\bcaes\b/i, alias: 'Commission d\'Accès à l\'Enseignement Supérieur — procédure parallèle à Parcoursup, ABSENTE de cette BDD (analyses séparées)' },
+  { match: /zone.*pays.*basque|pays.*basque/i, alias: 'sous-zone géographique de l\'académie de Bordeaux, définie par codes postaux/communes — colonne spécifique à cette BDD' },
+  { match: /\bcandidater\b|\bcandidature\b/i, alias: 'formuler un vœu sur Parcoursup (synonyme opérationnel de "faire un vœu")' },
+  { match: /voeux? formul[eé]s?/i, alias: 'vœux saisis par le candidat, maintenus ou non (≠ vœux confirmés)' },
+  { match: /acad[eé]mie de bordeaux|\bbordeaux\b/i, alias: 'académie couvrant 5 départements : Gironde (33), Dordogne (24), Lot-et-Garonne (47), Landes (40), Pyrénées-Atlantiques (64)' },
+  { match: /\bsaio\b/i, alias: 'Service Académique d\'Information et d\'Orientation — service du rectorat qui pilote les analyses Parcoursup' },
   { match: /proposition/i, alias: "offre de formation faite au candidat (≠ acceptation)" },
 ];
 function columnAlias(header) {
@@ -263,8 +279,16 @@ function buildParcoursupKnowledgeContext(question, localContext = '') {
   const src = (typeof getActiveDataSource === 'function') ? getActiveDataSource() : null;
   const columns = src && src.headers ? src.headers : [];
   const hits = searchParcoursupKnowledge(question + '\n' + localContext.slice(0, 1200), columns, 5);
-  if (!hits.length) return '';
-  return `RÉFÉRENCES MÉTIER PARCOURSUP SÉLECTIONNÉES AUTOMATIQUEMENT\n` +
+
+  // Avertissement CAES : ces dossiers ne sont pas dans la BDD Parcoursup standard
+  const qNorm = normalizeForSearch(question);
+  let caesWarning = '';
+  if (/\bcaes\b|commission acces|commission d.acces/.test(qNorm)) {
+    caesWarning = `\nATTENTION — CAES : Les dossiers traités en Commission d'Accès à l'Enseignement Supérieur (CAES) ne sont PAS présents dans cette base de données Parcoursup. Ils font l'objet d'analyses séparées. Ne pas tenter de les chercher dans ce jeu de données.\n`;
+  }
+
+  if (!hits.length && !caesWarning) return '';
+  return `RÉFÉRENCES MÉTIER PARCOURSUP SÉLECTIONNÉES AUTOMATIQUEMENT${caesWarning}\n` +
     hits.map((e, i) => {
       const content = String(e.content || '').slice(0, 1400);
       const tags = (e.tags || []).slice(0, 8).join(', ');
