@@ -19,6 +19,7 @@ Configuration (modifier les 4 variables ci-dessous) :
     ACADEMIE_FILTRE → "Bordeaux" pour filtrer, None pour tout télécharger (14 000 lignes)
 """
 
+import os
 import requests
 import pandas as pd
 import json
@@ -26,15 +27,18 @@ import sys
 import time
 
 # ─────────────────────────────────────────
-#  CONFIGURATION — à adapter
+#  CONFIGURATION
+#  Les variables d'environnement ont priorité
+#  (utilisées automatiquement par GitHub Actions)
 # ─────────────────────────────────────────
-GRIST_API_KEY   = "6bad78bac2d60a8f8c417b5da6441b775040a968"
+GRIST_API_KEY   = os.environ.get("GRIST_API_KEY", "6bad78bac2d60a8f8c417b5da6441b775040a968")
 GRIST_DOC_ID    = "msHoMY5qJm8o"
 GRIST_BASE_URL  = "https://grist.numerique.gouv.fr"
-GRIST_TABLE_ID  = "Parcoursup_National"   # sera créée si elle n'existe pas
+GRIST_TABLE_ID  = "Parcoursup_National"
 
-ACADEMIE_FILTRE = "Bordeaux"              # None = toutes les académies (national)
-SESSION         = 2025                    # année de session à télécharger
+ACADEMIE_FILTRE = os.environ.get("ACADEMIE_FILTRE", "Bordeaux")  # None = national complet
+SESSION         = int(os.environ.get("SESSION", "2025"))
+CI              = os.environ.get("CI", "false").lower() == "true"
 
 # Colonnes à importer (sous-ensemble lisible ; mettre [] pour tout importer)
 COLONNES = [
@@ -271,10 +275,13 @@ if __name__ == "__main__":
     print(df.head(3).to_string())
     print()
 
-    rep = input("Continuer le chargement dans Grist ? [o/N] : ").strip().lower()
-    if rep != "o":
-        print("Annulé.")
-        sys.exit(0)
+    if not CI:
+        rep = input("Continuer le chargement dans Grist ? [o/N] : ").strip().lower()
+        if rep != "o":
+            print("Annulé.")
+            sys.exit(0)
+    else:
+        print("Mode CI — chargement automatique.")
 
     charger_dans_grist(df)
 
