@@ -95,7 +95,7 @@ function normalizeForSearch(value) {
   return String(value || '')
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[̀-ͯ]/g, '')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
 }
@@ -110,7 +110,6 @@ async function loadParcoursupKB() {
       entries: Array.isArray(data.entries) ? data.entries : []
     };
     parcoursupKBReady = parcoursupKB.entries.length > 0;
-    console.log(`[Parcoursup KB] ${parcoursupKB.entries.length} fiches chargées`);
     await loadParcoursupKBIndex();
     updateKnowledgeStatusBadge();
   } catch (e) {
@@ -126,7 +125,6 @@ async function loadParcoursupKBIndex() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     parcoursupKBIndex = await response.json();
     parcoursupKBIndexReady = !!(parcoursupKBIndex && parcoursupKBIndex.index);
-    console.log(`[Parcoursup KB] index hybride chargé : ${parcoursupKBIndex.meta?.term_count || '?'} termes`);
   } catch (e) {
     console.warn('[Parcoursup KB] index hybride non chargé, fallback recherche simple :', e.message);
     parcoursupKBIndexReady = false;
@@ -264,7 +262,6 @@ function searchParcoursupKnowledge(question, columns = [], maxResults = 6) {
     score: Math.round(x.score * 10) / 10,
     reasons: x.reasons
   }));
-  console.table(lastKnowledgeTrace);
   return ranked.map(x => x.entry);
 }
 
@@ -304,7 +301,6 @@ async function loadParcoursupOpenDataReference() {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     parcoursupOD = await response.json();
     parcoursupODReady = !!(parcoursupOD && parcoursupOD.meta);
-    console.log(`[Parcoursup OpenData] référentiel chargé : ${parcoursupOD.meta?.rows || '?'} lignes source`);
     updateKnowledgeStatusBadge();
   } catch (e) {
     console.warn('[Parcoursup OpenData] référentiel non chargé :', e.message);
@@ -323,9 +319,9 @@ function compactOpenDataRows(rows, maxRows = 10) {
   return rows.slice(0, maxRows).map(r => {
     const label = r.label || 'Non renseigné';
     const cand = r['Effectif total des candidats pour une formation'];
-    const admis = r['Effectif total des candidats ayant accepté la proposition de l’établissement (admis)'];
-    const prop = r['Effectif total des candidats ayant reçu une proposition d’admission de la part de l’établissement'];
-    const cap = r['Capacité de l’établissement par formation'];
+    const admis = r['Effectif total des candidats ayant accepté la proposition de l'établissement (admis)'];
+    const prop = r['Effectif total des candidats ayant reçu une proposition d'admission de la part de l'établissement'];
+    const cap = r['Capacité de l'établissement par formation'];
     const pression = r.pression_candidats_par_place;
     const tauxAdmis = r.taux_admis_sur_candidats_pct;
     const tauxProp = r.taux_propositions_sur_candidats_pct;
@@ -357,5 +353,3 @@ function buildOpenDataReferenceContext(question) {
 }
 
 loadParcoursupOpenDataReference();
-
-
