@@ -179,7 +179,7 @@ def creer_ou_vider_table(df):
         print(f"      → Table créée avec {len(colonnes_def)} colonnes")
 
 
-def charger_par_lots(df, taille_lot=500):
+def charger_par_lots(df, taille_lot=50):
     """Envoie les données en lots de taille_lot lignes."""
     total = len(df)
     chargees = 0
