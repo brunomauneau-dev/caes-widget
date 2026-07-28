@@ -40,39 +40,9 @@ ACADEMIE_FILTRE = os.environ.get("ACADEMIE_FILTRE", "Bordeaux")  # None = nation
 SESSION         = int(os.environ.get("SESSION", "2025"))
 CI              = os.environ.get("CI", "false").lower() == "true"
 
-# Colonnes à importer (sous-ensemble lisible ; mettre [] pour tout importer)
-COLONNES = [
-    "session",
-    "g_uai",             # code UAI
-    "g_ea_lib_vx",       # établissement
-    "dep_lib",           # département
-    "acad_mies",         # académie
-    "region_etab_aff",   # région
-    "fili",              # filière (libellé court)
-    "lib_for_voe_ins",   # filière agrégée
-    "lib_comp_voe_ins",  # formation détaillée
-    "select_form",       # sélectivité (Oui/Non)
-    "capa_fin",          # capacité finale
-    "voe_tot",           # total voeux
-    "voe_tot_f",         # dont filles
-    "nb_voe_pp_bg",      # voeux bac général
-    "nb_voe_pp_bt",      # voeux bac techno
-    "nb_voe_pp_bp",      # voeux bac pro
-    "prop_tot",          # propositions totales
-    "acc_tot",           # admissions totales
-    "acc_tot_f",         # dont filles admises
-    "acc_bg",            # admis bac général
-    "acc_bt",            # admis bac techno
-    "acc_bp",            # admis bac pro
-    "pct_f",             # % filles admises
-    "pct_bg",            # % bac général admis
-    "pct_bt",            # % bac techno admis
-    "pct_bp",            # % bac pro admis
-    "nb_bours_t",        # boursiers admis
-    "pct_bours",         # % boursiers parmi admis
-    "rang_der_app_b",    # rang dernier appelé
-    "taux_adm",          # taux d'admission
-]
+# Colonnes à importer — laisser vide pour tout importer (recommandé la première fois)
+# Une fois le premier chargement réussi, on peut restreindre à un sous-ensemble.
+COLONNES = []
 
 # ─────────────────────────────────────────
 #  1. TÉLÉCHARGEMENT
