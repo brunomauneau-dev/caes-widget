@@ -92,6 +92,8 @@ let parcoursupOD = { meta: null, important_columns: [], dimensions: {}, aggregat
 let parcoursupODReady = false;
 let parcoursupNational = [];
 let parcoursupNationalReady = false;
+let nationalModeActive = false;
+function setNationalMode(active) { nationalModeActive = active; }
 
 function normalizeForSearch(value) {
   return String(value || '')
@@ -376,6 +378,17 @@ const NATIONAL_SELECT = [
   'rang_der_app_b', 'taux_adm'
 ].join(',');
 
+/* Colonnes Grist à conserver pour les données nationales (évite de charger les 118 colonnes) */
+const NATIONAL_COLS_KEEP = new Set([
+  'session', 'contrat_etab', 'g_uai', 'g_ea_lib_vx', 'dep', 'dep_lib',
+  'acad_mies', 'region_etab_aff', 'ville_etab',
+  'fili', 'lib_for_voe_ins', 'lib_comp_voe_ins', 'form_lib_voe_acc', 'select_form',
+  'capa_fin', 'voe_tot', 'voe_tot_f', 'prop_tot', 'acc_tot', 'acc_tot_f',
+  'acc_bg', 'acc_bt', 'acc_bp',
+  'pct_f', 'pct_bg', 'pct_bt', 'pct_bp', 'pct_bours', 'nb_bours_t',
+  'rang_der_app_b', 'taux_adm'
+]);
+
 function parseCSVSimple(text, sep = ';') {
   const lines = text.replace(/\r\n?/g, '\n').trim().split('\n');
   if (lines.length < 2) return [];
@@ -408,7 +421,7 @@ async function loadParcoursupNational() {
     if (typeof grist !== 'undefined' && grist.docApi) {
       const raw = await grist.docApi.fetchTable('Parcoursup_National');
       if (raw && raw.id && raw.id.length > 0) {
-        const keys = Object.keys(raw).filter(k => k !== 'id' && !k.startsWith('manualSort'));
+        const keys = Object.keys(raw).filter(k => k !== 'id' && !k.startsWith('manualSort') && NATIONAL_COLS_KEEP.has(k));
         parcoursupNational = raw.id.map((_, i) => {
           const obj = {};
           keys.forEach(k => { obj[k] = raw[k][i]; });
@@ -473,12 +486,31 @@ function formatNationalRows(rows) {
 }
 
 function buildNationalDataContext(question) {
-  if (!parcoursupNationalReady) return '';
+  if (!parcoursupNationalReady) {
+    if (nationalModeActive) return `MODE NATIONAL ACTIVÉ — les données nationales ${NATIONAL_SESSION} ne sont pas encore chargées. Informe l'utilisateur et invite-le à patienter quelques secondes puis à reposer sa question.`;
+    return '';
+  }
   const q = normalizeForSearch(question);
-  if (!/national|bordeaux|formation|comparer|comparaison|taux|admission|rang|pression|boursier|filiere|capacite|bts|but|cpge|licence|ifsi|pass|las/.test(q)) return '';
-  const hits = searchNationalFormations(question);
+  if (!nationalModeActive && !/national|bordeaux|formation|comparer|comparaison|taux|admission|rang|pression|boursier|filiere|capacite|bts|but|cpge|licence|ifsi|pass|las/.test(q)) return '';
+
+  const hits = searchNationalFormations(question, nationalModeActive ? 15 : 8);
+  const header = `DONNÉES NATIONALES PARCOURSUP — académie Bordeaux, session ${NATIONAL_SESSION} (source : data.gouv.fr)\nDonnées agrégées par formation. Ne contiennent PAS de données individuelles candidats.\nINSTRUCTION : quand tu cites ces données, précise systématiquement l'année (ex : "en ${NATIONAL_SESSION}, à titre de comparaison nationale...") pour distinguer des données locales de la session en cours.`;
+
+  if (!hits.length && nationalModeActive) {
+    // Question trop générique ou formation absente — deux sous-cas
+    const isGeneric = /resume|synthese|synthèse|overview|apercu|liste|toutes?|ensemble|global/i.test(q);
+    if (isGeneric) {
+      // Retourner un échantillon représentatif (10 formations variées)
+      const sample = parcoursupNational.slice(0, 10);
+      return `MODE NATIONAL ACTIVÉ — question générale détectée, voici un aperçu de la base.\n${header}\n\nÉchantillon (${sample.length} formations sur ${parcoursupNational.length}) :\n${formatNationalRows(sample)}\nINSTRUCTION : signale que la base contient ${parcoursupNational.length} formations et propose à l'utilisateur de préciser une filière ou une formation pour une analyse ciblée.`;
+    }
+    // Formation non trouvée
+    return `MODE NATIONAL ACTIVÉ — aucune formation correspondant à cette question n'a été trouvée dans la base nationale ${NATIONAL_SESSION}.\n${header}\n\nINSTRUCTION : explique à l'utilisateur qu'aucune formation ne correspond à sa recherche dans la base nationale ${NATIONAL_SESSION} (${parcoursupNational.length} formations académie Bordeaux disponibles) et propose-lui de reformuler avec un autre nom de filière ou de formation.`;
+  }
+
   if (!hits.length) return '';
-  return `DONNÉES NATIONALES PARCOURSUP — académie Bordeaux, session ${NATIONAL_SESSION} (source : data.gouv.fr)\nDonnées agrégées par formation. Ne contiennent PAS de données individuelles candidats.\nINSTRUCTION : quand tu cites ces données, précise systématiquement l'année (ex : "en ${NATIONAL_SESSION}, à titre de comparaison nationale...") pour distinguer des données locales de la session en cours.\n\n${formatNationalRows(hits)}`;
+  const modeNote = nationalModeActive ? 'MODE NATIONAL ACTIVÉ — réponds en te basant principalement sur ces données.\n' : '';
+  return `${modeNote}${header}\n\n${formatNationalRows(hits)}`;
 }
 
 loadParcoursupNational();
