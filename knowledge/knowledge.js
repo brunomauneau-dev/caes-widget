@@ -403,6 +403,27 @@ function parseCSVSimple(text, sep = ';') {
 }
 
 async function loadParcoursupNational() {
+  // 1. Source principale : table Grist Parcoursup_National
+  try {
+    if (typeof grist !== 'undefined' && grist.docApi) {
+      const raw = await grist.docApi.fetchTable('Parcoursup_National');
+      if (raw && raw.id && raw.id.length > 0) {
+        const keys = Object.keys(raw).filter(k => k !== 'id' && !k.startsWith('manualSort'));
+        parcoursupNational = raw.id.map((_, i) => {
+          const obj = {};
+          keys.forEach(k => { obj[k] = raw[k][i]; });
+          return obj;
+        });
+        parcoursupNationalReady = parcoursupNational.length > 0;
+        updateKnowledgeStatusBadge();
+        return;
+      }
+    }
+  } catch (e) {
+    console.warn('[Parcoursup National] table Grist non disponible, essai data.gouv :', e.message);
+  }
+
+  // 2. Fallback : API data.gouv directement (si la table Grist n'existe pas encore)
   try {
     const params = new URLSearchParams({
       where: `session=${NATIONAL_SESSION} AND acad_mies="${NATIONAL_ACADEMIE}"`,
@@ -417,7 +438,7 @@ async function loadParcoursupNational() {
     parcoursupNationalReady = parcoursupNational.length > 0;
     updateKnowledgeStatusBadge();
   } catch (e) {
-    console.warn('[Parcoursup National] données live non chargées :', e.message);
+    console.warn('[Parcoursup National] données non chargées :', e.message);
     parcoursupNationalReady = false;
     updateKnowledgeStatusBadge();
   }
@@ -457,7 +478,7 @@ function buildNationalDataContext(question) {
   if (!/national|bordeaux|formation|comparer|comparaison|taux|admission|rang|pression|boursier|filiere|capacite|bts|but|cpge|licence|ifsi|pass|las/.test(q)) return '';
   const hits = searchNationalFormations(question);
   if (!hits.length) return '';
-  return `DONNÉES NATIONALES PARCOURSUP — académie Bordeaux, session ${NATIONAL_SESSION} (source : data.gouv.fr)\nDonnées agrégées par formation. Ne contiennent PAS de données individuelles candidats.\n\n${formatNationalRows(hits)}`;
+  return `DONNÉES NATIONALES PARCOURSUP — académie Bordeaux, session ${NATIONAL_SESSION} (source : data.gouv.fr)\nDonnées agrégées par formation. Ne contiennent PAS de données individuelles candidats.\nINSTRUCTION : quand tu cites ces données, précise systématiquement l'année (ex : "en ${NATIONAL_SESSION}, à titre de comparaison nationale...") pour distinguer des données locales de la session en cours.\n\n${formatNationalRows(hits)}`;
 }
 
 loadParcoursupNational();
