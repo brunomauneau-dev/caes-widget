@@ -335,6 +335,9 @@ function compactOpenDataRows(rows, maxRows = 10) {
 }
 
 function buildOpenDataReferenceContext(question) {
+  // En mode national activé : court-circuiter les filtres OD et retourner directement
+  // le contexte national, même si parcoursupODReady est faux ou si les mots-clés OD ne matchent pas.
+  if (nationalModeActive) return buildNationalDataContext(question);
   if (!parcoursupODReady || !wantsOpenDataReference(question)) return '';
   const q = normalizeForSearch(question);
   const parts = [];
@@ -509,7 +512,9 @@ function buildNationalDataContext(question) {
   }
 
   if (!hits.length) return '';
-  const modeNote = nationalModeActive ? 'MODE NATIONAL ACTIVÉ — réponds en te basant principalement sur ces données.\n' : '';
+  const modeNote = nationalModeActive
+    ? 'MODE NATIONAL ACTIVÉ — INSTRUCTION PRIORITAIRE : utilise UNIQUEMENT les données nationales ci-dessous pour répondre. Ignore toute répartition ou statistique calculée sur la table locale. La question porte sur la base nationale Parcoursup 2025, pas sur les données locales de la session en cours.\n'
+    : '';
   return `${modeNote}${header}\n\n${formatNationalRows(hits)}`;
 }
 
