@@ -50,6 +50,7 @@ parcoursup-opendata-reference-v1.json
 | PR5 | Copilot feel (layout plein écran, panneau sources, mini-suggestions) | ✅ |
 | T2  | Garde-fous DOM sur tous les modules | ✅ |
 | T4  | Synchronisation script timing (`defer` + init guards) | ✅ |
+| PN  | Données nationales Parcoursup n-1 → Grist : GitHub Actions (`load-parcoursup.yml`) + script Python (`scripts/load_parcoursup_to_grist.py`) + table `Parcoursup_National` (631 lignes, académie Bordeaux, session 2025) + intégration `knowledge.js` (`loadParcoursupNational`, `buildNationalDataContext`) | ✅ |
 
 ---
 

@@ -30,6 +30,12 @@ Fichiers de données (chargés dynamiquement depuis la racine) :
 | `parcoursup-kb-index-v2.json` | Index hybride de la KB (recherche par terme) |
 | `parcoursup-opendata-reference-v1.json` | Référentiel national open data Parcoursup |
 
+Table Grist additionnelle (chargée via GitHub Actions) :
+
+| Table | Rôle |
+|---|---|
+| `Parcoursup_National` | Données nationales Parcoursup n-1 (académie Bordeaux, session 2025, 631 lignes). Rechargeable manuellement via `.github/workflows/load-parcoursup.yml`. |
+
 ---
 
 ## Règles de développement
