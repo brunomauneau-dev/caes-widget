@@ -235,8 +235,8 @@ const PARCOURSUP_ONTOLOGY_RULES = [
   { family:'identifiants', role:'identifiant technique', priority:1, re:/\b(id|identifiant|numero|num[eé]ro|code uai|uai|manualsort)\b/i, avoid:true },
   { family:'territoire', role:'filtre territorial', priority:95, re:/zone.*pays.*basque|pays.*basque|\bzone\b/i },
   { family:'territoire', role:'département du candidat', priority:82, re:/d[eé]partement(?!.*accueil)|dept/i },
-  { family:'territoire', role:'académie d'origine/scolarité', priority:58, re:/acad[eé]mie.*(scolar|origine|candidat|lyc[eé]e)/i },
-  { family:'territoire', role:'commune d'origine/scolarité', priority:50, re:/commune.*(scolar|origine|candidat|lyc[eé]e)/i },
+  { family:'territoire', role:"académie d'origine/scolarité", priority:58, re:/acad[eé]mie.*(scolar|origine|candidat|lyc[eé]e)/i },
+  { family:'territoire', role:"commune d'origine/scolarité", priority:50, re:/commune.*(scolar|origine|candidat|lyc[eé]e)/i },
 
   { family:'admission', role:'a reçu une proposition', priority:90, re:/proposition.*(oui|non|re[cç]ue|eu)|a.*proposition/i },
   { family:'admission', role:'a accepté / répondu favorablement', priority:92, re:/r[eé]pondu favorablement|proposition.*accept[eé]e|acceptation/i },
@@ -247,13 +247,13 @@ const PARCOURSUP_ONTOLOGY_RULES = [
   { family:'formation', role:'formation/spécialité acceptée', priority:96, re:/sp[eé]cialit[eé].*mention.*formation.*accueil.*accept[eé]e|mention.*formation.*accept|formation.*accueil.*accept[eé]e/i },
   { family:'formation', role:'filière/domaine', priority:74, re:/fili[eè]re|domaine|discipline/i },
 
-  { family:'mobilité', role:'académie d'accueil acceptée', priority:100, re:/acad[eé]mie.*(accueil|[eé]tablissement).*accept[eé]e|acad[eé]mie.*accueil/i },
-  { family:'mobilité', role:'département d'accueil', priority:86, re:/d[eé]partement.*(accueil|[eé]tablissement).*accept[eé]e/i },
-  { family:'mobilité', role:'région d'accueil', priority:75, re:/r[eé]gion.*(accueil|[eé]tablissement).*accept[eé]e/i },
-  { family:'mobilité', role:'commune d'accueil', priority:70, re:/commune.*(accueil|[eé]tablissement).*accept[eé]e/i },
+  { family:'mobilité', role:"académie d'accueil acceptée", priority:100, re:/acad[eé]mie.*(accueil|[eé]tablissement).*accept[eé]e|acad[eé]mie.*accueil/i },
+  { family:'mobilité', role:"département d'accueil", priority:86, re:/d[eé]partement.*(accueil|[eé]tablissement).*accept[eé]e/i },
+  { family:'mobilité', role:"région d'accueil", priority:75, re:/r[eé]gion.*(accueil|[eé]tablissement).*accept[eé]e/i },
+  { family:'mobilité', role:"commune d'accueil", priority:70, re:/commune.*(accueil|[eé]tablissement).*accept[eé]e/i },
 
-  { family:'établissement', role:'établissement d'accueil', priority:76, re:/[eé]tablissement.*accueil.*accept[eé]e|nom.*[eé]tablissement.*accueil/i },
-  { family:'établissement', role:'établissement de scolarité', priority:52, re:/[eé]tablissement.*scolarit[eé]|lyc[eé]e/i },
+  { family:'établissement', role:"établissement d'accueil", priority:76, re:/[eé]tablissement.*accueil.*accept[eé]e|nom.*[eé]tablissement.*accueil/i },
+  { family:'établissement', role:"établissement de scolarité", priority:52, re:/[eé]tablissement.*scolarit[eé]|lyc[eé]e/i },
   { family:'établissement', role:'secteur établissement', priority:68, re:/secteur.*[eé]tablissement|public|priv[eé]/i },
 
   { family:'profil social', role:'boursier', priority:85, re:/\bboursier\b|bourse/i },
