@@ -1,0 +1,31 @@
+name: Charger données Parcoursup → Grist
+
+on:
+  workflow_dispatch:
+    inputs:
+      academie:
+        description: 'Académie à charger'
+        required: false
+        default: 'Bordeaux'
+      session:
+        description: 'Session (année)'
+        required: false
+        default: '2025'
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Installer les dépendances
+        run: pip install pandas requests
+      - name: Charger les données dans Grist
+        run: python scripts/load_parcoursup_to_grist.py
+        env:
+          GRIST_API_KEY: ${{ secrets.GRIST_API_KEY }}
+          ACADEMIE_FILTRE: ${{ inputs.academie }}
+          SESSION: ${{ inputs.session }}
+          CI: 'true'
