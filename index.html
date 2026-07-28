@@ -1153,3 +1153,1158 @@ function toggleNationalMode() {
 
 </body>
 </html>
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Parcoursup Data Copilot — Albert</title>
+<script src="https://docs.getgrist.com/grist-plugin-api.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.11.0/mammoth.browser.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
+<script src="js/planner.js?v=27.5.8" defer></script>
+<script src="js/dataEngine.js?v=27.5.18" defer></script>
+<script src="js/config.js?v=27.5.7" defer></script>
+<script src="js/knowledge.js?v=27.5.15" defer></script>
+<script src="js/documents.js?v=27.5.8" defer></script>
+<script src="js/infographic.js?v=27.5.9" defer></script>
+<script src="js/sessions.js?v=27.5.15" defer></script>
+<script src="js/albert.js?v=27.6.12" defer></script>
+<style id="de-print-page-style"></style>
+<style>
+  :root {
+    --bleu:    #1a3a5c;
+    --bleu2:   #2d5f8a;
+    --vert:    #2a7a4b;
+    --orange:  #b45309;
+    --rouge:   #b91c1c;
+    --gris0:   #f5f6f8;
+    --gris1:   #e8eaed;
+    --gris2:   #c8cdd5;
+    --gris3:   #6b7280;
+    --texte:   #1f2937;
+    --blanc:   #ffffff;
+    --albert:  #6d28d9;
+    --albert2: #ede9fe;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--gris0);
+    color: var(--texte);
+    font-size: 13px;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ── Layout global v27 : Copilot plein écran + sources en tiroir ── */
+  .app {
+    display: grid;
+    grid-template-columns: 1fr;
+    height: 100vh;
+  }
+  @media (max-width: 760px) {
+    .app { grid-template-columns: 1fr; height: 100vh; overflow: hidden; }
+    body { height: 100vh; overflow: hidden; }
+  }
+
+  /* ── Colonne gauche : documents ── */
+  .docs-panel {
+    background: var(--blanc);
+    border-right: 1px solid var(--gris1);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .docs-header {
+    background: var(--bleu);
+    color: var(--blanc);
+    padding: 12px 16px;
+  }
+  .docs-header .title { font-size: 13px; font-weight: 700; }
+  .docs-header .sub { font-size: 10px; opacity: 0.6; margin-top: 2px; }
+
+
+  .doc-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .doc-item {
+    background: var(--gris0);
+    border: 1px solid var(--gris1);
+    border-radius: 8px;
+    padding: 10px 12px;
+    cursor: pointer;
+    transition: all 0.1s;
+    position: relative;
+  }
+  .doc-item:hover { border-color: var(--gris2); }
+  .doc-item.selected { background: var(--albert2); border-color: var(--albert); }
+  .doc-item .doc-name {
+    font-size: 12px; font-weight: 600; color: var(--texte);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    padding-right: 20px;
+  }
+  .doc-item .doc-meta {
+    font-size: 10px; color: var(--gris3); margin-top: 3px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .doc-badge {
+    font-size: 9px; font-weight: 700; padding: 1px 6px;
+    border-radius: 10px; text-transform: uppercase;
+  }
+  .doc-badge.pdf  { background: #fee2e2; color: #991b1b; }
+  .doc-badge.docx { background: #dbeafe; color: #1e40af; }
+  .doc-badge.xlsx { background: #d1fae5; color: #065f46; }
+  .doc-badge.txt  { background: var(--gris1); color: var(--gris3); }
+  .doc-remove {
+    position: absolute; top: 8px; right: 8px;
+    background: none; border: none; cursor: pointer;
+    color: var(--gris3); font-size: 13px; padding: 2px;
+    line-height: 1;
+  }
+  .doc-remove:hover { color: var(--rouge); }
+  .doc-status {
+    font-size: 10px; margin-top: 4px;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .doc-status.ok { color: var(--vert); }
+  .doc-status.loading { color: var(--gris3); }
+  .doc-status.error { color: var(--rouge); }
+
+  .grist-section {
+    border-top: 1px solid var(--gris1);
+    padding: 12px;
+  }
+  .grist-section .gs-label {
+    font-size: 10px; font-weight: 700; color: var(--gris3);
+    text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;
+  }
+  .grist-empty {
+    font-size: 11px; color: var(--gris3); font-style: italic;
+    padding: 8px 0;
+  }
+
+  /* ── Colonne droite : chat ── */
+  .chat-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+  .chat-header {
+    background: var(--blanc);
+    border-bottom: 1px solid var(--gris1);
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .chat-header .ch-title { font-size: 13px; font-weight: 700; color: var(--texte); }
+  .chat-header .ch-sub { font-size: 11px; color: var(--gris3); margin-top: 2px; }
+  .albert-badge {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--albert2); color: var(--albert);
+    font-size: 11px; font-weight: 600;
+    padding: 4px 10px; border-radius: 20px;
+  }
+  .albert-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--albert); }
+
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .msg { max-width: 80%; }
+  .msg.user { align-self: flex-end; }
+  .msg.assistant { align-self: flex-start; position: relative; }
+  .msg-dismiss {
+    position: absolute; top: 6px; right: 6px;
+    background: none; border: none; cursor: pointer;
+    color: var(--gris3); font-size: 14px; line-height: 1;
+    padding: 2px 5px; border-radius: 4px; opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 2;
+  }
+  .msg.assistant:hover .msg-dismiss { opacity: 1; }
+  .msg-dismiss:hover { color: var(--rouge); background: var(--gris1); }
+  .msg-bubble {
+    padding: 11px 15px;
+    border-radius: 12px;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .msg.user .msg-bubble {
+    background: var(--bleu);
+    color: var(--blanc);
+    border-radius: 12px 12px 2px 12px;
+  }
+  .msg.assistant .msg-bubble {
+    background: var(--blanc);
+    border: 1px solid var(--gris1);
+    color: var(--texte);
+    border-radius: 12px 12px 12px 2px;
+  }
+  .msg.assistant .msg-bubble h4 { font-size: 12px; font-weight: 700; color: var(--albert); margin: 10px 0 4px; }
+  .msg.assistant .msg-bubble h4:first-child { margin-top: 0; }
+  .msg.assistant .msg-bubble p { margin-bottom: 6px; }
+  .msg.assistant .msg-bubble ul { padding-left: 18px; margin-bottom: 6px; }
+  .msg.assistant .msg-bubble li { margin-bottom: 3px; }
+  .msg.assistant .msg-bubble strong { color: var(--texte); font-weight: 700; }
+  .msg.assistant .msg-bubble code {
+    background: var(--gris0); padding: 1px 5px; border-radius: 4px;
+    font-family: monospace; font-size: 12px;
+  }
+
+  .msg-sources {
+    font-size: 10px; color: var(--gris3); margin-top: 5px;
+    display: flex; gap: 4px; flex-wrap: wrap;
+  }
+  .msg-source-chip {
+    background: var(--gris0); border: 1px solid var(--gris1);
+    padding: 2px 8px; border-radius: 10px; font-weight: 600;
+  }
+
+  .empty-state {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    color: var(--gris3); text-align: center; padding: 40px;
+  }
+  .empty-state .es-icon { font-size: 40px; margin-bottom: 14px; opacity: 0.3; }
+  .empty-state .es-title { font-size: 14px; font-weight: 600; color: var(--texte); margin-bottom: 6px; }
+  .empty-state .es-sub { font-size: 12px; max-width: 320px; line-height: 1.6; }
+
+  .suggestions {
+    display: flex; flex-wrap: wrap; gap: 6px; justify-content: center;
+    margin-top: 16px; max-width: 420px;
+  }
+  .sugg-chip {
+    background: var(--blanc); border: 1px solid var(--gris2);
+    padding: 6px 12px; border-radius: 20px; font-size: 11px;
+    color: var(--gris3); cursor: pointer; transition: all 0.1s;
+  }
+  .sugg-chip:hover { border-color: var(--albert); color: var(--albert); background: var(--albert2); }
+
+  .mini-suggestions {
+    display: flex; flex-wrap: wrap; gap: 5px; padding: 0 0 6px;
+    width: 100%; box-sizing: border-box; overflow: hidden;
+  }
+  .mini-suggestions:empty { display: none; }
+  .mini-sugg-chip {
+    background: var(--gris0,#f8fafc); border: 1px solid var(--gris1,#f3f4f6);
+    padding: 3px 9px; border-radius: 14px; font-size: 10px;
+    color: var(--gris4,#9ca3af); cursor: pointer; transition: all 0.1s;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px;
+  }
+  .mini-sugg-chip:hover { border-color: var(--albert); color: var(--albert); background: var(--albert2); }
+
+  .loading-msg {
+    display: flex; align-items: center; gap: 8px;
+    color: var(--gris3); font-size: 12px; padding: 4px 0;
+  }
+  .spinner {
+    width: 14px; height: 14px;
+    border: 2px solid var(--gris1);
+    border-top-color: var(--albert);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .chat-input-zone {
+    border-top: 1px solid var(--gris1);
+    background: var(--blanc);
+    padding: 14px 20px;
+  }
+  .chat-input-row {
+    display: flex; gap: 10px; align-items: flex-end;
+  }
+  .chat-input-row textarea {
+    flex: 1; min-height: 42px; max-height: 120px;
+    font-size: 13px; padding: 10px 14px;
+    border: 1px solid var(--gris2); border-radius: 10px;
+    resize: none; font-family: inherit; color: var(--texte);
+  }
+  .chat-input-row textarea:focus { outline: none; border-color: var(--albert); }
+  .btn-send {
+    background: var(--albert); color: var(--blanc);
+    border: none; border-radius: 10px;
+    width: 42px; height: 42px; flex-shrink: 0;
+    cursor: pointer; font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s;
+  }
+  .btn-send:hover { background: #5b21b6; }
+  .btn-send:disabled { background: var(--gris2); cursor: not-allowed; }
+
+  .context-pills {
+    display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px;
+  }
+  .context-pill {
+    font-size: 10px; font-weight: 600;
+    background: var(--albert2); color: var(--albert);
+    padding: 2px 9px; border-radius: 20px;
+  }
+  .context-pill.none { background: var(--gris0); color: var(--gris3); }
+
+  /* ── Filtres persistants ── */
+  .pf-bar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    padding: 6px max(22px, calc((100vw - 1040px)/2));
+    background: var(--gris0); border-bottom: 1px solid var(--gris1);
+    min-height: 36px;
+  }
+  .pf-bar.empty { display: none; }
+  .pf-label { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .7px; color: var(--gris3); flex-shrink: 0; }
+  .pf-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: #fef3c7; border: 1px solid #f59e0b; color: #92400e;
+    font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 20px;
+  }
+  .pf-chip button {
+    background: none; border: none; cursor: pointer; color: #92400e;
+    font-size: 13px; line-height: 1; padding: 0; margin-left: 2px; opacity: .7;
+  }
+  .pf-chip button:hover { opacity: 1; }
+  .pf-clear { font-size: 10px; color: var(--gris3); background: none; border: none; cursor: pointer; margin-left: 4px; }
+  .pf-clear:hover { color: var(--rouge); }
+
+  /* PR 2.2 - barre contexte moteur */
+  .ec-bar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    padding: 5px max(22px, calc((100vw - 1040px)/2));
+    background: #eff6ff; border-bottom: 1px solid #bfdbfe;
+    min-height: 32px;
+  }
+  .ec-bar.empty { display: none; }
+  .ec-label { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .7px; color: #3b82f6; flex-shrink: 0; }
+  .ec-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: #dbeafe; border: 1px solid #93c5fd; color: #1e40af;
+    font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 20px;
+  }
+  .ec-reset { font-size: 10px; color: #3b82f6; background: none; border: none; cursor: pointer; margin-left: auto; }
+  .ec-reset:hover { color: var(--rouge); text-decoration: underline; }
+
+  /* Modal config Albert */
+  .modal-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.4);
+    align-items: center; justify-content: center;
+    z-index: 1000;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal-box {
+    background: var(--blanc); border-radius: 12px;
+    padding: 24px; width: 380px; max-width: 90vw;
+  }
+  .modal-box h3 { font-size: 14px; margin-bottom: 14px; color: var(--texte); }
+  .modal-box label { font-size: 11px; font-weight: 600; color: var(--gris3); display: block; margin-bottom: 4px; margin-top: 12px; }
+  .modal-box input, .modal-box select {
+    width: 100%; font-size: 13px; padding: 8px 10px;
+    border: 1px solid var(--gris2); border-radius: 6px;
+  }
+  .modal-box .modal-actions { display: flex; gap: 8px; margin-top: 18px; }
+  .modal-box button {
+    flex: 1; padding: 9px; border-radius: 6px; border: none;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .btn-cancel { background: var(--gris0); color: var(--gris3); }
+  .btn-confirm { background: var(--albert); color: var(--blanc); }
+  .gear-btn {
+    background: none; border: none; cursor: pointer;
+    font-size: 16px; color: var(--gris3); padding: 4px;
+  }
+  .gear-btn:hover { color: var(--albert); }
+
+
+  /* ═══════════════ V27 · COPILOT EXPERIENCE ═══════════════ */
+  .docs-panel {
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    width: 340px;
+    max-width: min(88vw, 380px);
+    z-index: 2600;
+    transform: translateX(-105%);
+    transition: transform .18s ease;
+    box-shadow: 18px 0 38px rgba(15, 23, 42, .18);
+  }
+  body.sources-open .docs-panel { transform: translateX(0); }
+  .source-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(15, 23, 42, .28);
+    z-index: 2500;
+    display: none;
+  }
+  body.sources-open .source-backdrop { display: block; }
+  .docs-header { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+  .docs-close {
+    background: rgba(255,255,255,.14); color: #fff; border: 0;
+    width: 28px; height: 28px; border-radius: 8px; cursor: pointer; font-weight:800;
+  }
+  .chat-panel { width: 100%; }
+  .chat-header { padding: 12px 22px; position: relative; z-index: 50; }
+  .chat-header-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+  .header-action {
+    border:1px solid var(--gris1); background:var(--blanc); color:var(--texte);
+    border-radius:999px; padding:7px 10px; font-size:11px; font-weight:800;
+    cursor:pointer; display:inline-flex; align-items:center; gap:6px;
+  }
+  .header-action:hover { border-color: var(--albert); color: var(--albert); background: var(--albert2); }
+  .header-action.primary { background: var(--albert2); color: var(--albert); border-color: transparent; }
+  .header-action.active { background: var(--vert); color: #fff; border-color: var(--vert); }
+  .header-action.active:hover { background: var(--vert); color: #fff; opacity: 0.9; }
+  .chat-messages { padding: 24px max(22px, calc((100vw - 1040px)/2)); }
+  .msg { width: 100%; max-width: 980px; }
+  .msg.assistant { align-self: center; }
+  .msg.user { max-width: 520px; align-self: flex-end; }
+  .msg.assistant .msg-bubble { border-radius: 14px; box-shadow: 0 1px 0 rgba(15,23,42,.03); }
+  .msg.user .msg-bubble { border-radius: 14px 14px 3px 14px; }
+  .chat-input-zone { padding: 14px max(22px, calc((100vw - 1040px)/2)); }
+  .copilot-actions {
+    margin-top: 8px; display:flex; flex-wrap:wrap; gap:7px;
+  }
+  .copilot-action {
+    border:1px solid var(--gris1); background:var(--gris0); color:var(--gris3);
+    border-radius:999px; padding:6px 10px; font-size:11px; font-weight:800;
+    cursor:pointer;
+  }
+  .copilot-action:hover { border-color: var(--albert); color:var(--albert); background:var(--albert2); }
+  @media (max-width: 760px) {
+    .chat-header { padding: 10px 12px; }
+    .chat-header-actions .albert-badge { display:none; }
+    .header-action span.label { display:none; }
+    .chat-messages { padding: 14px 10px; }
+    .chat-input-zone { padding: 10px; }
+    .msg, .msg.user { max-width: 100%; }
+  }
+
+  /* ═══════════════ V27.5.4 · SESSIONS (panneau repliable, même mécanique que docs-panel) ═══════════════ */
+  .sessions-panel {
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    width: 300px;
+    max-width: min(88vw, 340px);
+    z-index: 2600;
+    transform: translateX(-105%);
+    transition: transform .18s ease;
+    box-shadow: 18px 0 38px rgba(15, 23, 42, .18);
+    background: var(--blanc);
+    border-right: 1px solid var(--gris1);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  body.sessions-open .sessions-panel { transform: translateX(0); pointer-events: auto; }
+  .sessions-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(15, 23, 42, .28);
+    z-index: 2500;
+    display: none;
+  }
+  body.sessions-open .sessions-backdrop { display: block; }
+  .sessions-header {
+    background: var(--bleu);
+    color: var(--blanc);
+    padding: 12px 16px;
+    display:flex; justify-content:space-between; align-items:flex-start; gap:10px;
+  }
+  .sessions-header .title { font-size: 13px; font-weight: 700; }
+  .sessions-header .sub { font-size: 10px; opacity: 0.6; margin-top: 2px; }
+  .session-new-btn {
+    margin: 12px;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--albert);
+    background: var(--albert2);
+    color: var(--albert);
+    font-weight: 700;
+    font-size: 12px;
+    cursor: pointer;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .session-new-btn:hover { background: var(--albert); color: #fff; }
+  .session-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .session-item {
+    background: var(--gris0);
+    border: 1px solid var(--gris1);
+    border-radius: 8px;
+    padding: 10px 12px;
+    cursor: pointer;
+    transition: all 0.1s;
+    position: relative;
+  }
+  .session-item:hover { border-color: var(--gris2); }
+  .session-item.active { background: var(--albert2); border-color: var(--albert); }
+  .session-item .session-title {
+    font-size: 12px; font-weight: 600; color: var(--texte);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    padding-right: 20px;
+  }
+  .session-item .session-meta {
+    font-size: 10px; color: var(--gris3); margin-top: 3px;
+  }
+  .session-delete {
+    position: absolute; top: 8px; right: 8px;
+    background: none; border: none; cursor: pointer;
+    color: var(--gris3); font-size: 13px; padding: 2px;
+    line-height: 1;
+  }
+  .session-delete:hover { color: var(--rouge); }
+
+  /* ── Viewer de document ── */
+  .doc-name-clickable {
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-color: transparent;
+    transition: text-decoration-color 0.15s;
+  }
+  .doc-name-clickable:hover { text-decoration-color: var(--albert); }
+
+  .viewer-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.5);
+    align-items: center; justify-content: center;
+    z-index: 2000;
+    padding: 24px;
+  }
+  .viewer-overlay.show { display: flex; }
+  .viewer-box {
+    background: var(--blanc);
+    border-radius: 12px;
+    width: 100%; max-width: 760px;
+    height: 100%; max-height: 680px;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .viewer-header {
+    background: var(--bleu); color: var(--blanc);
+    padding: 14px 20px;
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .viewer-header .vh-title { font-size: 13px; font-weight: 700; }
+  .viewer-header .vh-sub { font-size: 11px; opacity: 0.6; margin-top: 2px; }
+  .viewer-close {
+    background: rgba(255,255,255,0.15); border: none; color: var(--blanc);
+    width: 28px; height: 28px; border-radius: 6px; cursor: pointer;
+    font-size: 14px; flex-shrink: 0;
+  }
+  .viewer-close:hover { background: rgba(255,255,255,0.25); }
+
+  .viewer-body {
+    flex: 1; overflow-y: auto;
+    padding: 20px;
+    font-size: 12.5px; line-height: 1.7;
+    color: var(--texte);
+    white-space: pre-wrap;
+    font-family: 'Consolas', 'Courier New', monospace;
+    background: var(--gris0);
+  }
+  .viewer-meta {
+    padding: 10px 20px;
+    background: var(--blanc);
+    border-top: 1px solid var(--gris1);
+    font-size: 11px; color: var(--gris3);
+    display: flex; justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .viewer-meta .btn-copy-content {
+    background: none; border: 1px solid var(--gris2);
+    border-radius: 6px; padding: 4px 10px;
+    color: var(--gris3); cursor: pointer; font-size: 11px;
+  }
+  .viewer-meta .btn-copy-content:hover { border-color: var(--albert); color: var(--albert); }
+  .viewer-search { margin: 0 20px; margin-top: 12px; }
+  .viewer-search input {
+    width: 100%; font-size: 12px; padding: 7px 12px;
+    border: 1px solid var(--gris2); border-radius: 6px;
+  }
+  mark.viewer-highlight { background: #fef08a; padding: 0 1px; border-radius: 2px; }
+
+
+  /* ── Hub de sources : Grist pour gros volumes, drag & drop pour analyse rapide ── */
+  .source-hub {
+    margin: 12px;
+    padding: 12px;
+    border: 1px solid var(--gris1);
+    border-radius: 10px;
+    background: var(--gris0);
+    display: grid;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .source-hub-title {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .6px;
+    color: var(--gris3);
+    text-transform: uppercase;
+  }
+  .source-card {
+    background: var(--blanc);
+    border: 1px solid var(--gris1);
+    border-radius: 8px;
+    padding: 10px;
+  }
+  .source-card.active { border-color: var(--vert); background: #f0fdf4; }
+  .source-card.warn { border-color: #fbbf24; background: #fffbeb; }
+  .source-card .sc-head { display:flex; justify-content:space-between; gap:8px; align-items:center; }
+  .source-card .sc-title { font-size: 12px; font-weight: 800; color: var(--texte); }
+  .source-card .sc-badge { font-size: 9px; font-weight: 800; border-radius: 20px; padding: 2px 7px; background: var(--gris1); color: var(--gris3); text-transform: uppercase; white-space: nowrap; }
+  .source-card.active .sc-badge { background:#dcfce7; color:#166534; }
+  .source-card.warn .sc-badge { background:#fef3c7; color:#92400e; }
+  .source-card .sc-detail { margin-top: 5px; font-size: 11px; color: var(--gris3); line-height: 1.45; }
+  .source-card .sc-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .source-action { border:1px solid var(--gris2); background:var(--blanc); color:var(--texte); border-radius:7px; padding:5px 8px; font-size:10px; font-weight:700; cursor:pointer; }
+  .source-action.primary { background:var(--albert); color:white; border-color:var(--albert); }
+  .source-action:hover { border-color: var(--albert); }
+  .doc-advice {
+    margin-top: 7px;
+    padding: 7px 8px;
+    border-radius: 7px;
+    border-left: 3px solid #f59e0b;
+    background: #fffbeb;
+    color: #92400e;
+    font-size: 10px;
+    line-height: 1.45;
+  }
+  .mode-pill {
+    font-size:10px;
+    font-weight:800;
+    background:#eef3f8;
+    color:var(--secondary, #1a3a5c);
+    border:1px solid #d5e1ee;
+    padding:2px 8px;
+    border-radius:999px;
+  }
+
+
+  /* ── Modal brief infographie ── */
+  .brief-modal-box {
+    background: var(--blanc);
+    border-radius: 14px;
+    width: 720px;
+    max-width: 94vw;
+    max-height: 90vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 24px 80px rgba(0,0,0,.28);
+  }
+  .brief-modal-head {
+    background: var(--bleu);
+    color: var(--blanc);
+    padding: 16px 20px;
+    display:flex;
+    justify-content:space-between;
+    gap:14px;
+    align-items:flex-start;
+  }
+  .brief-modal-head h3 { font-size:15px; margin:0 0 4px; }
+  .brief-modal-head p { font-size:11px; opacity:.68; margin:0; line-height:1.45; }
+  .brief-close {
+    background:rgba(255,255,255,.14); border:0; color:white; width:30px; height:30px; border-radius:8px; cursor:pointer;
+  }
+  .brief-modal-body { padding:18px 20px; overflow:auto; display:grid; gap:14px; }
+  .brief-row { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+  .brief-field label { display:block; font-size:10px; text-transform:uppercase; letter-spacing:.8px; font-weight:800; color:var(--gris3); margin-bottom:5px; }
+  .brief-field select, .brief-field input, .brief-field textarea {
+    width:100%; border:1px solid var(--gris2); border-radius:8px; padding:9px 10px; font-family:inherit; font-size:13px; color:var(--texte); background:white;
+  }
+  .brief-field textarea { min-height:92px; resize:vertical; line-height:1.45; }
+  .brief-help { font-size:11px; color:var(--gris3); line-height:1.45; margin-top:5px; }
+  .brief-cascade-box { border:1px solid var(--gris1); background:var(--gris0); border-radius:10px; padding:12px; display:grid; gap:10px; }
+  .cascade-levels-builder { display:grid; gap:8px; }
+  .cascade-level-row { display:grid; grid-template-columns:72px 1fr auto auto; gap:8px; align-items:end; background:#fff; border:1px solid var(--gris1); border-radius:8px; padding:8px; }
+  .cascade-level-row label { font-size:10px; font-weight:800; color:var(--gris3); text-transform:uppercase; letter-spacing:.5px; }
+  .cascade-level-row select { min-width:0; }
+  .cascade-mini-btn { border:1px solid var(--gris2); background:#fff; color:var(--texte); border-radius:7px; padding:7px 9px; cursor:pointer; font-size:11px; font-weight:700; }
+  .cascade-mini-btn:hover { border-color:var(--albert); color:var(--albert); }
+  .cascade-mini-btn.danger:hover { border-color:var(--rouge); color:var(--rouge); }
+  .cascade-controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  @media(max-width:760px){ .cascade-level-row{grid-template-columns:1fr; align-items:stretch;} }
+
+  .brief-check { display:flex; align-items:center; gap:8px; font-size:12px; font-weight:700; color:var(--texte); }
+  .brief-check input { width:auto; }
+  .cascade-tree { display:grid; gap:8px; font-size:12px; }
+  .cascade-node { border-left:3px solid var(--accent, #c1440e); padding-left:10px; }
+  .cascade-node.level-1 { margin-top:8px; }
+  .cascade-title { display:flex; justify-content:space-between; gap:10px; font-weight:800; }
+  .cascade-children { margin-top:6px; margin-left:10px; display:grid; gap:5px; }
+  .cascade-muted { color:var(--muted); font-size:11px; }
+  .brief-chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .brief-chip { border:1px solid var(--gris2); background:var(--gris0); border-radius:999px; padding:5px 9px; font-size:11px; cursor:pointer; user-select:none; }
+  .brief-chip.active { background:var(--albert2); color:var(--albert); border-color:var(--albert); font-weight:700; }
+  .brief-modal-foot { padding:14px 20px; border-top:1px solid var(--gris1); display:flex; justify-content:space-between; gap:10px; align-items:center; }
+  .brief-btn { border:0; border-radius:9px; padding:9px 13px; font-weight:700; font-size:13px; cursor:pointer; }
+  .brief-btn.secondary { background:var(--gris0); color:var(--gris3); border:1px solid var(--gris1); }
+  .brief-btn.primary { background:var(--albert); color:white; }
+  .brief-summary { font-size:11px; color:var(--gris3); }
+  @media(max-width:760px){ .brief-row{grid-template-columns:1fr}.brief-modal-box{width:94vw} }
+
+  /* ── Compositeur d'infographie ── */
+  .ic-box { background:var(--blanc); border-radius:14px; width:640px; max-width:94vw; max-height:88vh; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 24px 80px rgba(0,0,0,.28); }
+  .ic-head { background:var(--bleu); color:var(--blanc); padding:16px 20px; display:flex; justify-content:space-between; align-items:flex-start; gap:14px; flex-shrink:0; }
+  .ic-head h3 { font-size:15px; margin:0 0 4px; }
+  .ic-head p { font-size:11px; opacity:.68; margin:0; line-height:1.45; }
+  .ic-body { padding:18px 20px; overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:12px; }
+  .ic-section-title { font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.8px; color:var(--gris3); }
+  .ic-blocks { display:flex; flex-direction:column; gap:8px; }
+  .ic-block { display:flex; align-items:center; gap:10px; background:var(--gris0); border:2px solid var(--gris1); border-radius:8px; padding:10px 12px; transition:border-color .1s; user-select:none; }
+  .ic-block:hover { border-color:var(--gris2); }
+  .ic-block.ic-drag-over { border-color:var(--albert); background:var(--albert2); }
+  .ic-block.ic-dragging { opacity:.35; }
+  .ic-block-handle { color:var(--gris3); font-size:15px; cursor:grab; flex-shrink:0; line-height:1; }
+  .ic-block-check { width:16px; height:16px; flex-shrink:0; cursor:pointer; }
+  .ic-block-label { flex:1; min-width:0; }
+  .ic-block-title { font-size:12px; font-weight:700; color:var(--texte); display:flex; align-items:center; gap:4px; min-width:0; }
+  .ic-block-title-text { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+  .ic-block-title-edit-btn, .ic-block-title-reset-btn { flex-shrink:0; border:none; background:transparent; cursor:pointer; font-size:11px; line-height:1; padding:2px 4px; border-radius:4px; color:var(--gris3); opacity:0; transition:opacity .1s, background .1s, color .1s; }
+  .ic-block:hover .ic-block-title-edit-btn, .ic-block:hover .ic-block-title-reset-btn, .ic-block-title-edit-btn:focus-visible, .ic-block-title-reset-btn:focus-visible { opacity:1; }
+  .ic-block-title-edit-btn:hover, .ic-block-title-reset-btn:hover { background:var(--gris1); color:var(--texte); }
+
+  .de-block-title, .ic-card-title { display:flex; align-items:center; gap:6px; min-width:0; }
+  .de-block-title-text, .ic-card-title-text { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  .de-block-title-edit-btn, .de-block-title-reset-btn, .ic-card-title-edit-btn, .ic-card-title-reset-btn { border:none; background:transparent; cursor:pointer; font-size:11px; line-height:1; padding:2px 4px; border-radius:4px; color:var(--gris3); opacity:0; transition:opacity .1s, background .1s, color .1s; }
+  .de-block-title:hover .de-block-title-edit-btn, .de-block-title:hover .de-block-title-reset-btn, .ic-card-title:hover .ic-card-title-edit-btn, .ic-card-title:hover .ic-card-title-reset-btn, .de-block-title-edit-btn:focus-visible, .de-block-title-reset-btn:focus-visible, .ic-card-title-edit-btn:focus-visible, .ic-card-title-reset-btn:focus-visible { opacity:1; }
+  .de-block-title-edit-btn:hover, .de-block-title-reset-btn:hover, .ic-card-title-edit-btn:hover, .ic-card-title-reset-btn:hover { background:var(--gris1); color:var(--texte); }
+  .de-block-title-input, .ic-card-title-input { min-width:220px; max-width:100%; font-size:12px; font-weight:700; color:var(--texte); font-family:inherit; border:1px solid var(--albert); border-radius:4px; padding:2px 6px; background:#fff; }
+
+  .ic-block-title-editing { display:flex; }
+  .ic-block-title-input { flex:1; min-width:0; font-size:12px; font-weight:700; color:var(--texte); font-family:inherit; border:1px solid var(--albert); border-radius:4px; padding:2px 6px; background:#fff; user-select:text; }
+  .ic-block-sub { font-size:10px; color:var(--gris3); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ic-empty { font-size:12px; color:var(--gris3); text-align:center; padding:24px; border:1px dashed var(--gris2); border-radius:8px; }
+  .ic-themes { display:flex; gap:8px; flex-wrap:wrap; }
+  .ic-theme-swatch { display:flex; align-items:center; gap:7px; padding:7px 12px; border-radius:8px; border:2px solid var(--gris1); cursor:pointer; font-size:12px; font-weight:700; color:var(--gris4); transition:all .1s; }
+  .ic-theme-swatch:hover { border-color:var(--gris3); }
+  .ic-theme-swatch.ic-active { border-color:var(--albert); background:var(--albert2); color:var(--albert); }
+  .ic-theme-dot { width:13px; height:13px; border-radius:50%; flex-shrink:0; }
+  .ic-retheme { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+  .ic-retheme-btn { display:inline-flex; align-items:center; gap:5px; padding:4px 9px; border-radius:6px; border:1px solid var(--gris2); background:var(--blanc); font-size:11px; font-weight:700; cursor:pointer; color:var(--gris4); transition:all .1s; }
+  .ic-retheme-btn:hover { border-color:var(--albert); color:var(--albert); }
+
+  /* ── Impression PDF ciblée sur un seul bloc (bouton "🖨 PDF") ──
+     #de-print-root reçoit une copie nettoyée du bloc à imprimer (boutons et
+     détails techniques retirés en JS) ; en mode print, tout le reste de la
+     page est masqué pour n'imprimer que ce bloc, avec une mise en page propre. */
+  #de-print-root { display: none; }
+  @media print {
+    @page { margin: 16mm 14mm; }
+    body.de-printing > *:not(#de-print-root) { display: none !important; }
+    body.de-printing {
+      background: var(--blanc) !important;
+      height: auto !important;
+      overflow: visible !important;
+    }
+    body.de-printing #de-print-root {
+      display: block !important;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      color: var(--texte);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    /* Force l'impression des couleurs (barres de graphique, badges, etc.) */
+    body.de-printing #de-print-root,
+    body.de-printing #de-print-root * {
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+      color-adjust: exact !important;
+    }
+    body.de-printing #de-print-root .de-print-header {
+      display: flex; align-items: baseline; justify-content: space-between;
+      gap: 12px; margin-bottom: 16px; padding-bottom: 10px;
+      border-bottom: 2px solid var(--albert2);
+    }
+    body.de-printing #de-print-root .de-print-header .de-print-brand {
+      font-size: 11px; font-weight: 700; color: var(--albert); letter-spacing: .02em;
+    }
+    body.de-printing #de-print-root .de-print-header .de-print-date {
+      font-size: 10px; color: var(--gris3);
+    }
+    body.de-printing #de-print-root h4 {
+      font-size: 15px; font-weight: 700; color: var(--albert); margin-bottom: 12px;
+    }
+    body.de-printing #de-print-root p { margin-bottom: 7px; }
+    body.de-printing #de-print-root ul { margin: 0 0 10px 18px; }
+    body.de-printing #de-print-root li { margin-bottom: 3px; }
+    body.de-printing #de-print-root table { border-collapse: collapse; width: 100%; }
+    body.de-printing #de-print-root th,
+    body.de-printing #de-print-root td { border: 1px solid var(--gris2); padding: 5px 8px; }
+    body.de-printing #de-print-root div[style*="overflow-x"] {
+      overflow: visible !important;
+      width: auto !important;
+      max-width: 100% !important;
+      padding-bottom: 0 !important;
+    }
+    body.de-printing #de-print-root table[style*="min-width"] {
+      width: 100% !important;
+      min-width: 0 !important;
+      table-layout: auto !important;
+    }
+    body.de-printing #de-print-root table[style*="min-width"] th,
+    body.de-printing #de-print-root table[style*="min-width"] td {
+      white-space: nowrap;
+      padding: 3px 6px;
+    }
+    body.de-printing #de-print-root button,
+    body.de-printing #de-print-root details.msg-sources,
+    body.de-printing #de-print-root .de-block-title-edit-btn,
+    body.de-printing #de-print-root .de-block-title-reset-btn {
+      display: none !important;
+    }
+  }
+
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ═══════════════ PANNEAU GAUCHE : DOCUMENTS ═══════════════ -->
+  <div class="docs-panel">
+    <div class="docs-header">
+      <div>
+        <div class="title">📂 Sources d'analyse</div>
+        <div class="sub">Table Grist · état du moteur</div>
+      </div>
+      <button class="docs-close" onclick="closeSourcesPanel()" title="Fermer">×</button>
+    </div>
+
+    <div class="source-hub" id="source-hub">
+      <div class="source-hub-title">Sources d'analyse</div>
+      <div class="source-card" id="grist-source-card">
+        <div class="sc-head">
+          <div class="sc-title">Table Grist</div>
+          <div class="sc-badge">inactive</div>
+        </div>
+        <div class="sc-detail" id="grist-source-detail">Aucune table connectée.</div>
+        <div class="sc-actions" id="grist-source-actions" style="display:none">
+          <button class="source-action primary" onclick="resetContextSilent(); closeSourcesPanel(); quickAsk(buildSyntheseGlobaleQuestion())" title="Synthèse complète du jeu de données (repart de zéro, sans filtre actif)">Synthèse globale</button>
+        </div>
+      </div>
+
+      <!-- Colonnes reconnues par le moteur -->
+      <div class="source-card" id="grist-columns-card" style="display:none">
+        <div class="sc-head">
+          <div class="sc-title">Dimensions analysables</div>
+          <div class="sc-badge" style="background:#dcfce7;color:#15803d">détectées</div>
+        </div>
+        <div class="sc-detail" id="grist-columns-detail">—</div>
+      </div>
+
+      <!-- Filtres persistants actifs -->
+      <div class="source-card" id="grist-filters-card" style="display:none">
+        <div class="sc-head">
+          <div class="sc-title">Filtres actifs</div>
+          <div class="sc-badge" style="background:#fef9c3;color:#854d0e">périmètre restreint</div>
+        </div>
+        <div class="sc-detail" id="grist-filters-detail">—</div>
+        <div class="sc-actions" style="display:flex">
+          <button class="source-action" onclick="resetContextSilent(); closeSourcesPanel()" title="Effacer le contexte et les filtres actifs">Réinitialiser</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="doc-list" id="doc-list"></div>
+
+    <div class="grist-section">
+      <div class="gs-label" id="grist-info" class="grist-empty">Aucune table connectée.</div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ PANNEAU DROIT : CHAT ═══════════════ -->
+  <div class="chat-panel">
+    <div class="chat-header">
+      <div>
+        <div class="ch-title">Parcoursup Data Copilot</div>
+        <div class="ch-sub" id="chat-sub">Aucun document chargé</div>
+      </div>
+      <div class="chat-header-actions">
+        <button class="header-action" onclick="openSessionsPanel()" title="Retrouver vos anciennes conversations et en démarrer une nouvelle">🗂 <span class="label">Sessions</span></button>
+        <button class="header-action primary" onclick="openSourcesPanel()" title="Voir quelle table Grist ou quels fichiers sont utilisés pour répondre à vos questions">📂 <span class="label">Sources</span></button>
+        <button class="header-action" onclick="openInfographicComposer()" title="Créer une infographie en choisissant parmi vos résultats précédents dans cette conversation">🖼 <span class="label">Composer une infographie</span></button>
+        <button class="header-action" id="btn-national-mode" onclick="toggleNationalMode()" title="Interroger les données nationales Parcoursup 2025 (académie Bordeaux)">🇫🇷 <span class="label">National 2025</span></button>
+        <button class="header-action" onclick="resetCopilotDialogue()" title="Effacer le contexte actuel (filtres, dernière question) pour repartir d'une analyse neutre">↻ <span class="label">Reset</span></button>
+        <div class="albert-badge"><div class="dot"></div>Albert API</div>
+        <button class="gear-btn" onclick="openConfig()" title="Paramètres techniques (clé API, modèle)">⚙️</button>
+      </div>
+    </div>
+
+    <!-- ─── Barre de filtres persistants ─── -->
+    <div class="pf-bar empty" id="pf-bar">
+      <span class="pf-label">🔒 Filtres actifs</span>
+      <div id="pf-chips"></div>
+      <button class="pf-clear" onclick="clearAllPersistentFilters()">Tout effacer</button>
+    </div>
+
+    <!-- PR 2.2 - Barre contexte moteur (filtre / groupes actifs) -->
+    <div class="ec-bar empty" id="ec-bar">
+      <span class="ec-label">Contexte</span>
+      <div id="ec-chips"></div>
+      <button class="ec-reset" onclick="resetEngineContext()">&#x21BA; Reinitialiser contexte</button>
+    </div>
+
+    <div class="chat-messages" id="chat-messages">
+      <div class="empty-state" id="empty-state">
+        <div class="es-icon">💬</div>
+        <div class="es-title">Posez une question sur vos documents</div>
+        <div class="es-sub">Posez une question sur la table Grist ou ajoutez un fichier avec le trombone. Les sources sont accessibles via le bouton Sources.</div>
+        <div class="suggestions" id="suggestions"></div>
+      </div>
+    </div>
+
+    <div class="chat-input-zone">
+      <div class="context-pills" id="context-pills"></div>
+      <div class="mini-suggestions" id="mini-suggestions"></div>
+      <div class="chat-input-row">
+        <textarea id="chat-input" placeholder="Posez votre question…" rows="1" onkeydown="handleKeydown(event)"></textarea>
+        <button class="btn-send" id="btn-send" onclick="sendMessage()">➤</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+<div class="source-backdrop" onclick="closeSourcesPanel()"></div>
+
+<!-- ═══════════════ PANNEAU SESSIONS (repliable) ═══════════════ -->
+<div class="sessions-panel" id="sessions-panel">
+  <div class="sessions-header">
+    <div>
+      <div class="title">🗂 Sessions</div>
+      <div class="sub">Vos conversations précédentes</div>
+    </div>
+    <button class="docs-close" onclick="closeSessionsPanel()" title="Fermer">×</button>
+  </div>
+  <div class="session-new-btn" onclick="createNewSession()">+ Nouvelle session</div>
+  <div class="session-list" id="session-list"></div>
+</div>
+<div class="sessions-backdrop" id="sessions-backdrop" onclick="closeSessionsPanel()"></div>
+
+<!-- ═══════════════ VIEWER DOCUMENT ═══════════════ -->
+<div class="viewer-overlay" id="viewer-overlay" onclick="if(event.target===this) closeViewer()">
+  <div class="viewer-box">
+    <div class="viewer-header">
+      <div>
+        <div class="vh-title" id="viewer-title">Document</div>
+        <div class="vh-sub" id="viewer-sub"></div>
+      </div>
+      <button class="viewer-close" onclick="closeViewer()">✕</button>
+    </div>
+    <div class="viewer-search">
+      <input type="text" id="viewer-search-input" placeholder="🔍 Rechercher dans le texte extrait…" oninput="searchInViewer(this.value)">
+    </div>
+    <div class="viewer-body" id="viewer-body"></div>
+    <div class="viewer-meta">
+      <span id="viewer-meta-info"></span>
+      <button class="btn-copy-content" onclick="copyViewerContent()">📋 Copier le texte</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ MODAL CONFIG ═══════════════ -->
+<div class="modal-overlay" id="modal-config">
+  <div class="modal-box">
+    <h3>⚙️ Configuration Albert API</h3>
+    <label>Clé API</label>
+    <input type="password" id="cfg-key" placeholder="sk-...">
+    <label>Endpoint</label>
+    <input type="text" id="cfg-endpoint" value="https://app-6fb1a617-d3e3-4989-9dcb-b396964f246e.cleverapps.io/v1/chat/completions">
+    <label>Modèle</label>
+    <input type="text" id="cfg-model" placeholder="ex: openweight-large, openweight-medium...">
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeConfig()">Annuler</button>
+      <button class="btn-confirm" onclick="saveConfig()">Enregistrer</button>
+    </div>
+    <button id="btn-clear-config" onclick="clearConfig()" style="width:100%;margin-top:8px;background:none;border:none;color:var(--rouge);font-size:11px;cursor:pointer;padding:6px;display:none">Effacer la clé sauvegardée</button>
+  </div>
+</div>
+
+
+<!-- ═══════════════ MODAL BRIEF INFOGRAPHIE ═══════════════ -->
+<div class="modal-overlay" id="modal-infographic-brief">
+  <div class="brief-modal-box">
+    <div class="brief-modal-head">
+      <div>
+        <h3>🎨 Brief d'infographie Parcoursup</h3>
+        <p>Précise le périmètre, l'angle et les éléments à afficher avant de lancer Albert.</p>
+      </div>
+      <button class="brief-close" onclick="closeInfographicBrief()">✕</button>
+    </div>
+    <div class="brief-modal-body">
+      <div class="brief-row">
+        <div class="brief-field">
+          <label>Périmètre principal</label>
+          <select id="brief-scope">
+            <option value="auto">Automatique d'après ma demande</option>
+            <option value="Zone du Pays Basque = oui">Zone Pays Basque uniquement</option>
+            <option value="ensemble">Ensemble des candidats</option>
+            <option value="boursiers">Candidats boursiers</option>
+            <option value="non-boursiers">Candidats non boursiers</option>
+            <option value="apprentis">Candidats apprentis</option>
+            <option value="admis">Candidats ayant répondu favorablement</option>
+            <option value="personnalise">Autre / précisé ci-dessous</option>
+          </select>
+          <div class="brief-help">Le périmètre sera rappelé explicitement dans chaque section.</div>
+        </div>
+        <div class="brief-field">
+          <label>Angle d'analyse</label>
+          <select id="brief-angle">
+            <option value="synthese">Synthèse générale</option>
+            <option value="comparaison">Comparaison avec un autre groupe</option>
+            <option value="formations">Formations choisies</option>
+            <option value="mobilite">Mobilité / académies d'accueil</option>
+            <option value="profils">Profils des candidats</option>
+            <option value="admission">Propositions et admissions</option>
+            <option value="etablissements">Établissements d'accueil</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="brief-field">
+        <label>Blocs à inclure</label>
+        <div class="brief-chips" id="brief-blocks">
+          <span class="brief-chip active" data-block="indicateurs clés">Indicateurs clés</span>
+          <span class="brief-chip active" data-block="formations">Formations</span>
+          <span class="brief-chip active" data-block="académies d'accueil et mobilité">Académies / mobilité</span>
+          <span class="brief-chip" data-block="profils scolaires">Profils scolaires</span>
+          <span class="brief-chip" data-block="boursiers et social">Boursiers / social</span>
+          <span class="brief-chip" data-block="établissements">Établissements</span>
+          <span class="brief-chip active" data-block="enseignements à retenir">À retenir</span>
+        </div>
+        <div class="brief-help">Clique pour activer/désactiver. Albert ne doit pas sortir de ces blocs sauf nécessité.</div>
+      </div>
+
+      <div class="brief-field">
+        <label>Tableau en cascade optionnel</label>
+        <div class="brief-cascade-box">
+          <label class="brief-check"><input type="checkbox" id="brief-cascade-enabled"> Ajouter un tableau hiérarchique dans l'infographie</label>
+          <div id="brief-cascade-levels" class="cascade-levels-builder"></div>
+          <div class="cascade-controls">
+            <button type="button" class="cascade-mini-btn" onclick="addBriefCascadeLevel()">+ Ajouter un niveau</button>
+            <button type="button" class="cascade-mini-btn" onclick="autoFillBriefCascadeLevels()">Suggestion Parcoursup</button>
+            <div class="brief-field" style="min-width:140px;max-width:170px;margin-left:auto">
+              <label>Top par niveau</label>
+              <select id="brief-cascade-top">
+                <option value="5">Top 5</option>
+                <option value="8" selected>Top 8</option>
+                <option value="10">Top 10</option>
+                <option value="15">Top 15</option>
+                <option value="25">Top 25</option>
+              </select>
+            </div>
+          </div>
+          <div class="brief-help">Les niveaux reprennent directement les colonnes disponibles dans Grist / l'Excel. Tu peux ajouter autant de niveaux que nécessaire, les réordonner, ou en retirer. Exemple : Académie d'accueil → Établissement → Grand groupe → Spécialité → Série → Boursier.</div>
+        </div>
+      </div>
+
+      <div class="brief-row">
+        <div class="brief-field">
+          <label>Comparer à</label>
+          <input id="brief-compare" placeholder="ex. reste de l'académie, non-boursiers, autres départements...">
+        </div>
+        <div class="brief-field">
+          <label>Format</label>
+          <select id="brief-depth">
+            <option value="court">Court : 4 à 5 sections</option>
+            <option value="standard" selected>Standard : 6 à 7 sections</option>
+            <option value="detaille">Détaillé : jusqu'à 9 sections</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="brief-field">
+        <label>Données à afficher en priorité</label>
+        <textarea id="brief-include" placeholder="ex. uniquement les Basques ; montrer les formations choisies hors Bordeaux ; détailler Toulouse ; éviter les établissements... "></textarea>
+      </div>
+
+      <div class="brief-field">
+        <label>À éviter / exclure</label>
+        <textarea id="brief-exclude" placeholder="ex. ne pas parler de l'ensemble des candidats ; ne pas afficher les identifiants ; éviter les ratios peu lisibles type 1789 / 579 +209 %..."></textarea>
+      </div>
+
+      <div class="brief-field">
+        <label>Demande libre</label>
+        <textarea id="brief-free" placeholder="Exemple : Je veux seulement une infographie avec les Basques comme périmètre, centrée sur ce qu'ils choisissent et où ils vont."></textarea>
+      </div>
+    </div>
+    <div class="brief-modal-foot">
+      <div class="brief-summary" id="brief-source-summary">Source : table Grist prioritaire si connectée.</div>
+      <div style="display:flex;gap:8px">
+        <button class="brief-btn secondary" onclick="closeInfographicBrief()">Annuler</button>
+        <button class="brief-btn primary" onclick="submitInfographicBrief()">Générer l'infographie</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ MODAL COMPOSITEUR D'INFOGRAPHIE ═══════════════ -->
+<div class="modal-overlay" id="modal-ic" style="display:none">
+  <div class="ic-box">
+    <div class="ic-head">
+      <div>
+        <h3>🖼 Composer une infographie</h3>
+        <p>Sélectionnez et ordonnez les blocs de données · glissez pour réordonner</p>
+      </div>
+      <button class="brief-close" onclick="closeInfographicComposer()">✕</button>
+    </div>
+    <div class="ic-body">
+      <div class="ic-section-title">Blocs de données disponibles</div>
+      <div class="ic-blocks" id="ic-blocks"></div>
+      <div class="ic-section-title">Thème graphique</div>
+      <div class="ic-themes" id="ic-themes"></div>
+    </div>
+    <div class="brief-modal-foot">
+      <span class="brief-summary" id="ic-summary">Aucun bloc sélectionné</span>
+      <div style="display:flex;gap:8px">
+        <button class="brief-btn secondary" onclick="closeInfographicComposer()">Annuler</button>
+        <button class="brief-btn primary" id="ic-submit" onclick="submitInfographicComposer()" disabled>🖼 Générer</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════ CONTENEUR D'IMPRESSION PDF CIBLÉE (bloc unique) ═══════════════ -->
+<div id="de-print-root"></div>
+
+<script>
+function toggleNationalMode() {
+  const btn = document.getElementById('btn-national-mode');
+  if (!btn) return;
+  const isActive = btn.classList.toggle('active');
+  if (typeof setNationalMode === 'function') setNationalMode(isActive);
+  const sub = document.getElementById('chat-sub');
+  if (sub) {
+    if (isActive) {
+      sub.dataset.prevText = sub.textContent;
+      sub.textContent = '🇫🇷 Données nationales 2025 — académie Bordeaux';
+    } else {
+      sub.textContent = sub.dataset.prevText || '';
+    }
+  }
+}
+</script>
+
+</body>
+</html>
