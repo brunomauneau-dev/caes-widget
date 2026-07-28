@@ -1,6 +1,20 @@
 /* config.js — État global, constantes, Storage
    Chargé en premier, avant tous les autres modules. */
 
+/* ═══════════════════════ FONCTIONS UTILITAIRES CRITIQUES ═══════════════════════
+   normalizeText est définie ICI en plus de documents.js car config.js est le
+   premier script chargé. Cela garantit qu'elle est disponible même si documents.js
+   tarde à charger ou si le cache CDN sert une vieille version de documents.js. */
+function normalizeText(v) {
+  return String(v ?? '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/['’]/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
 /* ═══════════════════════ ÉTAT GLOBAL ═══════════════════════ */
 let documents = [];        // {id, name, type, content, status}
 let gristRecords = [];
