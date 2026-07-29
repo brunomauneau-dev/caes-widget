@@ -561,7 +561,41 @@ function renderMiniBarChart(rows, total, filename) {
     const pct = total ? ((r.count || 0) / total * 100).toFixed(1) : '0';
     return `<div data-bar-label="${escapeHtml(r.value)}" data-bar-value="${pct}" data-bar-count="${(r.count||0).toLocaleString('fr-FR')}" style="display:grid;grid-template-columns:minmax(120px,220px) 1fr auto;gap:8px;align-items:center"><div style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(r.value)}">${escapeHtml(r.value)}</div><div style="height:12px;background:var(--gris1);border-radius:6px;overflow:hidden"><div style="height:12px;width:${w}%;background:var(--albert);border-radius:6px"></div></div><div style="font-size:11px;font-weight:700">${(r.count || 0).toLocaleString('fr-FR')}</div></div>`;
   }).join('');
-  return `<div class="de-chart-export-wrap" style="margin:10px 0"><div style="display:grid;gap:6px;max-width:560px">${bars}</div>${_chartExportBtn(filename || 'graphique_barres.png')}</div>`;
+  return `<div class="de-chart-export-wrap" style="margin:10px 0"><div style="display:grid;gap:6px;max-width:560px">${bars}</div>${_chartTypeSwitcher('bar')}${_chartExportBtn(filename || 'graphique_barres.png')}</div>`;
+}
+
+// Barres verticales (colonnes) — alternative visuelle au bar chart horizontal
+function renderMiniColChart(rows, total, filename) {
+  if (!rows || !rows.length) return '';
+  const max = Math.max(...rows.map(r => r.count || 0), 1);
+  const top = rows.slice(0, 10);
+  const colW = Math.max(32, Math.min(60, Math.floor(480 / top.length)));
+  const cols = top.map(r => {
+    const h = Math.max(4, Math.round((r.count || 0) / max * 120));
+    const pct = total ? ((r.count || 0) / total * 100).toFixed(1) : '0';
+    const label = r.value && r.value.length > 10 ? r.value.slice(0, 9) + '…' : (r.value || '');
+    return `<div style="display:flex;flex-direction:column;align-items:center;gap:4px;width:${colW}px" title="${escapeHtml(r.value)} — ${(r.count||0).toLocaleString('fr-FR')} (${pct} %)"><div style="font-size:10px;font-weight:700">${(r.count||0).toLocaleString('fr-FR')}</div><div style="width:${colW-8}px;height:${h}px;background:var(--albert);border-radius:4px 4px 0 0"></div><div style="font-size:10px;text-align:center;color:var(--gris3);word-break:break-all;max-width:${colW}px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${escapeHtml(label)}</div></div>`;
+  }).join('');
+  return `<div class="de-chart-export-wrap" style="margin:10px 0"><div style="display:flex;align-items:flex-end;gap:4px;height:160px;border-bottom:2px solid var(--gris1);padding-bottom:0;overflow-x:auto">${cols}</div>${_chartTypeSwitcher('col')}${_chartExportBtn(filename || 'graphique_colonnes.png')}</div>`;
+}
+
+// Sélecteur de type de graphique — boutons discrets sous le graphique
+// Permet de basculer entre barres H / barres V / camembert sans re-poser la question.
+// Les données sont déjà dans le DOM (data-bar-* attributes) pour les barres.
+function _chartTypeSwitcher(currentType) {
+  const types = [
+    { id: 'bar', icon: '▬', label: 'Barres H' },
+    { id: 'col', icon: '▐', label: 'Barres V' },
+    { id: 'pie', icon: '◕', label: 'Camembert' },
+  ];
+  const btns = types.map(t => {
+    const active = t.id === currentType;
+    const style = active
+      ? 'background:var(--albert);color:white;border-color:var(--albert)'
+      : 'background:white;color:var(--gris3);border-color:var(--gris1)';
+    return `<button onclick="if(typeof switchChartType==='function')switchChartType(this,'${t.id}')" data-chart-type="${t.id}" style="border:1px solid;border-radius:6px;padding:3px 9px;font-size:10px;font-weight:700;cursor:pointer;${style}" title="${t.label}">${t.icon} ${t.label}</button>`;
+  }).join('');
+  return `<div style="display:flex;gap:6px;margin-top:8px;align-items:center"><span style="font-size:10px;color:var(--gris3);margin-right:2px">Afficher en :</span>${btns}</div>`;
 }
 
 // v27.5.2 — rendu camembert en SVG inline (aucune dépendance externe).
@@ -600,7 +634,7 @@ function renderMiniPieChart(rows, total) {
     return `<div style="display:flex;align-items:center;gap:7px;font-size:11px"><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${s.color};flex:0 0 auto"></i><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px" title="${escapeHtml(s.row.value)}">${escapeHtml(s.row.value)}</span><strong style="margin-left:auto">${(s.row.count || 0).toLocaleString('fr-FR')} · ${pct} %</strong></div>`;
   }).join('')}</div>`;
 
-  return `<div class="de-chart-export-wrap" style="margin:10px 0"><div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center">${svg}${legend}</div>${_chartExportBtn('graphique_camembert.png')}</div>`;
+  return `<div class="de-chart-export-wrap" style="margin:10px 0"><div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center">${svg}${legend}</div>${_chartTypeSwitcher('pie')}${_chartExportBtn('graphique_camembert.png')}</div>`;
 }
 
 
@@ -1651,19 +1685,22 @@ function renderDataEngineResultHtml(tool, plan, result) {
   if (tool === 'pivot') {
     const cols = result.colValues || [];
     const total = result.total || 0;
-    // Tronquer les libellés de colonnes trop longs pour garder le tableau lisible
-    const truncCol = (s) => s && s.length > 18 ? s.slice(0, 16) + '…' : (s || '—');
-    const header = `<tr><th style="text-align:left;min-width:140px;padding:6px 8px">${escapeHtml(_shortColName(plan.targetCol))}</th>${cols.map(c => `<th style="text-align:right;padding:6px 8px;white-space:nowrap" title="${escapeHtml(c)}">${escapeHtml(truncCol(c))}</th>`).join('')}<th style="text-align:right;padding:6px 8px">Total</th><th style="text-align:right;padding:6px 8px">%</th></tr>`;
-    const body = (result.matrix || []).map(r => {
+    // Tronquer les en-têtes de colonnes longs tout en gardant le tooltip
+    const truncCol = (s) => s && s.length > 14 ? s.slice(0, 13) + '…' : (s || '—');
+    // Styles communs
+    const thStyle = `text-align:right;padding:7px 10px;background:var(--bleu2,#e8f0fe);color:var(--bleu,#003189);font-size:10px;letter-spacing:.5px;white-space:nowrap;border-bottom:2px solid var(--bleu-doux,#c8d8f0);max-width:90px;overflow:hidden;text-overflow:ellipsis`;
+    const thFirstStyle = `text-align:left;padding:7px 10px;background:var(--bleu2,#e8f0fe);color:var(--bleu,#003189);font-size:10px;letter-spacing:.5px;border-bottom:2px solid var(--bleu-doux,#c8d8f0);min-width:120px`;
+    const header = `<tr><th style="${thFirstStyle}">${escapeHtml(_shortColName(plan.targetCol))}</th>${cols.map(c => `<th style="${thStyle}" title="${escapeHtml(c)}">${escapeHtml(truncCol(c))}</th>`).join('')}<th style="${thStyle};font-weight:800;min-width:60px">Total</th><th style="${thStyle};min-width:50px">%</th></tr>`;
+    const body = (result.matrix || []).map((r, i) => {
       const pct = total ? (r.total / total * 100).toFixed(1).replace('.', ',') : '—';
-      return `<tr><td style="padding:5px 8px">${escapeHtml(r.value)}</td>${r.cells.map(c => `<td style="text-align:right;padding:5px 8px">${c > 0 ? c.toLocaleString('fr-FR') : '<span style="color:var(--gris2)">—</span>'}</td>`).join('')}<td style="text-align:right;padding:5px 8px"><strong>${r.total.toLocaleString('fr-FR')}</strong></td><td style="text-align:right;padding:5px 8px">${pct} %</td></tr>`;
+      const rowBg = i % 2 === 1 ? 'background:var(--gris0,#f8fafc)' : '';
+      return `<tr style="${rowBg}" onmouseover="this.style.background='var(--bleu2,#e8f0fe)'" onmouseout="this.style.background='${i % 2 === 1 ? 'var(--gris0,#f8fafc)' : ''}'"><td style="padding:6px 10px;font-size:12px;color:var(--bleu,#003189);font-weight:500;white-space:nowrap">${escapeHtml(r.value)}</td>${r.cells.map(c => `<td style="text-align:right;padding:6px 10px;font-size:12px">${c > 0 ? `<strong>${c.toLocaleString('fr-FR')}</strong>` : '<span style="color:var(--gris2,#e5e7eb)">—</span>'}</td>`).join('')}<td style="text-align:right;padding:6px 10px;font-size:12px;font-weight:800;color:var(--texte,#1a1a2e);border-left:1px solid var(--gris1,#f3f4f6)">${r.total.toLocaleString('fr-FR')}</td><td style="text-align:right;padding:6px 10px;font-size:11px;color:var(--gris3,#6b7280)">${pct} %</td></tr>`;
     }).join('');
     const colTotals = cols.map((_, i) => (result.matrix || []).reduce((s, r) => s + (r.cells[i] || 0), 0));
-    const foot = `<tr style="background:var(--gris0,#f8fafc);font-weight:700"><td style="padding:5px 8px">Total</td>${colTotals.map(t => `<td style="text-align:right;padding:5px 8px">${t.toLocaleString('fr-FR')}</td>`).join('')}<td style="text-align:right;padding:5px 8px">${total.toLocaleString('fr-FR')}</td><td></td></tr>`;
+    const foot = `<tr style="background:var(--bleu2,#e8f0fe);border-top:2px solid var(--bleu-doux,#c8d8f0)"><td style="padding:7px 10px;font-weight:800;font-size:12px;color:var(--bleu,#003189)">Total</td>${colTotals.map(t => `<td style="text-align:right;padding:7px 10px;font-weight:800;font-size:12px">${t.toLocaleString('fr-FR')}</td>`).join('')}<td style="text-align:right;padding:7px 10px;font-weight:800;font-size:12px;border-left:1px solid var(--bleu-doux,#c8d8f0)">${total.toLocaleString('fr-FR')}</td><td></td></tr>`;
     const clearTitle = `${_shortColName(plan.targetCol)} × ${_shortColName(plan.targetCol2)}`;
-    // width:auto (pas 100%) : laisse la table prendre sa largeur naturelle
-    // et le overflow:auto du container gère le scroll horizontal
-    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p><strong>${total.toLocaleString('fr-FR')}</strong> lignes retenues. Croisement <strong>${escapeHtml(plan.targetCol)}</strong> × <strong>${escapeHtml(plan.targetCol2)}</strong>.</p><div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--gris1);border-radius:8px;padding-bottom:14px"><table style="border-collapse:collapse;font-size:12px;width:auto;min-width:100%;margin-bottom:0"><thead style="background:var(--gris0)">${header}</thead><tbody>${body}${foot}</tbody></table></div>${filtersHtml}${debug}`;
+    const colNote = cols.length > 8 ? `<p style="font-size:11px;color:var(--gris3);margin-top:6px">💡 Survolez les en-têtes pour voir les libellés complets.</p>` : '';
+    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p style="font-size:13px;color:var(--gris3)"><strong style="color:var(--texte)">${total.toLocaleString('fr-FR')}</strong> lignes retenues · Croisement <strong style="color:var(--texte)">${escapeHtml(_shortColName(plan.targetCol))}</strong> × <strong style="color:var(--texte)">${escapeHtml(_shortColName(plan.targetCol2))}</strong></p><div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--gris1,#f3f4f6);border-radius:10px;padding-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,.04)"><table style="border-collapse:collapse;font-size:12px;width:auto;min-width:100%;margin-bottom:0"><thead>${header}</thead><tbody>${body}${foot}</tbody></table></div>${colNote}${filtersHtml}${debug}`;
   }
   if (tool === 'stats') {
     const fmt = v => v === null || v === undefined ? '—' : Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 2 });
