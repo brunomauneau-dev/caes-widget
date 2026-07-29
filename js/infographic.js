@@ -555,3 +555,53 @@ function renderAdaptiveInfographicHtml(spec, question) {
 </body>
 </html>`;
 }
+async function generateInfographicWithAlbert(question, localAnalysis, dataExecution = null) {
+  // Si un résultat Data Engine est disponible (compare, group_by, pivot…), on l'injecte
+  // en tête de contexte — il est plus structuré que la répartition locale et doit primer.
+  let deContext = '';
+  if (dataExecution && typeof dataEngineResultToContext === 'function') {
+    try {
+      const raw = dataEngineResultToContext(dataExecution);
+      if (raw && raw.length > 20) deContext = raw + '\n\n';
+    } catch(e) { console.warn('[infographic] dataEngineResultToContext error:', e); }
+  }
+  // Quand deContext existe déjà, c'est la seule source à faire autorité pour les chiffres :
+  // on n'ajoute plus le group-by local (localAnalysis, filtres détectés séparément) ni la
+  // synthèse pleine table (top valeurs par colonne sur données NON filtrées) — ces deux
+  // sources pouvaient diverger du résultat Data Engine sur le même indicateur et produisaient
+  // des infographies non reproductibles selon le point d'entrée (bloc vs compositeur).
+  const context = deContext + buildContext(localAnalysis, { suppressGlobalStats: !!deContext });
+  // Thème par défaut du bouton bloc-unique : Bleu France. La spec est désormais
+  // retournée en plus du HTML (voir addInfographicMessage) pour que ce point d'entrée
+  // bénéficie des mêmes boutons post-génération (thème, titres, recomposer) que le
+  // compositeur multi-blocs, plutôt que d'être volontairement privé de ces réglages.
+  const specPrompt = buildInfographicSpecPrompt(question, context, null);
+
+  const response = await fetch(albertConfig.endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: albertConfig.model,
+      messages: [
+        { role: 'system', content: specPrompt },
+        { role: 'user', content: question }
+      ],
+      temperature: 0.2
+    })
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Erreur ${response.status} : ${errText.slice(0,200)}`);
+  }
+  const data = await response.json();
+  const raw = data.choices?.[0]?.message?.content || '';
+  let spec;
+  try {
+    spec = parseJsonLoose(raw);
+  } catch(e) {
+    console.warn('JSON infographie invalide, fallback local:', e, raw);
+    spec = buildFallbackInfographicSpec(question, localAnalysis);
+  }
+  return { html: renderAdaptiveInfographicHtml(spec, question), spec };
+}
