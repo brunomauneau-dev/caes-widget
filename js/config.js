@@ -1,20 +1,8 @@
 /* config.js — État global, constantes, Storage
    Chargé en premier, avant tous les autres modules. */
 
-/* ═══════════════════════ FONCTIONS UTILITAIRES CRITIQUES ═══════════════════════
-   normalizeText est définie ICI en plus de documents.js car config.js est le
-   premier script chargé. Cela garantit qu'elle est disponible même si documents.js
-   tarde à charger ou si le cache CDN sert une vieille version de documents.js. */
-function normalizeText(v) {
-  return String(v ?? '')
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/['’]/g, ' ')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim()
-    .replace(/\s+/g, ' ');
-}
-
+/* app.js — logique principale du widget Grist/Albert.
+   Fichier extrait du HTML monolithique v16 pour faciliter la maintenance. */
 /* ═══════════════════════ ÉTAT GLOBAL ═══════════════════════ */
 let documents = [];        // {id, name, type, content, status}
 let gristRecords = [];
@@ -91,10 +79,11 @@ let albertConfig = {
 };
 
 /* ═══════════════════════ STOCKAGE PERSISTANT ═══════════════════════
-   Le widget est déployé sur GitHub Pages et chargé par Grist dans un
-   iframe externe. On utilise localStorage pour la persistance, tout en
-   restant compatible avec window.storage si le code est réutilisé dans
-   un autre contexte. */
+   window.storage n'existe que dans l'environnement des artifacts
+   Claude.ai. Ce widget étant déployé de façon autonome (GitHub Pages,
+   chargé par Grist dans un iframe externe), on utilise localStorage
+   à la place — tout en restant compatible si jamais le code est
+   réutilisé un jour dans un artifact Claude.ai.                     */
 const Storage = {
   async get(key) {
     if (window.storage && typeof window.storage.get === 'function') {
@@ -127,3 +116,4 @@ const SUGGESTIONS = [
   "Extrait les chiffres importants",
   "Quels sont les points d'action ?",
 ];
+

@@ -113,10 +113,10 @@ describe('infographic.js — police Marianne et variables CSS thème dynamiques'
 
 // ─── (5) index.html — cache-busting à jour ───────────────────────────────────
 describe('index.html — cache-busting à jour', () => {
-  assert(/config\.js\?v=27\.5\.7/.test(indexSrc), 'config.js bumpé v27.5.7');
-  assert(/infographic\.js\?v=27\.5\.9/.test(indexSrc), 'infographic.js bumpé v27.5.9');
-  assert(/dataEngine\.js\?v=27.5.18/.test(indexSrc), 'dataEngine.js bumpé v27.5.18');
-  assert(/sessions\.js\?v=27\.5\.15/.test(indexSrc), 'sessions.js bumpé v27.5.15');
+  assert(/config\.js\?v=27\.5\.8/.test(indexSrc), 'config.js bumpé v27.5.7');
+  assert(/infographic\.js\?v=27\.5\.10/.test(indexSrc), 'infographic.js bumpé v27.5.9');
+  assert(/dataEngine\.js\?v=27.5.19/.test(indexSrc), 'dataEngine.js bumpé v27.5.19');
+  assert(/sessions\.js\?v=27\.5\.16/.test(indexSrc), 'sessions.js bumpé v27.5.15');
 });
 
 // ─── (6) Logo Parcoursup dans le héro ─────────────────────────────────────

@@ -82,6 +82,10 @@ function buildCrossTabs(headers, dataRows, totalRows) {
         const counts = new Map();
         vals.forEach(v => { const k = String(v).trim(); counts.set(k, (counts.get(k)||0)+1); });
         const sorted = [...counts.entries()].sort((a,b) => b[1]-a[1]).slice(0, MAX_BREAKDOWN_ITEMS);
+        // % calculé sur les valeurs renseignées pour cette colonne (≠ n total du
+        // filtre, car certaines lignes peuvent avoir cette colonne vide — ex: pas
+        // encore de proposition acceptée). On l'indique explicitement pour éviter
+        // toute ambiguïté côté modèle.
         const breakdown = sorted.map(([val,c]) => `${val}: ${c} (${(c/renseigne*100).toFixed(1)}%)`).join(', ');
         out += `  - ${resCol.header} (${renseigne}/${n} lignes renseignées) → ${breakdown}\n`;
       });
@@ -99,9 +103,9 @@ function buildCrossTabs(headers, dataRows, totalRows) {
    compte pas. */
 function normalizeText(v) {
   return String(v ?? '')
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
-    .replace(/['']/g, ' ')
+    .replace(/[’']/g, ' ')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
     .replace(/\s+/g, ' ');
@@ -158,10 +162,6 @@ function isGenericGristField(name) {
   return /^(id|manualSort|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|AA|AB|AC|AD|AE|AF|AG|AH|AI|AJ|AK|AL|AM|AN|AO|AP|AQ|AR|AS|AT|AU|AV|AW|AX|AY|AZ)$/.test(String(name));
 }
 
-/* Colonnes techniques à déprioritiser quand la table est très large */
-const TECHNICAL_COL_PAT = /^(cod_|crea_|c_jur|t_jur|lib_uai|cod_aff|tri_|fco_|g_olocalisation|g_ea_code|lien_|num_tel|adr_|cp_|g_lng|g_lat|detail_forma)/i;
-const MAX_GRIST_COLS = 45;
-
 function buildGristQueryTable() {
   if (!gristRecords || !gristRecords.length) return null;
   const allFields = Object.keys(gristRecords[0]).filter(f => f !== 'id' && f !== 'manualSort');
@@ -189,21 +189,7 @@ function buildGristQueryTable() {
   }
 
   // Cas où la table Grist a déjà de vrais noms de colonnes.
-  // Si la table est très large (ex : Parcoursup_National — 118 colonnes),
-  // on limite à MAX_GRIST_COLS colonnes pertinentes pour éviter de bloquer le navigateur.
-  let processFields = allFields;
-  let processRecords = gristRecords;
-  if (allFields.length > MAX_GRIST_COLS) {
-    const nonTech = allFields.filter(f => !TECHNICAL_COL_PAT.test(f));
-    processFields = (nonTech.length >= 15 ? nonTech : allFields).slice(0, MAX_GRIST_COLS);
-    processRecords = gristRecords.map(r => {
-      const o = {};
-      processFields.forEach(f => { o[f] = r[f]; });
-      return o;
-    });
-  }
-
-  return { source: 'Grist', name: 'Table Grist connectée', headers: processFields, objects: processRecords };
+  return { source: 'Grist', name: 'Table Grist connectée', headers: allFields, objects: gristRecords };
 }
 
 function getActiveQueryTables() {
@@ -235,8 +221,8 @@ const PARCOURSUP_ONTOLOGY_RULES = [
   { family:'identifiants', role:'identifiant technique', priority:1, re:/\b(id|identifiant|numero|num[eé]ro|code uai|uai|manualsort)\b/i, avoid:true },
   { family:'territoire', role:'filtre territorial', priority:95, re:/zone.*pays.*basque|pays.*basque|\bzone\b/i },
   { family:'territoire', role:'département du candidat', priority:82, re:/d[eé]partement(?!.*accueil)|dept/i },
-  { family:'territoire', role:"académie d'origine/scolarité", priority:58, re:/acad[eé]mie.*(scolar|origine|candidat|lyc[eé]e)/i },
-  { family:'territoire', role:"commune d'origine/scolarité", priority:50, re:/commune.*(scolar|origine|candidat|lyc[eé]e)/i },
+  { family:'territoire', role:'académie d’origine/scolarité', priority:58, re:/acad[eé]mie.*(scolar|origine|candidat|lyc[eé]e)/i },
+  { family:'territoire', role:'commune d’origine/scolarité', priority:50, re:/commune.*(scolar|origine|candidat|lyc[eé]e)/i },
 
   { family:'admission', role:'a reçu une proposition', priority:90, re:/proposition.*(oui|non|re[cç]ue|eu)|a.*proposition/i },
   { family:'admission', role:'a accepté / répondu favorablement', priority:92, re:/r[eé]pondu favorablement|proposition.*accept[eé]e|acceptation/i },
@@ -247,13 +233,13 @@ const PARCOURSUP_ONTOLOGY_RULES = [
   { family:'formation', role:'formation/spécialité acceptée', priority:96, re:/sp[eé]cialit[eé].*mention.*formation.*accueil.*accept[eé]e|mention.*formation.*accept|formation.*accueil.*accept[eé]e/i },
   { family:'formation', role:'filière/domaine', priority:74, re:/fili[eè]re|domaine|discipline/i },
 
-  { family:'mobilité', role:"académie d'accueil acceptée", priority:100, re:/acad[eé]mie.*(accueil|[eé]tablissement).*accept[eé]e|acad[eé]mie.*accueil/i },
-  { family:'mobilité', role:"département d'accueil", priority:86, re:/d[eé]partement.*(accueil|[eé]tablissement).*accept[eé]e/i },
-  { family:'mobilité', role:"région d'accueil", priority:75, re:/r[eé]gion.*(accueil|[eé]tablissement).*accept[eé]e/i },
-  { family:'mobilité', role:"commune d'accueil", priority:70, re:/commune.*(accueil|[eé]tablissement).*accept[eé]e/i },
+  { family:'mobilité', role:'académie d’accueil acceptée', priority:100, re:/acad[eé]mie.*(accueil|[eé]tablissement).*accept[eé]e|acad[eé]mie.*accueil/i },
+  { family:'mobilité', role:'département d’accueil', priority:86, re:/d[eé]partement.*(accueil|[eé]tablissement).*accept[eé]e/i },
+  { family:'mobilité', role:'région d’accueil', priority:75, re:/r[eé]gion.*(accueil|[eé]tablissement).*accept[eé]e/i },
+  { family:'mobilité', role:'commune d’accueil', priority:70, re:/commune.*(accueil|[eé]tablissement).*accept[eé]e/i },
 
-  { family:'établissement', role:"établissement d'accueil", priority:76, re:/[eé]tablissement.*accueil.*accept[eé]e|nom.*[eé]tablissement.*accueil/i },
-  { family:'établissement', role:"établissement de scolarité", priority:52, re:/[eé]tablissement.*scolarit[eé]|lyc[eé]e/i },
+  { family:'établissement', role:'établissement d’accueil', priority:76, re:/[eé]tablissement.*accueil.*accept[eé]e|nom.*[eé]tablissement.*accueil/i },
+  { family:'établissement', role:'établissement de scolarité', priority:52, re:/[eé]tablissement.*scolarit[eé]|lyc[eé]e/i },
   { family:'établissement', role:'secteur établissement', priority:68, re:/secteur.*[eé]tablissement|public|priv[eé]/i },
 
   { family:'profil social', role:'boursier', priority:85, re:/\bboursier\b|bourse/i },
@@ -336,10 +322,6 @@ function pctFr(n, d, digits = 1) {
   return (n / d * 100).toFixed(digits).replace('.', ',') + ' %';
 }
 
-function isNumericKey(k) {
-  return /^-?\d+([.,]\d+)?$/.test(String(k).trim());
-}
-
 function topCountsForRows(rows, col, max = 12) {
   const counts = new Map();
   let filled = 0;
@@ -350,34 +332,10 @@ function topCountsForRows(rows, col, max = 12) {
     const key = String(v).trim();
     counts.set(key, (counts.get(key) || 0) + 1);
   });
-
-  const distinctKeys = [...counts.keys()];
-  const numericRatio = distinctKeys.length
-    ? distinctKeys.filter(isNumericKey).length / distinctKeys.length
-    : 0;
-  const isNumericCol = numericRatio > 0.9;
-
-  let entries = [...counts.entries()];
-
-  if (isNumericCol) {
-    entries.sort((a, b) => parseFloat(a[0].replace(',', '.')) - parseFloat(b[0].replace(',', '.')));
-
-    if (entries.length > max && max > 1) {
-      const keep = max - 1;
-      const head = entries.slice(0, keep);
-      const tail = entries.slice(keep);
-      const tailCount = tail.reduce((s, [, c]) => s + c, 0);
-      const tailFrom = tail[0][0];
-      const tailTo = tail[tail.length - 1][0];
-      const tailLabel = tailFrom === tailTo ? `${tailFrom}` : `${tailFrom}–${tailTo}`;
-      entries = [...head, [`${tailLabel} et plus`, tailCount]];
-    }
-  } else {
-    entries.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'fr'));
-    entries = entries.slice(0, max);
-  }
-
-  const top = entries.map(([value, count]) => ({ value, count, pct: filled ? count / filled * 100 : 0 }));
+  const top = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'fr'))
+    .slice(0, max)
+    .map(([value, count]) => ({ value, count, pct: filled ? count / filled * 100 : 0 }));
   return { filled, distinct: counts.size, top };
 }
 
@@ -422,6 +380,7 @@ function buildFullTableSynthesis(table, question = '') {
   out += `Nombre de colonnes : ${headers.length}\n`;
   out += `Important : cette synthèse est calculée sur toutes les lignes, pas seulement sur un aperçu.\n\n`;
 
+  // Colonnes principales : colonnes métier + colonnes dont le nom est cité dans la question.
   const selectedCols = headers
     .map(col => ({ col, score: scoreColumnForSummary(col) + (q && q.includes(normalizeText(col)) ? 12 : 0) }))
     .filter(x => x.score > -10)
@@ -448,6 +407,7 @@ function buildFullTableSynthesis(table, question = '') {
     }
   });
 
+  // Croisements Parcoursup très utiles pour les synthèses générales.
   const zoneCol = findBestColumn(headers, [/zone.*pays.*basque|pays.*basque|zone/], []);
   const groupCol = findBestColumn(headers, [/grands? groupes?.*formation.*accueil.*acceptee|grands? groupes?.*formation|formation.*accueil.*acceptee/], []);
   const acadCol = findBestColumn(headers, [/academie/], [/scolarite|origine|lycee/]);
@@ -506,6 +466,7 @@ function detectFilters(table, questionNorm, targetCol) {
   const filters = [];
   const headers = table.headers.filter(Boolean);
 
+  // Cas métier Parcoursup : "basque" signifie Zone du Pays Basque = oui.
   if (/basque|pays basque/.test(questionNorm)) {
     const zoneCol = findBestColumn(headers, [/zone.*pays.*basque|pays.*basque|zone/], []);
     if (zoneCol) {
@@ -514,6 +475,7 @@ function detectFilters(table, questionNorm, targetCol) {
     }
   }
 
+  // Cas métier : groupe L1 - CUPGE - DEUST - DU.
   if (/\bl1\b/.test(questionNorm) && /cupge/.test(questionNorm) && /deust/.test(questionNorm)) {
     const groupCol = findBestColumn(headers, [/grands? groupes?.*formation.*accueil.*acceptee|groupes?.*formation|formation.*accueil.*acceptee/], []);
     if (groupCol) {
@@ -525,6 +487,8 @@ function detectFilters(table, questionNorm, targetCol) {
     }
   }
 
+  // Cas générique utile : "autre académie que Bordeaux", "hors Bordeaux",
+  // "académie différente de Bordeaux" => Académie d'accueil != Bordeaux.
   if (/(autre|hors|sauf|different|differente|≠|!=|pas).*bordeaux|bordeaux.*(exclu|exclue|sauf)/.test(questionNorm)) {
     const acadCol = findBestColumn(headers, [/academie/], [/scolarite|origine|lycee/]);
     if (acadCol && acadCol !== targetCol) {
@@ -533,6 +497,8 @@ function detectFilters(table, questionNorm, targetCol) {
     }
   }
 
+  // Détection générique : si une valeur catégorielle apparaît dans la question,
+  // elle devient un filtre, sauf pour la colonne cible du GROUP BY.
   headers.forEach(col => {
     if (col === targetCol || filters.some(f => f.col === col)) return;
     const values = uniqueValues(table, col, 150);
@@ -602,7 +568,10 @@ function executeLocalDataQuery(question, filterContextText = question) {
 }
 
 
-/* ═══════════════════════ ACTIONS LOCALES GÉNÉRIQUES ═══════════════════════ */
+/* ═══════════════════════ ACTIONS LOCALES GÉNÉRIQUES ═══════════════════════
+   Albert comprend et rédige ; le widget exécute les opérations mécaniques.
+   Cette couche reste volontairement générique : elle ne connaît pas Parcoursup,
+   sauf via les détecteurs de filtres déjà existants quand ils sont disponibles. */
 const LOCAL_TOOLS = [
   { name: 'export_excel', description: 'Exporter des lignes filtrées dans un fichier .xlsx' },
   { name: 'export_csv', description: 'Exporter des lignes filtrées dans un fichier .csv' }
@@ -632,6 +601,7 @@ function guessExportFilename(question, ext) {
   else if (/apprenti|apprentissage/.test(q)) name = 'candidats_apprentis';
   return `${sanitizeFilenamePart(name)}.${ext}`;
 }
+
 
 function applyLocalActionFilters(rows, filters) {
   if (!filters || !filters.length) return rows.slice();
@@ -697,3 +667,5 @@ function formatActionFilters(filters) {
   if (!filters || !filters.length) return 'Filtres appliqués : aucun — export de toute la table active.';
   return 'Filtres appliqués : ' + filters.map(f => `${f.col} ${f.op === 'neq' ? '≠' : '='} "${f.value}"`).join(' ; ');
 }
+
+

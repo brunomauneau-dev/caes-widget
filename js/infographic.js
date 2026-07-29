@@ -9,19 +9,6 @@
    calculs locaux Grist/Excel et une identité graphique cohérente. */
 let generatedInfographics = [];
 
-// ── Config du segment résiduel "Autres" pour les sections stacked ──
-// Voir renderStacked() : quand la somme des segments fournis par Albert
-// n'atteint pas le total réel de la population, on complète nous-mêmes
-// avec un segment résiduel plutôt que de compter sur Albert pour y penser
-// (une génération sur deux, il l'ajoutait spontanément ; l'autre non — d'où
-// des pourcentages incohérents entre sections stacked et bars sur les mêmes
-// données). Le libellé est ici un paramètre unique et modifiable, pas codé
-// en dur dans la fonction de rendu.
-const INFOGRAPHIC_STACKED_OTHER_LABEL = 'Autres';
-// En dessous de ce seuil (en % du total réel), l'écart est considéré comme
-// du bruit d'arrondi et on n'ajoute pas de segment résiduel visuel.
-const INFOGRAPHIC_STACKED_OTHER_MIN_PCT = 1;
-
 function isInfographicRequest(question) {
   const q = normalizeText(question);
   return /infographie|dataviz|visualisation|page html|rapport visuel|dashboard|tableau de bord|mise en forme visuelle|comme claude|artifact|visuel/.test(q);
@@ -280,7 +267,7 @@ function renderBars(items, opts = {}) {
     const raw = values[idx] || 0;
     const width = clampNum(raw / max * 100, 2, 100);
     const pct = it.percent || it.pct || it.share || '';
-    const shown = it.display || it.count || it.n || it.effectif || it.nb || it.value || (raw === 0 ? '0' : '');
+    const shown = it.display || it.count || it.n || it.effectif || it.nb || it.value || '';
     return `<div class="bar-row">
       <div class="bar-top"><span>${escapeHtml(it.label || it.name || it.category || `Item ${idx+1}`)}</span><strong>${escapeHtml(shown)}${pct ? ` · ${escapeHtml(pct)}` : ''}</strong></div>
       <div class="bar-track"><div class="bar-fill" style="width:${width.toFixed(1)}%"></div></div>
@@ -307,66 +294,24 @@ function renderComparison(items) {
 }
 
 function renderStacked(groups) {
-  groups = Array.isArray(groups) ? groups.slice(0, 8) : [];
+  groups = Array.isArray(groups) ? groups.slice(0, 5) : [];
   if (!groups.length) return '';
   const palette = ['var(--accent)', 'var(--secondary)', '#4f7c3a', '#d4a017', '#8b4513', '#6b6560'];
-  // Couleur fixe (gris neutre) pour le segment résiduel "Autres" : il ne doit jamais
-  // reprendre une couleur de la palette cyclique, sinon il se confond visuellement
-  // avec le segment qui occupe cette position dans le cycle (ex. PCSI, 1er segment,
-  // même teinte que "Autres" ajouté en 7e position sur une palette de 6 couleurs).
-  const OTHER_COLOR = '#b7bcc4';
-  const segColor = (seg, i) => seg && seg._isOtherResidual ? OTHER_COLOR : palette[i % palette.length];
   return `<div class="stacked-list">${groups.map(g => {
-    let segments = Array.isArray(g.segments) ? g.segments.slice(0, 6) : [];
-    let values = segments.map(x => Number(x.value) || parseInfographicNumber(x.display || x.percent) || 0);
-    let sum = values.reduce((s, x) => s + x, 0);
+    const segments = Array.isArray(g.segments) ? g.segments.slice(0, 6) : [];
+    const values = segments.map(x => Number(x.value) || parseInfographicNumber(x.display || x.percent) || 0);
+    const sum = values.reduce((s, x) => s + x, 0);
     // Si Albert fournit déjà des pourcentages (somme proche de 100), on les utilise tels quels.
     // Sinon, on normalise sur la somme des effectifs.
     const valuesArePercents = sum > 85 && sum <= 105 && values.every(v => v >= 0 && v <= 100);
-
-    // Segment résiduel "Autres" : si Albert a transmis le total réel de la population
-    // du groupe (g.total, ex. 175 candidats) et que la somme des segments affichés ne
-    // l'atteint pas, on complète nous-mêmes en code — jamais laissé à l'initiative du
-    // modèle. C'est ce qui garantit qu'un même item (ex. PCSI) affiche le même % dans
-    // une section "bars" (sur le total réel) et une section "stacked" juste à côté
-    // (auparavant calculé sur la seule somme des segments affichés, d'où l'écart
-    // 26,3 % / 33,1 % observé sur les mêmes données).
-    if (!valuesArePercents) {
-      const realTotal = parseInfographicNumber(g.total ?? g.n ?? g.count);
-      if (realTotal && isFinite(realTotal) && realTotal > 0) {
-        if (realTotal >= sum) {
-          const residual = realTotal - sum;
-          const residualPct = residual / realTotal * 100;
-          if (residualPct >= INFOGRAPHIC_STACKED_OTHER_MIN_PCT) {
-            segments = segments.concat([{ label: INFOGRAPHIC_STACKED_OTHER_LABEL, value: residual, _isOtherResidual: true }]);
-            values = values.concat([residual]);
-            sum = realTotal;
-          }
-        } else {
-          // Incohérence : le total annoncé par Albert est plus petit que la somme des
-          // segments qu'il a lui-même fournis. On ne casse pas l'affichage — on retombe
-          // sur la normalisation existante (sur la somme des segments) — mais on trace
-          // l'anomalie pour qu'elle ne reste pas invisible comme le bug initial.
-          console.warn('[infographic] stacked: total groupe incohérent (< somme des segments)', { label: g.label, total: realTotal, sum });
-        }
-      }
-    }
-
     const total = valuesArePercents ? 100 : (sum || 1);
-    // Le pourcentage normalisé (utilisé pour la largeur ET la légende) — calculé une seule
-    // fois ici, jamais repris du texte libre "display"/"percent" fourni par Albert. Avant ce
-    // correctif, la légende affichait `seg.display` tel quel : rien ne garantissait qu'il
-    // corresponde à `seg.value`, et Albert a déjà produit les deux pour un même segment
-    // (ex. largeur 33,8 % / légende "26,7 %") — un désaccord interne à sa propre réponse,
-    // impossible à détecter côté widget tant que les deux champs restaient indépendants.
-    const pcts = values.map(v => clampNum(v / total * 100, 0, 100));
     return `<div class="stacked-block">
       <div class="stacked-title">${escapeHtml(g.label || '')}</div>
       <div class="stacked-bar">${segments.map((seg, i) => {
-        const w = pcts[i];
-        return `<div class="stacked-seg" style="width:${w.toFixed(1)}%;background:${segColor(seg, i)}"></div>`;
+        const w = clampNum(values[i] / total * 100, 0, 100);
+        return `<div class="stacked-seg" style="width:${w.toFixed(1)}%;background:${palette[i % palette.length]}">${w >= 10 ? escapeHtml(seg.shortLabel || seg.label || '') : ''}</div>`;
       }).join('')}</div>
-      <div class="stacked-legend">${segments.map((seg, i) => `<span><i style="background:${segColor(seg, i)}"></i>${escapeHtml(seg.label || '')} ${pcts[i].toFixed(1).replace('.', ',')} %</span>`).join('')}</div>
+      <div class="stacked-legend">${segments.map((seg, i) => `<span><i style="background:${palette[i % palette.length]}"></i>${escapeHtml(seg.label || '')} ${escapeHtml(seg.display || seg.percent || '')}</span>`).join('')}</div>
     </div>`;
   }).join('')}</div>`;
 }
@@ -438,28 +383,6 @@ function renderSection(section, idx) {
 
 function renderAdaptiveInfographicHtml(spec, question) {
   spec = normalizeInfographicSpec(spec, question);
-  // Filet de sécurité (pas un correctif automatique — cf. discussion) : on trace,
-  // sans rien changer à l'affichage, les cas où une section "stacked" apparaît sans
-  // section ranking/bars correspondante juste avant, ou avec un périmètre ("scope")
-  // différent de celle qui la précède. Un vrai doublon barres+stacked structurellement
-  // fusionné ou renommé par Albert reste un choix éditorial qu'on ne corrige pas ici
-  // (le risque de "deviner" un titre serait pire que le problème), mais au moins la
-  // trace permet de vérifier la fréquence du phénomène plutôt que de le découvrir par
-  // hasard en comparant deux captures d'écran.
-  spec.sections.forEach((s, i) => {
-    if ((s.type || '') !== 'stacked') return;
-    const prev = spec.sections[i - 1];
-    const prevIsRankingOrBars = prev && (prev.type === 'ranking' || prev.type === 'bars');
-    if (!prevIsRankingOrBars) {
-      console.warn('[infographic] section stacked sans ranking/bars juste avant', { index: i, title: s.title });
-      return;
-    }
-    const scopeA = (prev.scope || prev.perimeter || '').trim();
-    const scopeB = (s.scope || s.perimeter || '').trim();
-    if (scopeA && scopeB && scopeA !== scopeB) {
-      console.warn('[infographic] scope divergent entre section bars et section stacked adjacentes', { titleBars: prev.title, scopeBars: scopeA, titleStacked: s.title, scopeStacked: scopeB });
-    }
-  });
   const sections = spec.sections.map((s, i) => renderSection(s, i)).join('\n');
   const metrics = renderMetricCards(spec.metrics);
   const narrative = Array.isArray(spec.narrative) ? spec.narrative : (spec.narrative ? [spec.narrative] : []);
@@ -475,7 +398,7 @@ function renderAdaptiveInfographicHtml(spec, question) {
   @import url("https://unpkg.com/@gouvfr/dsfr@1.12.1/dist/fonts/Marianne-Regular.woff2");
   :root{--accent:${spec.accent};--secondary:${spec.secondary};--bg:${spec.bg||"#f7f4ef"};--card:${spec.card||"#fff"};--text:${spec.text||"#1c1a17"};--muted:${spec.muted||"#6b6560"};--line:${spec.line||"#e0dbd4"};--soft:${spec.soft||"#f1e9e3"};--hero-bg:${spec.hero||spec.text||"#1c1a17"};}
   *{box-sizing:border-box;margin:0;padding:0} body{font-family:"Marianne","Segoe UI",system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5} 
-  .hero{background:var(--hero-bg);color:white;padding:46px 42px 38px;position:relative;overflow:hidden}.hero:before{content:"";position:absolute;right:-80px;top:-90px;width:330px;height:330px;border-radius:50%;background:var(--accent);opacity:.23}.hero>*{position:relative}.eyebrow{font-size:11px;letter-spacing:2px;text-transform:uppercase;font-weight:700;color:var(--accent);margin-bottom:12px}.hero h1{font-family:Georgia,serif;font-size:clamp(30px,5vw,54px);font-weight:400;line-height:1.05;max-width:900px;margin-bottom:14px}.hero-sub{color:rgba(255,255,255,.65);max-width:760px}.page{max-width:1180px;margin:0 auto;padding:32px 26px}.metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px}.hero .metric-grid{max-width:920px;margin-top:30px}.metric-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;box-shadow:0 8px 24px rgba(0,0,0,.04)}.hero .metric-card{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.08);box-shadow:none}.metric-label{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);font-weight:700;margin-bottom:8px}.hero .metric-label{color:rgba(255,255,255,.55)}.metric-value{font-size:30px;line-height:1;font-weight:800;color:var(--accent);margin-bottom:6px}.hero .metric-value{color:rgba(255,255,255,.95)}.metric-detail{font-size:12px;color:var(--muted)}.hero .metric-detail{color:rgba(255,255,255,.62)}.narrative{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--accent);border-radius:14px;padding:22px 24px;margin-bottom:18px;display:grid;gap:10px}.narrative p{color:var(--muted)}.info-section{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:24px;margin-bottom:18px}.section-headline{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.scope-badge{font-size:10px;text-transform:uppercase;letter-spacing:.7px;font-weight:800;color:var(--secondary);background:#eef3f8;border:1px solid #d5e1ee;border-radius:999px;padding:6px 10px;white-space:nowrap}.section-kicker{font-size:10px;text-transform:uppercase;letter-spacing:2px;color:var(--accent);font-weight:800;margin-bottom:8px}.info-section h2{font-family:Georgia,serif;font-size:26px;font-weight:400;margin-bottom:6px}.section-subtitle,.section-note,.section-text{color:var(--muted);font-size:13px;margin-bottom:16px}.section-body{margin-top:14px}.bars{display:grid;gap:13px}.bar-top{display:flex;justify-content:space-between;gap:18px;font-size:13px;margin-bottom:5px}.bar-top strong{white-space:nowrap;color:var(--text)}.bar-track{height:12px;background:var(--soft);border-radius:99px;overflow:hidden}.bar-fill{height:100%;background:var(--accent);border-radius:99px}.compare-list{display:grid;gap:0}.compare-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0;border-bottom:1px solid var(--line)}.compare-row:last-child{border-bottom:0}.compare-label{font-size:13px;color:var(--muted)}.compare-values{display:flex;align-items:center;gap:8px}.val{font-weight:800;font-size:17px}.val.primary{color:var(--accent)}.val.secondary{color:var(--secondary)}.sep{color:var(--line)}.delta{font-size:11px;font-weight:800;border-radius:99px;padding:3px 7px;background:var(--soft);color:var(--muted)}.delta.plus{background:#ecfdf5;color:#059669}.delta.minus{background:#fff1f2;color:#e11d48}.stacked-list{display:grid;gap:16px}.stacked-title{font-weight:800;font-size:13px;margin-bottom:6px}.stacked-bar{display:flex;height:32px;border-radius:7px;overflow:hidden;background:var(--soft)}.stacked-seg{display:flex;align-items:center;justify-content:center;color:white;font-size:10px;font-weight:800}.stacked-legend{display:flex;flex-wrap:wrap;gap:8px 14px;margin-top:8px;color:var(--muted);font-size:12px}.stacked-legend span{display:flex;align-items:center;gap:5px}.stacked-legend i{width:9px;height:9px;border-radius:2px;display:inline-block}.insight-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}.insight-card{background:linear-gradient(180deg,#fff,var(--soft));border:1px solid var(--line);border-radius:14px;padding:18px}.insight-num{font-size:10px;color:var(--accent);font-weight:900;letter-spacing:1.5px;margin-bottom:8px}.insight-card h4{font-size:15px;margin-bottom:7px}.insight-card p{font-size:12px;color:var(--muted);line-height:1.65}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border-bottom:1px solid var(--line);padding:9px 10px;text-align:left}th{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);background:var(--soft)}.foot{text-align:center;color:var(--muted);font-size:11px;padding:24px;border-top:1px solid var(--line)}@media(max-width:700px){.hero{padding:34px 24px}.page{padding:22px 14px}.compare-row{align-items:flex-start;flex-direction:column}.compare-values{width:100%;justify-content:flex-start}.info-section{padding:18px}.bar-top{flex-direction:column;gap:2px}.metric-value{font-size:26px}}
+  .hero{background:var(--hero-bg);color:white;padding:46px 42px 38px;position:relative;overflow:hidden}.hero:before{content:"";position:absolute;right:-80px;top:-90px;width:330px;height:330px;border-radius:50%;background:var(--accent);opacity:.23}.hero>*{position:relative}.eyebrow{font-size:11px;letter-spacing:2px;text-transform:uppercase;font-weight:700;color:var(--accent);margin-bottom:12px}.hero h1{font-family:Georgia,serif;font-size:clamp(30px,5vw,54px);font-weight:400;line-height:1.05;max-width:900px;margin-bottom:14px}.hero-sub{color:rgba(255,255,255,.65);max-width:760px}.page{max-width:1180px;margin:0 auto;padding:32px 26px}.metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px}.hero .metric-grid{max-width:920px;margin-top:30px}.metric-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;box-shadow:0 8px 24px rgba(0,0,0,.04)}.hero .metric-card{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.08);box-shadow:none}.metric-label{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted);font-weight:700;margin-bottom:8px}.hero .metric-label{color:rgba(255,255,255,.55)}.metric-value{font-size:30px;line-height:1;font-weight:800;color:var(--accent);margin-bottom:6px}.hero .metric-value{color:rgba(255,255,255,.95)}.metric-detail{font-size:12px;color:var(--muted)}.hero .metric-detail{color:rgba(255,255,255,.62)}.narrative{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--accent);border-radius:14px;padding:22px 24px;margin-bottom:18px;display:grid;gap:10px}.narrative p{color:var(--muted)}.info-section{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:24px;margin-bottom:18px}.section-headline{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}.scope-badge{font-size:10px;text-transform:uppercase;letter-spacing:.7px;font-weight:800;color:var(--secondary);background:#eef3f8;border:1px solid #d5e1ee;border-radius:999px;padding:6px 10px;white-space:nowrap}.section-kicker{font-size:10px;text-transform:uppercase;letter-spacing:2px;color:var(--accent);font-weight:800;margin-bottom:8px}.info-section h2{font-family:Georgia,serif;font-size:26px;font-weight:400;margin-bottom:6px}.section-subtitle,.section-note,.section-text{color:var(--muted);font-size:13px;margin-bottom:16px}.section-body{margin-top:14px}.bars{display:grid;gap:13px}.bar-top{display:flex;justify-content:space-between;gap:18px;font-size:13px;margin-bottom:5px}.bar-top strong{white-space:nowrap;color:var(--text)}.bar-track{height:10px;background:var(--soft);border-radius:99px;overflow:hidden}.bar-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--secondary));border-radius:99px}.compare-list{display:grid;gap:0}.compare-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0;border-bottom:1px solid var(--line)}.compare-row:last-child{border-bottom:0}.compare-label{font-size:13px;color:var(--muted)}.compare-values{display:flex;align-items:center;gap:8px}.val{font-weight:800;font-size:17px}.val.primary{color:var(--accent)}.val.secondary{color:var(--secondary)}.sep{color:var(--line)}.delta{font-size:11px;font-weight:800;border-radius:99px;padding:3px 7px;background:var(--soft);color:var(--muted)}.delta.plus{background:#ecfdf5;color:#059669}.delta.minus{background:#fff1f2;color:#e11d48}.stacked-list{display:grid;gap:16px}.stacked-title{font-weight:800;font-size:13px;margin-bottom:6px}.stacked-bar{display:flex;height:24px;border-radius:7px;overflow:hidden;background:var(--soft)}.stacked-seg{display:flex;align-items:center;justify-content:center;color:white;font-size:10px;font-weight:800}.stacked-legend{display:flex;flex-wrap:wrap;gap:8px 14px;margin-top:7px;color:var(--muted);font-size:11px}.stacked-legend span{display:flex;align-items:center;gap:5px}.stacked-legend i{width:9px;height:9px;border-radius:2px;display:inline-block}.insight-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}.insight-card{background:linear-gradient(180deg,#fff,var(--soft));border:1px solid var(--line);border-radius:14px;padding:18px}.insight-num{font-size:10px;color:var(--accent);font-weight:900;letter-spacing:1.5px;margin-bottom:8px}.insight-card h4{font-size:15px;margin-bottom:7px}.insight-card p{font-size:12px;color:var(--muted);line-height:1.65}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:12px}th,td{border-bottom:1px solid var(--line);padding:9px 10px;text-align:left}th{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);background:var(--soft)}.foot{text-align:center;color:var(--muted);font-size:11px;padding:24px;border-top:1px solid var(--line)}@media(max-width:700px){.hero{padding:34px 24px}.page{padding:22px 14px}.compare-row{align-items:flex-start;flex-direction:column}.compare-values{width:100%;justify-content:flex-start}.info-section{padding:18px}.bar-top{flex-direction:column;gap:2px}.metric-value{font-size:26px}}
 
 
   /* ── Hub de sources : Grist pour gros volumes, drag & drop pour analyse rapide ── */
@@ -555,6 +478,242 @@ function renderAdaptiveInfographicHtml(spec, question) {
 </body>
 </html>`;
 }
+
+function buildFallbackInfographicSpec(question, localAnalysis) {
+  const table = getActiveDataSource();
+  const source = table ? `${table.source} · ${table.rows.length.toLocaleString('fr-FR')} lignes` : 'Données disponibles';
+  const rows = table?.rows || [];
+  const headers = table?.headers || [];
+  const metrics = [
+    { label: 'Source', value: table?.source || 'Données', detail: source },
+    { label: 'Lignes', value: rows.length.toLocaleString('fr-FR'), detail: 'observations analysées' },
+    { label: 'Colonnes', value: headers.length.toLocaleString('fr-FR'), detail: 'variables disponibles' }
+  ];
+  const sections = [];
+  const interesting = headers.filter(h => !/id$|^id$|code|uai|numero|numéro/i.test(h)).slice(0, 5);
+  interesting.forEach((h, idx) => {
+    const counts = new Map();
+    rows.forEach(r => {
+      const v = String(r[h] ?? '').trim();
+      if (v) counts.set(v, (counts.get(v) || 0) + 1);
+    });
+    const items = [...counts.entries()].sort((a,b)=>b[1]-a[1]).slice(0,8).map(([label, count]) => ({ label, count, value: count, percent: `${(count / Math.max(rows.length,1) * 100).toFixed(1).replace('.', ',')} %` }));
+    if (items.length) sections.push({ type: 'ranking', kicker: String(idx+1).padStart(2,'0'), title: h, subtitle: 'Répartition des principales valeurs', items });
+  });
+  sections.push({ type: 'insights', title: 'À retenir', items: [
+    { title: 'Synthèse calculée localement', text: 'Les graphiques ci-dessus sont produits à partir des lignes accessibles au widget, sans se limiter à un aperçu.' },
+    { title: 'Structure adaptive', text: 'Les sections varient selon les colonnes détectées et la question posée.' }
+  ]});
+  return { title: question || 'Infographie adaptive', subtitle: source, eyebrow: 'Infographie adaptive · Albert', metrics, sections };
+}
+
+let _infogCounter = 0;
+window._infogSpecs = window._infogSpecs || {};
+
+function _icBuildTitlesEditorHtml(spec, uid) {
+  const fields = [
+    { id: `ict-${uid}-title`,    label: 'Titre principal',  val: spec.title    || '' },
+    { id: `ict-${uid}-subtitle`, label: 'Sous-titre',       val: spec.subtitle || '' },
+    ...(spec.sections || []).map((s, i) => ({
+      id:    `ict-${uid}-s${i}`,
+      label: `Section ${i+1} — ${s.type}`,
+      val:   s.title || ''
+    }))
+  ];
+  const inputs = fields.map(f =>
+    `<div style="display:flex;flex-direction:column;gap:3px">
+       <label style="font-size:10px;font-weight:700;color:var(--gris3);text-transform:uppercase">${escapeHtml(f.label)}</label>
+       <input id="${f.id}" value="${escapeAttr(f.val)}" style="border:1px solid var(--gris1);border-radius:6px;padding:5px 8px;font-size:12px;width:100%">
+     </div>`
+  ).join('');
+  return `<div style="display:grid;gap:8px;padding:12px 0">${inputs}
+    <div style="display:flex;gap:8px;margin-top:4px">
+      <button class="ic-retheme-btn" onclick="icApplyTitles(${uid})" style="background:var(--albert);color:white;border-color:var(--albert)">✅ Mettre à jour</button>
+      <button class="ic-retheme-btn" onclick="icToggleTitlesEditor(${uid})">Annuler</button>
+    </div>
+  </div>`;
+}
+
+function icToggleTitlesEditor(uid) {
+  const te = document.getElementById(`ic-te-${uid}`);
+  if (te) te.style.display = te.style.display === 'none' ? 'block' : 'none';
+}
+window.icToggleTitlesEditor = icToggleTitlesEditor;
+
+function icApplyTitles(uid) {
+  const stored = window._infogSpecs[uid];
+  if (!stored) return;
+  const spec = stored.spec;
+  const get = id => { const el = document.getElementById(id); return el ? el.value : null; };
+  const newTitle    = get(`ict-${uid}-title`);
+  const newSubtitle = get(`ict-${uid}-subtitle`);
+  if (newTitle    !== null) spec.title    = newTitle;
+  if (newSubtitle !== null) spec.subtitle = newSubtitle;
+  (spec.sections || []).forEach((s, i) => {
+    const v = get(`ict-${uid}-s${i}`);
+    if (v !== null) s.title = v;
+  });
+  if (newTitle !== null) _icPersistInfographicTitle(uid, newTitle, false);
+  // Re-render
+  const theme = (typeof INFOGRAPH_THEMES !== 'undefined' ? INFOGRAPH_THEMES : []).find(t => t.id === stored.themeId) || {};
+  const newHtml = renderAdaptiveInfographicHtml(spec, spec.title);
+  const blob = new Blob([newHtml], { type: 'text/html;charset=utf-8' });
+  const newUrl = URL.createObjectURL(blob);
+  const frame = document.getElementById(`ic-frame-${uid}`);
+  if (frame) frame.src = newUrl;
+  const openLink = document.getElementById(`ic-open-${uid}`);
+  if (openLink) openLink.href = newUrl;
+  const dlLink = document.getElementById(`ic-dl-${uid}`);
+  if (dlLink) dlLink.href = newUrl;
+  icToggleTitlesEditor(uid);
+}
+window.icApplyTitles = icApplyTitles;
+
+function addInfographicMessage(html, title = 'Infographie adaptive générée', opts = {}) {
+  const safeHtml = html || renderAdaptiveInfographicHtml(buildFallbackInfographicSpec(title), title);
+  generatedInfographics.push(safeHtml);
+  const blob = new Blob([safeHtml], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+
+  const uid = ++_infogCounter;
+  const infogId = opts.messageId || ('info_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7));
+  const specJson = opts.spec ? JSON.stringify(opts.spec) : null;
+  const activeTheme = opts.themeId || 'bordeaux';
+  if (opts.spec) window._infogSpecs[uid] = { spec: JSON.parse(JSON.stringify(opts.spec)), themeId: activeTheme };
+
+  const rethemeHtml = specJson
+    ? `<div class="ic-retheme">
+        ${(typeof INFOGRAPH_THEMES !== 'undefined' ? INFOGRAPH_THEMES : []).map(t =>
+          `<button class="ic-retheme-btn${t.id === activeTheme ? ' ic-active' : ''}"
+            onclick="rethemeInfographic(this,${escapeHtml(JSON.stringify(specJson))},'${t.id}')">
+            <span class="ic-theme-dot" style="background:${t.accent};width:9px;height:9px;border-radius:50%;display:inline-block"></span>${escapeHtml(t.label)}
+          </button>`).join('')}
+        <button class="ic-retheme-btn" onclick="openInfographicComposer(${uid})" title="Recomposer">✏️ Recomposer</button>
+        <button class="ic-retheme-btn" onclick="icToggleTitlesEditor(${uid})" title="Modifier les titres">🖊 Titres</button>
+      </div>
+      <div id="ic-te-${uid}" style="display:none;border:1px solid var(--gris1);border-radius:8px;padding:10px;margin-bottom:8px;background:var(--gris0)">
+        ${_icBuildTitlesEditorHtml(opts.spec, uid)}
+      </div>`
+    : '';
+
+  const wrap = document.getElementById('chat-messages');
+  if (!wrap) return;
+  const msg = document.createElement('div');
+  msg.className = 'msg assistant';
+  msg.style.maxWidth = '95%';
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble';
+  bubble.innerHTML = `
+    <h4 class="ic-card-title" data-infog-id="${escapeAttr(infogId)}" data-original-title="${escapeAttr(title)}"><span class="ic-card-title-text">${escapeHtml(title)}</span><button type="button" class="ic-card-title-edit-btn" onclick="_icStartRenameCardTitle(this)" title="Renommer cette infographie">✎</button><button type="button" class="ic-card-title-reset-btn" onclick="_icResetCardTitle(this)" title="Revenir au titre original">↺</button></h4>
+    ${rethemeHtml}
+    <div style="display:flex;gap:8px;margin:10px 0;flex-wrap:wrap">
+      <a id="ic-open-${uid}" href="${url}" target="_blank" rel="noopener" style="background:var(--albert);color:white;text-decoration:none;padding:7px 10px;border-radius:6px;font-size:12px;font-weight:600">Ouvrir l'infographie</a>
+      <a id="ic-dl-${uid}" href="${url}" download="infographie_adaptive_albert.html" style="background:var(--gris0);color:var(--texte);text-decoration:none;padding:7px 10px;border-radius:6px;border:1px solid var(--gris1);font-size:12px;font-weight:600">Télécharger le HTML</a>
+    </div>
+    <iframe id="ic-frame-${uid}" src="${url}" title="${escapeAttr(title)}" style="width:100%;height:560px;border:1px solid var(--gris1);border-radius:8px;background:white"></iframe>
+  `;
+  msg.appendChild(bubble);
+  wrap.appendChild(msg);
+  wrap.scrollTop = wrap.scrollHeight;
+  chatHistory.push({ role: 'assistant', content: `[Infographie adaptive générée : ${title}]` });
+  if (opts.record !== false && typeof recordSessionMessage === 'function') {
+    recordSessionMessage({ type: 'infographic', id: infogId, title, originalTitle: title, html: safeHtml, spec: opts.spec, themeId: activeTheme });
+  }
+}
+
+function _icFindCardTitleEl(btn) {
+  return btn ? btn.closest('h4.ic-card-title') : null;
+}
+function _icCardTitleTextEl(h4) {
+  return h4 ? h4.querySelector('.ic-card-title-text') : null;
+}
+function _icPersistInfographicTitle(uidOrEl, title, resetToOriginal) {
+  let uid = uidOrEl;
+  let h4 = null;
+  if (uidOrEl && uidOrEl.nodeType === 1) {
+    h4 = uidOrEl;
+    const frame = h4.closest('.msg-bubble')?.querySelector('iframe[id^="ic-frame-"]');
+    uid = frame ? Number((frame.id || '').replace('ic-frame-', '')) : null;
+  } else if (uid) {
+    const frame = document.getElementById(`ic-frame-${uid}`);
+    h4 = frame?.closest('.msg-bubble')?.querySelector('h4.ic-card-title');
+  }
+  const infogId = h4?.getAttribute('data-infog-id') || null;
+  const originalTitle = h4?.getAttribute('data-original-title') || title;
+  if (h4) {
+    const txt = _icCardTitleTextEl(h4);
+    if (txt) txt.textContent = title;
+  }
+  if (uid && window._infogSpecs && window._infogSpecs[uid]?.spec) {
+    window._infogSpecs[uid].spec.title = title;
+    const input = document.getElementById(`ict-${uid}-title`);
+    if (input) input.value = title;
+  }
+  const session = (typeof getCurrentSession === 'function') ? getCurrentSession() : null;
+  if (session && Array.isArray(session.messages)) {
+    const msg = session.messages.find(m => m && m.type === 'infographic' && ((infogId && m.id === infogId) || (!infogId && m.title === originalTitle)));
+    if (msg) {
+      msg.title = title;
+      msg.originalTitle = msg.originalTitle || originalTitle;
+      if (msg.spec) msg.spec.title = title;
+      session.updatedAt = new Date().toISOString();
+    }
+  }
+  if (typeof scheduleSessionsSave === 'function') scheduleSessionsSave();
+}
+window._icPersistInfographicTitle = _icPersistInfographicTitle;
+
+function _icStartRenameCardTitle(btn) {
+  const h4 = _icFindCardTitleEl(btn);
+  const txt = _icCardTitleTextEl(h4);
+  if (!h4 || !txt || h4.querySelector('.ic-card-title-input')) return;
+  const current = txt.textContent.trim();
+  const input = document.createElement('input');
+  input.className = 'ic-card-title-input';
+  input.value = current;
+  txt.replaceWith(input);
+  input.focus();
+  input.select();
+  const commit = () => {
+    const value = input.value.replace(/\s+/g, ' ').trim() || current;
+    const span = document.createElement('span');
+    span.className = 'ic-card-title-text';
+    span.textContent = value;
+    input.replaceWith(span);
+    _icPersistInfographicTitle(h4, value, false);
+  };
+  input.addEventListener('keydown', ev => {
+    if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
+    if (ev.key === 'Escape') { ev.preventDefault(); input.value = current; commit(); }
+  });
+  input.addEventListener('blur', commit, { once: true });
+}
+window._icStartRenameCardTitle = _icStartRenameCardTitle;
+
+function _icResetCardTitle(btn) {
+  const h4 = _icFindCardTitleEl(btn);
+  if (!h4) return;
+  const original = h4.getAttribute('data-original-title') || 'Infographie Albert';
+  const input = h4.querySelector('.ic-card-title-input');
+  if (input) {
+    const span = document.createElement('span');
+    span.className = 'ic-card-title-text';
+    span.textContent = original;
+    input.replaceWith(span);
+  } else {
+    const txt = _icCardTitleTextEl(h4);
+    if (txt) txt.textContent = original;
+  }
+  _icPersistInfographicTitle(h4, original, true);
+}
+window._icResetCardTitle = _icResetCardTitle;
+
+/* Le compositeur multi-blocs (openInfographicComposer, closeInfographicComposer,
+   _icRenderBlocks, _icRenderThemes, icToggleBlock, icSelectTheme, submitInfographicComposer)
+   est déjà implémenté de façon complète dans sessions.js — il gère en plus la fusion
+   des blocs globaux/session et le mode "Recomposer" (targetUid). Pas de redéfinition ici
+   pour éviter toute divergence entre deux implémentations concurrentes. */
+
 async function generateInfographicWithAlbert(question, localAnalysis, dataExecution = null) {
   // Si un résultat Data Engine est disponible (compare, group_by, pivot…), on l'injecte
   // en tête de contexte — il est plus structuré que la répartition locale et doit primer.
@@ -565,17 +724,69 @@ async function generateInfographicWithAlbert(question, localAnalysis, dataExecut
       if (raw && raw.length > 20) deContext = raw + '\n\n';
     } catch(e) { console.warn('[infographic] dataEngineResultToContext error:', e); }
   }
-  // Quand deContext existe déjà, c'est la seule source à faire autorité pour les chiffres :
-  // on n'ajoute plus le group-by local (localAnalysis, filtres détectés séparément) ni la
-  // synthèse pleine table (top valeurs par colonne sur données NON filtrées) — ces deux
-  // sources pouvaient diverger du résultat Data Engine sur le même indicateur et produisaient
-  // des infographies non reproductibles selon le point d'entrée (bloc vs compositeur).
-  const context = deContext + buildContext(localAnalysis, { suppressGlobalStats: !!deContext });
-  // Thème par défaut du bouton bloc-unique : Bleu France. La spec est désormais
-  // retournée en plus du HTML (voir addInfographicMessage) pour que ce point d'entrée
-  // bénéficie des mêmes boutons post-génération (thème, titres, recomposer) que le
-  // compositeur multi-blocs, plutôt que d'être volontairement privé de ces réglages.
-  const specPrompt = buildInfographicSpecPrompt(question, context, null);
+  const context = deContext + buildContext(localAnalysis);
+  const specPrompt = `Tu es un directeur artistique, data analyst et rédacteur institutionnel.
+
+Tu dois produire une SPECIFICATION JSON pour une infographie adaptive. Le HTML sera généré ensuite par un moteur de rendu : ne renvoie donc PAS de HTML.
+
+Réponds UNIQUEMENT par un JSON valide, sans Markdown, sans commentaire, sans texte avant/après.
+
+Schéma attendu :
+{
+  "title": "titre clair",
+  "subtitle": "sous-titre avec périmètre et volume",
+  "eyebrow": "contexte court",
+  "accent": "#003189",
+  "secondary": "#E1000F",
+  "metrics": [ {"label":"...", "value":"...", "detail":"..."} ],
+  "narrative": ["phrase analytique 1", "phrase analytique 2"],
+  "sections": [
+    {"type":"kpi_grid", "title":"...", "metrics":[...]},
+    {"type":"ranking", "title":"...", "subtitle":"...", "items":[{"label":"...", "count":"...", "value":123, "percent":"..."}]},
+    {"type":"bars", "title":"...", "items":[...]},
+    {"type":"comparison", "title":"...", "items":[{"label":"...", "left":"...", "right":"...", "delta":"..."}]},
+    {"type":"stacked", "title":"...", "groups":[{"label":"...", "segments":[{"label":"...", "value":60, "display":"60 %"}]}]},
+    {"type":"insights", "title":"...", "items":[{"title":"...", "text":"..."}]},
+    {"type":"table", "title":"...", "headers":[...], "rows":[...]},
+    {"type":"text", "title":"...", "text":"..."},
+    {"type":"cascade", "title":"...", "scope":"...", "levels":["Niveau 1","Niveau 2","Niveau 3","..."], "total":123, "nodes":[{"label":"...", "count":10, "percent":"8,1 %", "children":[...]}]}
+  ],
+  "footer": "source et prudence éventuelle"
+}
+
+Règles d'adaptation éditoriale :
+- Tu es un consultant Parcoursup : utilise l'ONTOLOGIE PARCOURSUP DÉTECTÉE pour choisir les blocs pertinents selon la question (public, territoire, mobilité, formation, admission, boursiers, apprentis, etc.).
+- Construis une infographie narrative, pas une suite de statistiques. Il faut un fil conducteur clair : cadrage du public → résultats/profil → choix/orientations → destinations/mobilité si pertinent → enseignements.
+- Ne force jamais une section Pays Basque si la question porte sur un autre public ; Pays Basque n'est qu'une variable territoriale parmi d'autres.
+- Ne répète jamais dans une section les mêmes KPI que ceux du hero.
+- Chaque section doit avoir un champ "scope" explicite : "Périmètre : ensemble des candidats", "Périmètre : zone Pays Basque", "Périmètre : candidats boursiers", "Périmètre : candidats avec proposition acceptée", etc. Ne mélange pas plusieurs périmètres dans une même section sauf si le type est "comparison".
+- Pour Parcoursup : privilégie uniquement les dimensions détectées dans l'ontologie : profils, propositions, formations, académies, mobilité, boursiers, séries, établissements.
+- Évite les comparaisons mathématiquement vraies mais peu lisibles (ex : "1789 / 579 +209 %"). Pour une relation partie/tout, utilise plutôt une répartition explicite : Bordeaux 75,5 % / autres académies 24,5 %.
+- Mets 3 à 6 grands KPI en hero, choisis pour ouvrir l'histoire.
+- Utilise au plus 7 sections, chacune utile et non redondante.
+- Choisis le composant adapté : ranking/barres pour top catégories, comparison pour deux groupes, stacked pour répartitions qui totalisent 100 %, insights pour interprétation.
+- Évite les tableaux sauf si c'est indispensable ; préfère ranking, cartes ou insights. Ne termine jamais par un tableau : termine par des insights/conclusion. Exception : si le brief contient un TABLEAU EN CASCADE À INTÉGRER OBLIGATOIREMENT, crée une section dédiée cascade/tableau hiérarchique.
+- Pour les barres/rankings, fournis TOUJOURS une valeur numérique d'effectif dans "value". Le libellé affiché peut contenir "count" et "percent", mais "value" doit rester un nombre pur.
+- INTERDIT ABSOLU : Ne jamais utiliser de label générique comme "Item 1", "Item 2", "Item 3", "Catégorie X", "Label", "Valeur" ou tout autre placeholder. Chaque label doit être extrait LITTÉRALEMENT du contexte fourni (ex : "Bordeaux", "Toulouse", "CPGE - CPES", "L1"). Si tu ne trouves pas de label dans le contexte, omets l'item entier.
+- Les insights doivent interpréter les chiffres : évite "X domine" seul ; explique pourquoi c'est notable, surprenant ou utile.
+- N'invente aucun chiffre. Utilise seulement le contexte. Si un élément manque, n'en fais pas une section.
+- Pas de données personnelles ni d'identifiants individuels.
+
+EXEMPLES OBLIGATOIRES À SUIVRE :
+
+✅ BON — eyebrow et ranking avec labels réels :
+{"eyebrow":"Parcoursup 2026 · Pays Basque","sections":[{"type":"ranking","title":"Académies d'accueil","scope":"Périmètre : zone Pays Basque","items":[{"label":"Bordeaux","value":1789,"percent":"75,5 %"},{"label":"Toulouse","value":253,"percent":"10,7 %"},{"label":"Paris","value":68,"percent":"2,9 %"}]}]}
+
+✅ BON — insight avec analyse chiffrée (minimum 15 mots) :
+{"type":"insights","title":"Points saillants","items":[{"title":"Ancrage territorial fort","text":"75,5 % des candidats du Pays Basque restent dans l'académie de Bordeaux — un taux de proximité bien supérieur à la moyenne nationale, qui reflète l'effet frontière de la région."}]}
+
+❌ MAUVAIS — ne jamais produire :
+{"eyebrow":"Analyse 1","sections":[{"type":"ranking","title":"Répartition","items":[{"label":"Item 1","value":"..."},{"label":"Catégorie X","value":""}]}]}
+
+Demande utilisateur : ${question}
+
+CONTEXTE À UTILISER :
+${context || '(Aucun contexte disponible)'}`;
 
   const response = await fetch(albertConfig.endpoint, {
     method: 'POST',
@@ -603,5 +814,6 @@ async function generateInfographicWithAlbert(question, localAnalysis, dataExecut
     console.warn('JSON infographie invalide, fallback local:', e, raw);
     spec = buildFallbackInfographicSpec(question, localAnalysis);
   }
-  return { html: renderAdaptiveInfographicHtml(spec, question), spec };
+  return renderAdaptiveInfographicHtml(spec, question);
 }
+

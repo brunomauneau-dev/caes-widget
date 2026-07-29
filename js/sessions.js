@@ -3,15 +3,33 @@
 
 /* ═══════════════ SESSIONS & FILTRES PERSISTANTS ═══════════════ */
 // ── _generateInfographicFromComposer ──
-// Utilise le même prompt de génération que le bouton "🖼 Infographie" d'un bloc
-// unique (buildInfographicSpecPrompt, défini dans infographic.js) : avant, ce
-// compositeur avait son propre prompt plus pauvre (pas de "scope" par section,
-// pas de pourcentage systématique sur les barres, moins de garde-fous anti-
-// redondance), ce qui produisait des infographies structurellement différentes
-// de celles générées depuis un bloc — alors même que les données sources étaient
-// identiques. Seuls le thème de couleurs et le contexte (multi-blocs ici) varient.
 async function _generateInfographicFromComposer(question, composerCtx, theme) {
-  const prompt = buildInfographicSpecPrompt(question, composerCtx, theme);
+  const prompt = `Tu es un directeur artistique, data analyst et rédacteur institutionnel Parcoursup.
+Produis une SPECIFICATION JSON pour une infographie adaptive. Ne produis PAS de HTML. Réponds UNIQUEMENT par du JSON valide.
+Les couleurs DOIVENT être exactement : "accent":"${theme.accent}", "secondary":"${theme.secondary}".
+Schéma :
+{"title":"...","subtitle":"...","eyebrow":"...","accent":"${theme.accent}","secondary":"${theme.secondary}","metrics":[{"label":"...","value":"...","detail":"..."}],"narrative":["..."],"sections":[{"type":"ranking|bars|comparison|kpi_grid|insights|stacked","title":"...",...}],"footer":"..."}
+Règles ABSOLUES :
+- Infographie narrative avec fil conducteur clair, max 7 sections non redondantes.
+- N'invente aucun chiffre. Utilise SEULEMENT les données fournies ci-dessous.
+- INTERDIT ABSOLU : Ne jamais utiliser de label générique comme "Item 1", "Item 2", "Item 3", "Analyse 1", "Catégorie X", "Label", "Valeur", "Périmètre", "Section X". Chaque label doit être extrait LITTÉRALEMENT des données fournies (ex : "Bordeaux", "Toulouse", "CPGE - CPES"). Si tu ne trouves pas de label dans les données, omets l'item entier.
+- INTERDIT : champs vides (""), valeurs "...", titres génériques comme "À retenir" sans texte, cards insights sans contenu réel.
+- Chaque card insights DOIT avoir un champ "text" non vide (minimum 15 mots) avec une vraie analyse ou interprétation issue des données.
+- Si tu n'as pas assez de données pour remplir une section complètement, réduis le nombre d'items plutôt que de laisser des champs vides.
+- Toutes les sections doivent avoir uniquement des items avec titre ET texte/valeur réels.
+
+EXEMPLES (à suivre strictement) :
+
+✅ BON — section ranking avec labels issus des données :
+{"type":"ranking","title":"Académies d'accueil","items":[{"label":"Bordeaux","value":"1 789","percent":"75,5 %"},{"label":"Toulouse","value":"253","percent":"10,7 %"},{"label":"Paris","value":"68","percent":"2,9 %"}]}
+
+✅ BON — section insights avec vraie analyse (text > 15 mots) :
+{"type":"insights","title":"Points saillants","items":[{"title":"Concentration académique","text":"75,5 % des candidats du Pays Basque restent dans l'académie de Bordeaux, contre 10,7 % qui rejoignent Toulouse — un ancrage territorial marqué."}]}
+
+❌ MAUVAIS — ne jamais produire ceci :
+{"type":"ranking","title":"Répartition","items":[{"label":"Item 1","value":"..."},{"label":"Catégorie X","value":""},{"label":"Analyse 1","value":"N/A"}]}
+
+DONNÉES :\n${composerCtx}`;
   const resp = await fetch(albertConfig.endpoint, {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ model: albertConfig.model, messages:[{role:'system',content:prompt},{role:'user',content:`Génère l'infographie : ${question}`}], temperature:0.2 })
@@ -215,98 +233,6 @@ function addPersistentFilter(col, value, op = 'eq', label = null) {
 }
 
 
-// ── printCopilotBlock ──
-// Imprime uniquement le bloc de résultat courant (bubble), pas toute la page.
-// Sans ça, window.print() imprimait tout le fil de discussion tel qu'affiché
-// à l'écran, ce qui faisait sortir n'importe quel autre bloc (souvent celui
-// du dessus) au lieu du bloc sur lequel l'utilisateur avait cliqué "PDF".
-// On retire aussi tout ce qui n'a de sens qu'à l'écran (boutons d'action,
-// "Exporter l'image" des graphiques, détail technique du plan de calcul)
-// pour un rendu PDF propre plutôt qu'un simple dump de l'interface.
-function printCopilotBlock(bubble) {
-  const root = document.getElementById('de-print-root');
-  if (!root || !bubble) { window.print(); return; }
-  const clone = bubble.cloneNode(true);
-  clone.querySelectorAll('button').forEach(el => el.remove());
-  clone.querySelectorAll('details.msg-sources').forEach(el => el.remove());
-
-  const header = document.createElement('div');
-  header.className = 'de-print-header';
-  const dateStr = new Date().toLocaleString('fr-FR', { dateStyle: 'long', timeStyle: 'short' });
-  header.innerHTML = `<span class="de-print-brand">Parcoursup Data Copilot</span><span class="de-print-date">Exporté le ${dateStr}</span>`;
-
-  root.innerHTML = '';
-  root.appendChild(header);
-  root.appendChild(clone);
-
-  // Les tableaux croisés (pivot) peuvent avoir beaucoup de colonnes ; sans
-  // ajustement, elles dépassaient la largeur de la page et étaient tronquées
-  // (le conteneur overflow-x:auto ne s'imprime pas comme un scroll, il coupe).
-  // On bascule en paysage et on réduit la police en fonction du nombre de
-  // colonnes du tableau le plus large présent dans le bloc.
-  let maxCols = 0;
-  clone.querySelectorAll('table').forEach(t => {
-    const headerRow = t.querySelector('thead tr') || t.querySelector('tr');
-    if (headerRow) maxCols = Math.max(maxCols, headerRow.children.length);
-  });
-  const pageStyleTag = document.getElementById('de-print-page-style');
-  if (maxCols > 6) {
-    const fontSize = maxCols > 14 ? '7px' : maxCols > 10 ? '8px' : '9.5px';
-    clone.querySelectorAll('table').forEach(t => { t.style.fontSize = fontSize; });
-    if (pageStyleTag) pageStyleTag.textContent = '@media print { @page { size: landscape; } }';
-  } else if (pageStyleTag) {
-    pageStyleTag.textContent = '';
-  }
-
-  document.body.classList.add('de-printing');
-  const cleanup = () => {
-    document.body.classList.remove('de-printing');
-    root.innerHTML = '';
-    if (pageStyleTag) pageStyleTag.textContent = '';
-    window.removeEventListener('afterprint', cleanup);
-  };
-  window.addEventListener('afterprint', cleanup);
-  // Filet de sécurité si 'afterprint' ne se déclenche pas (ex : certains webviews)
-  setTimeout(cleanup, 20000);
-  window.print();
-}
-
-
-// ── Spinner de chargement pour les boutons copilot-action ──
-// Un simple changement de texte ("⏳ Génération…") passe facilement inaperçu :
-// même police, même couleur, aucun mouvement. Un petit spinner animé + libellé
-// grisé rend l'état "en cours" visible du coin de l'œil, sans dépendre d'une
-// feuille de style externe (le <style> est injecté une seule fois, à la demande).
-function _ensureCopilotSpinnerStyle() {
-  if (document.getElementById('copilot-spinner-style')) return;
-  const style = document.createElement('style');
-  style.id = 'copilot-spinner-style';
-  style.textContent = `
-    .copilot-action-spinner {
-      display:inline-block;width:11px;height:11px;margin-right:6px;vertical-align:-1px;
-      border-radius:50%;border:2px solid rgba(0,0,0,0.15);border-top-color:currentColor;
-      animation:copilot-spin .6s linear infinite;
-    }
-    .copilot-action.is-loading { opacity:.7;cursor:progress;pointer-events:none; }
-    @keyframes copilot-spin { to { transform:rotate(360deg); } }
-  `;
-  document.head.appendChild(style);
-}
-// Bascule un bouton copilot-action en état "chargement" (spinner + libellé),
-// et retourne une fonction à appeler pour le restaurer.
-function _setCopilotActionLoading(btn, loadingLabel) {
-  _ensureCopilotSpinnerStyle();
-  const originalHTML = btn.innerHTML;
-  btn.classList.add('is-loading');
-  btn.innerHTML = `<span class="copilot-action-spinner"></span>${escapeHtml(loadingLabel)}`;
-  btn.disabled = true;
-  return () => {
-    btn.innerHTML = originalHTML;
-    btn.classList.remove('is-loading');
-    btn.disabled = false;
-  };
-}
-
 // ── buildCopilotActionBar ──
 function buildCopilotActionBar(bubble, dataExecution = null, question = '') {
   const bar = document.createElement('div');
@@ -323,20 +249,23 @@ function buildCopilotActionBar(bubble, dataExecution = null, question = '') {
   bar.appendChild(mk('📊 Graphique', 'Afficher un graphique sur le résultat courant', () => quickAsk('Graphique')));
   if (dataExecution) {
     bar.appendChild(mk('🖼 Infographie', 'Générer une infographie à partir de ce résultat uniquement', async (btn) => {
-    const restore = _setCopilotActionLoading(btn, 'Génération…');
+    const originalLabel = btn.textContent;
+    btn.textContent = '⏳ Génération…';
+    btn.disabled = true;
     try {
       const localAnalysis = (typeof executeLocalDataQuery === 'function') ? executeLocalDataQuery(question, question) : {};
-      const { html, spec } = await generateInfographicWithAlbert(question || 'Infographie de ce résultat', localAnalysis, dataExecution);
-      addInfographicMessage(html, 'Infographie de ce bloc', { spec });
+      const html = await generateInfographicWithAlbert(question || 'Infographie de ce résultat', localAnalysis, dataExecution);
+      addInfographicMessage(html, 'Infographie de ce bloc');
     } catch (e) {
       addMessage('assistant', `<p style="color:var(--rouge)"><strong>Erreur pendant la génération de l'infographie</strong><br>${e.message}</p>`);
     } finally {
-      restore();
+      btn.textContent = originalLabel;
+      btn.disabled = false;
     }
   }));
   }
   bar.appendChild(mk('📄 Excel', 'Exporter le résultat courant en Excel', () => quickAsk('Exporte en Excel')));
-  bar.appendChild(mk('🖨 PDF', 'Imprimer / exporter en PDF', () => printCopilotBlock(bubble)));
+  bar.appendChild(mk('🖨 PDF', 'Imprimer / exporter en PDF', () => window.print()));
   bar.appendChild(mk('📋 Copier', 'Copier le rapport', async () => {
     const text = bubble.innerText || bubble.textContent || '';
     try { await navigator.clipboard.writeText(text); } catch(e) { console.warn(e); }
