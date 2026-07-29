@@ -340,6 +340,12 @@ function topCountsForRows(rows, col, max = 12) {
 }
 
 function numericStatsForRows(rows, col) {
+  // toStrictNumber : convertit une valeur en nombre, retourne NaN si impossible
+  const toStrictNumber = (v) => {
+    if (v === null || v === undefined || v === '') return NaN;
+    const n = typeof v === 'number' ? v : Number(String(v).replace(/\s/g, '').replace(',', '.'));
+    return isFinite(n) ? n : NaN;
+  };
   const vals = [];
   rows.forEach(row => {
     if (isEmptyCell(row[col])) return;
