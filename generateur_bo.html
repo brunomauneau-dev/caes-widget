@@ -114,7 +114,7 @@ header .badge{margin-left:auto;background:var(--rouge);color:white;font-size:11p
     <div class="albert-desc">Albert (LLM souverain de l'État) analyse votre demande et coche automatiquement les données et filtres correspondants.</div>
     <textarea id="albert-input" placeholder="Ex : je veux la liste des candidats du Pays Basque en terminale générale ayant formulé un vœu en CPGE, avec le détail des spécialités de bac et la situation d'admission..."></textarea>
     <div class="albert-row">
-      <input class="albert-key" type="password" id="albert-key" placeholder="Clé API Albert (albert.playground.etalab.gouv.fr/keys)">
+      <input class="albert-key" type="password" id="albert-key" placeholder="Clé API Albert (même clé que dans le widget Grist)">
       <button class="btn-albert" id="btn-albert" onclick="askAlbert()">
         <span class="spinner" id="albert-spinner"></span>
         <span id="albert-btn-txt">Analyser →</span>
@@ -565,11 +565,11 @@ async function askAlbert() {
   showFeedback('Albert analyse votre demande…', 'info');
 
   try {
-    const resp = await fetch('https://albert.api.etalab.gouv.fr/v1/chat/completions', {
+    const resp = await fetch('https://app-6fb1a617-d3e3-4989-9dcb-b396964f246e.cleverapps.io/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
       body: JSON.stringify({
-        model: 'meta-llama/Llama-3.1-8B-Instruct',
+        model: 'openweight-large',
         max_tokens: 1000,
         messages: [
           { role: 'system', content: ALBERT_SYSTEM },
