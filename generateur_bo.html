@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Générateur de requêtes BO — SAIO Bordeaux</title>
+<style>
+@import url('https://unpkg.com/@gouvfr/dsfr@1.12.1/dist/fonts/Marianne-Regular.woff2');
+:root{--bleu:#003189;--bleu-clair:#E8F0FE;--bleu-doux:#C8D8F0;--rouge:#E1000F;--fond:#F7F8FA;--blanc:#FFFFFF;--texte:#1A1A2E;--gris:#6B7280;--gris-clair:#E5E7EB;--vert:#15803D;--vert-bg:#DCFCE7;--orange:#EA580C;--radius:10px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Marianne','Segoe UI',system-ui,sans-serif;background:var(--fond);color:var(--texte);font-size:14px;line-height:1.6;min-height:100vh}
+header{background:var(--bleu);color:white;padding:14px 32px;display:flex;align-items:center;gap:16px;box-shadow:0 2px 8px rgba(0,49,137,.2)}
+header .logo{font-size:11px;letter-spacing:1.5px;text-transform:uppercase;opacity:.7}
+header h1{font-size:17px;font-weight:700}
+header .badge{margin-left:auto;background:var(--rouge);color:white;font-size:11px;font-weight:700;padding:4px 12px;border-radius:20px}
+.layout{display:grid;grid-template-columns:400px 1fr;min-height:calc(100vh - 54px)}
+.form-panel{background:var(--blanc);border-right:1px solid var(--bleu-doux);padding:24px 20px;overflow-y:auto}
+.form-panel h2{font-size:14px;font-weight:700;color:var(--bleu);margin-bottom:18px;padding-bottom:8px;border-bottom:2px solid var(--bleu-doux)}
+.field{margin-bottom:18px}
+.field>label{display:block;font-size:11px;font-weight:700;color:var(--gris);text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px}
+.field .hint{font-size:11px;color:var(--gris);margin-bottom:6px;font-style:italic}
+.check-group{display:flex;flex-wrap:wrap;gap:5px}
+.check-item{display:flex;align-items:center;gap:5px;background:var(--fond);border:1px solid var(--gris-clair);border-radius:6px;padding:5px 9px;cursor:pointer;transition:all .1s;font-size:12px;user-select:none}
+.info-icon{position:relative;display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;margin-left:2px;border-radius:50%;background:var(--bleu-doux);color:var(--bleu);font-size:10px;font-weight:700;font-style:normal;cursor:help;flex-shrink:0}
+.info-icon .tooltip-text{visibility:hidden;opacity:0;pointer-events:none;transition:opacity .15s;position:absolute;bottom:135%;left:50%;transform:translateX(-50%);background:var(--texte);color:#fff;padding:8px 10px;border-radius:6px;font-size:11px;font-weight:400;text-transform:none;letter-spacing:normal;line-height:1.45;width:230px;box-shadow:0 4px 14px rgba(0,0,0,.25);z-index:30;text-align:left;white-space:normal}
+.info-icon .tooltip-text::after{content:'';position:absolute;top:100%;left:50%;margin-left:-5px;border:5px solid transparent;border-top-color:var(--texte)}
+.info-icon:hover .tooltip-text,.info-icon:focus .tooltip-text{visibility:visible;opacity:1}
+.check-item:hover{border-color:var(--bleu);background:var(--bleu-clair)}
+.check-item input{accent-color:var(--bleu);width:13px;height:13px;flex-shrink:0}
+.check-item.on{background:var(--bleu-clair);border-color:var(--bleu);color:var(--bleu);font-weight:600}
+.sep{border:none;border-top:1px solid var(--bleu-doux);margin:16px 0}
+.section-label{font-size:10px;font-weight:700;color:var(--bleu);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;margin-top:4px}
+.btn-generate{width:100%;padding:12px;background:var(--bleu);color:white;border:none;border-radius:var(--radius);font-family:inherit;font-size:14px;font-weight:700;cursor:pointer;transition:all .15s;margin-top:4px}
+.btn-generate:hover{background:#002070;box-shadow:0 4px 12px rgba(0,49,137,.3)}
+.result-panel{padding:24px 28px;overflow-y:auto}
+.result-panel h2{font-size:14px;font-weight:700;color:var(--bleu);margin-bottom:18px;padding-bottom:8px;border-bottom:2px solid var(--bleu-doux);display:flex;align-items:center;justify-content:space-between}
+.empty-state{text-align:center;padding:60px 20px;color:var(--gris)}
+.empty-state .icon{font-size:48px;margin-bottom:16px}
+.result-bloc{background:var(--blanc);border:1px solid var(--bleu-doux);border-radius:var(--radius);margin-bottom:14px;overflow:hidden}
+.rb-head{background:var(--bleu-clair);padding:9px 14px;font-size:11px;font-weight:700;color:var(--bleu);text-transform:uppercase;letter-spacing:.8px;display:flex;align-items:center;gap:8px}
+.rb-head .count{background:var(--bleu);color:white;border-radius:12px;padding:2px 8px;font-size:11px;font-weight:700}
+.rb-body{padding:14px 16px}
+/* Colonnes groupées par dossier */
+.dossier{margin-bottom:12px}
+.dossier-name{font-size:11px;font-weight:700;color:var(--gris);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;display:flex;align-items:center;gap:5px}
+.col-list{display:flex;flex-wrap:wrap;gap:5px}
+.col-chip{background:var(--fond);border:1px solid var(--gris-clair);border-radius:5px;padding:3px 9px;font-size:11px;color:var(--texte)}
+.col-chip.indicateur{border-color:#FCD34D;background:#FFFBEB;color:#92400E}
+/* Filtres */
+.filter-list{display:flex;flex-direction:column;gap:7px}
+.filter-item{display:flex;align-items:flex-start;gap:10px;padding:9px 12px;background:#FFFBEB;border:1px solid #FCD34D;border-radius:8px;font-size:12px}
+.filter-item .arr{color:var(--orange);font-weight:700;flex-shrink:0;margin-top:1px}
+.filter-item strong{color:var(--texte)}
+.filter-item .val{color:var(--bleu);font-weight:700}
+/* Instructions */
+.instructions{background:#F0FDF4;border:1px solid #86EFAC;border-radius:var(--radius);padding:14px 16px;margin-bottom:14px}
+.instructions h3{font-size:12px;font-weight:700;color:var(--vert);margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.step-list{list-style:none;counter-reset:s}
+.step-list li{counter-increment:s;display:flex;gap:9px;margin-bottom:8px;font-size:12px;align-items:flex-start}
+.step-list li::before{content:counter(s);background:var(--vert);color:white;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;margin-top:1px}
+.step-list li code{background:#DCFCE7;color:#14532D;padding:1px 5px;border-radius:3px;font-family:monospace;font-size:11px}
+.warning{background:#FEE2E2;border:1px solid #FCA5A5;border-radius:8px;padding:10px 14px;font-size:12px;color:#7F1D1D;margin-bottom:12px}
+.btn-copy{background:none;border:1px solid var(--bleu-doux);color:var(--bleu);border-radius:6px;padding:4px 12px;font-size:11px;font-family:inherit;cursor:pointer}
+.btn-copy:hover{background:var(--bleu-clair)}
+.legend{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px;font-size:11px;color:var(--gris)}
+.legend span{display:flex;align-items:center;gap:4px}
+.tab-switch{display:flex;gap:6px;margin-bottom:20px}
+.tab-btn{flex:1;text-align:center;padding:9px 6px;border:1px solid var(--gris-clair);border-radius:8px;cursor:pointer;font-size:12px;font-weight:700;color:var(--gris);background:var(--fond);transition:all .1s}
+.tab-btn:hover{border-color:var(--bleu)}
+.tab-btn.active{background:var(--bleu);color:#fff;border-color:var(--bleu)}
+
+/* ── Albert AI ── */
+.albert-zone{background:linear-gradient(135deg,#e8f0fe 0%,#f0f4fb 100%);border:1.5px solid var(--bleu-doux);border-radius:var(--radius);padding:14px 16px;margin-bottom:20px}
+.albert-zone .albert-header{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.albert-zone .albert-header .ico{font-size:18px}
+.albert-zone .albert-header strong{font-size:13px;color:var(--bleu);font-weight:700}
+.albert-zone .albert-header .beta{font-size:10px;background:var(--bleu);color:white;padding:2px 7px;border-radius:10px;font-weight:700;margin-left:auto}
+.albert-zone .albert-desc{font-size:11px;color:var(--gris);margin-bottom:10px;line-height:1.5}
+.albert-zone textarea{width:100%;border:1px solid var(--bleu-doux);border-radius:8px;padding:10px 12px;font-family:inherit;font-size:12px;resize:vertical;min-height:70px;background:white;color:var(--texte);transition:border-color .1s}
+.albert-zone textarea:focus{outline:none;border-color:var(--bleu)}
+.albert-zone textarea::placeholder{color:#9CA3AF}
+.albert-row{display:flex;gap:8px;margin-top:8px;align-items:center}
+.albert-key{flex:1;border:1px solid var(--bleu-doux);border-radius:6px;padding:6px 10px;font-family:inherit;font-size:11px;color:var(--texte);background:white}
+.albert-key:focus{outline:none;border-color:var(--bleu)}
+.btn-albert{background:var(--bleu);color:white;border:none;border-radius:6px;padding:7px 14px;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:6px;transition:all .15s}
+.btn-albert:hover{background:#002070}
+.btn-albert:disabled{opacity:.5;cursor:not-allowed}
+.btn-albert .spinner{width:12px;height:12px;border:2px solid rgba(255,255,255,.3);border-top-color:white;border-radius:50%;animation:spin .7s linear infinite;display:none}
+.btn-albert:disabled .spinner{display:block}
+@keyframes spin{to{transform:rotate(360deg)}}
+.albert-feedback{margin-top:8px;font-size:11px;padding:7px 10px;border-radius:6px;display:none}
+.albert-feedback.ok{background:var(--vert-bg);color:var(--vert);border:1px solid #86EFAC}
+.albert-feedback.err{background:#FEE2E2;color:#7F1D1D;border:1px solid #FCA5A5}
+.albert-feedback.info{background:var(--bleu-clair);color:var(--bleu);border:1px solid var(--bleu-doux)}
+@media(max-width:900px){.layout{grid-template-columns:1fr}.form-panel{border-right:none;border-bottom:1px solid var(--bleu-doux)}}
+</style>
+</head>
+<body>
+<header>
+  <div><div class="logo">SAIO Bordeaux · Académie de Bordeaux</div><h1>Générateur de requêtes BO Parcoursup</h1></div>
+  <span class="badge">BO_Parcoursup_2025</span>
+</header>
+<div class="layout">
+<div class="form-panel">
+  <h2>Décrivez votre besoin</h2>
+
+    <!-- ── Zone Albert ── -->
+  <div class="albert-zone" id="albert-zone">
+    <div class="albert-header">
+      <span class="ico">✨</span>
+      <strong>Décrivez votre besoin en français</strong>
+      <span class="beta">IA</span>
+    </div>
+    <div class="albert-desc">Albert (LLM souverain de l'État) analyse votre demande et coche automatiquement les données et filtres correspondants.</div>
+    <textarea id="albert-input" placeholder="Ex : je veux la liste des candidats du Pays Basque en terminale générale ayant formulé un vœu en CPGE, avec le détail des spécialités de bac et la situation d'admission..."></textarea>
+    <div class="albert-row">
+      <input class="albert-key" type="password" id="albert-key" placeholder="Clé API Albert (albert.playground.etalab.gouv.fr/keys)">
+      <button class="btn-albert" id="btn-albert" onclick="askAlbert()">
+        <span class="spinner" id="albert-spinner"></span>
+        <span id="albert-btn-txt">Analyser →</span>
+      </button>
+    </div>
+    <div class="albert-feedback" id="albert-feedback"></div>
+  </div>
+  <!-- fin Zone Albert -->
+<div class="tab-switch">
+    <div class="tab-btn active" id="tabbtn-candidat" onclick="switchTab('candidat')">👤 Candidat</div>
+    <div class="tab-btn" id="tabbtn-etablissement" onclick="switchTab('etablissement')">🏫 Établissement</div>
+  </div>
+
+  <!-- CARACTÉRISTIQUES FORMATION / ÉTABLISSEMENT (onglet Établissement uniquement, en premier : c'est l'axe principal de cet onglet) -->
+  <div class="tab-etablissement" style="display:none">
+  <div class="field">
+    <label>Caractéristiques formation / établissement d'accueil (filtres)</label>
+    <div class="check-group" id="etab-crit">
+      <label class="check-item"><input type="checkbox" value="apprentissage" onchange="tick(this)"> Formation en apprentissage</label>
+      <label class="check-item"><input type="checkbox" value="selective" onchange="tick(this)"> Sélective</label>
+      <label class="check-item"><input type="checkbox" value="non_selective" onchange="tick(this)"> Non sélective</label>
+      <label class="check-item"><input type="checkbox" value="public" onchange="tick(this)"> Établissement public</label>
+      <label class="check-item"><input type="checkbox" value="prive" onchange="tick(this)"> Établissement privé</label>
+    </div>
+    <div class="hint">⚠️ Valeurs "Public"/"Privé" à vérifier dans l'univers BO (non confirmées dans l'audit initial).</div>
+  </div>
+  <hr class="sep">
+  </div>
+  <!-- fin bloc caractéristiques établissement -->
+
+  <!-- OBJECTIF (onglet Candidat uniquement) -->
+  <div class="tab-candidat">
+  <div class="field">
+    <label>Quel est votre objectif ?</label>
+    <div class="hint">Détermine les colonnes à extraire. Un comptage n'a pas besoin des mêmes colonnes qu'un export complet.</div>
+    <div class="check-group" id="objectif">
+      <label class="check-item on"><input class="no-track" type="radio" name="objectif" value="liste" checked onchange="syncObjectif(this)"> 📋 Liste détaillée des candidats<span class="info-icon" tabindex="0" onclick="event.preventDefault();event.stopPropagation();">i<span class="tooltip-text">Extraction complète : toutes les colonnes de profil, scolarité, formation et admission. À utiliser pour une analyse fine ou un export vers Grist.</span></span></label>
+      <label class="check-item"><input class="no-track" type="radio" name="objectif" value="comptage" onchange="syncObjectif(this)"> 🔢 Compter les candidats<span class="info-icon" tabindex="0" onclick="event.preventDefault();event.stopPropagation();">i<span class="tooltip-text">Pour répondre à « combien de candidats correspondent à ce profil ? ». Requête minimale (1 colonne), plus rapide à exécuter dans BO.</span></span></label>
+      <label class="check-item"><input class="no-track" type="radio" name="objectif" value="repartition" onchange="syncObjectif(this)"> 📊 Répartir par catégorie<span class="info-icon" tabindex="0" onclick="event.preventDefault();event.stopPropagation();">i<span class="tooltip-text">Pour répondre à « comment se répartissent les candidats selon un critère ? » (ex : par série de bac, par département). Ajoute une dimension de regroupement pour un tableau croisé.</span></span></label>
+    </div>
+  </div>
+
+  <!-- RÉPARTITION : dimension de regroupement -->
+  <div class="field" id="repartition-field" style="display:none">
+    <label>Répartir par</label>
+    <div class="check-group" id="repart_dim">
+      <label class="check-item on"><input class="no-track" type="radio" name="repart_dim" value="Profil synthétique candidat" checked onchange="syncRepart(this)"> Profil candidat</label>
+      <label class="check-item"><input class="no-track" type="radio" name="repart_dim" value="Série de la Classe" onchange="syncRepart(this)"> Série du bac</label>
+      <label class="check-item"><input class="no-track" type="radio" name="repart_dim" value="Type de formation d'accueil" onchange="syncRepart(this)"> Type de formation d'accueil</label>
+      <label class="check-item"><input class="no-track" type="radio" name="repart_dim" value="Département de l'établissement de la scolarité" onchange="syncRepart(this)"> Département de scolarité</label>
+      <label class="check-item"><input class="no-track" type="radio" name="repart_dim" value="Boursier des lycées (Oui/Non)" onchange="syncRepart(this)"> Statut boursier</label>
+    </div>
+  </div>
+  <hr class="sep">
+  </div>
+  <!-- fin onglet Candidat (objectif) -->
+
+  <!-- GÉO (partagé entre les deux onglets) -->
+  <div class="field">
+    <label>Périmètre géographique</label>
+    <div class="hint">Filtre appliqué automatiquement par votre compte BO (académie Bordeaux). Affinez si besoin.</div>
+    <div class="check-group" id="geo">
+      <label class="check-item on"><input type="checkbox" value="academie" checked onchange="syncGeo(this)"> Toute l'académie</label>
+      <label class="check-item"><input type="checkbox" value="pays_basque" onchange="syncGeo(this)"> Pays Basque</label>
+      <label class="check-item"><input type="checkbox" value="gironde" onchange="syncGeo(this)"> Gironde (33)</label>
+      <label class="check-item"><input type="checkbox" value="dordogne" onchange="syncGeo(this)"> Dordogne (24)</label>
+      <label class="check-item"><input type="checkbox" value="lot47" onchange="syncGeo(this)"> Lot-et-Garonne (47)</label>
+      <label class="check-item"><input type="checkbox" value="landes" onchange="syncGeo(this)"> Landes (40)</label>
+      <label class="check-item"><input type="checkbox" value="pa64" onchange="syncGeo(this)"> Pyrénées-Atlantiques (64)</label>
+    </div>
+  </div>
+  <hr class="sep">
+
+  <!-- PROFIL -->
+  <div class="field">
+    <label>Profil candidat (filtres)</label>
+    <div class="hint">Ces critères seront dans les Filtres de la requête WebI. Les colonnes Oui/Non correspondantes seront dans les données.</div>
+    <div class="check-group">
+      <label class="check-item"><input type="checkbox" value="boursier" onchange="tick(this)"> Boursiers seulement</label>
+      <label class="check-item"><input type="checkbox" value="non_boursier" onchange="tick(this)"> Non boursiers seulement</label>
+      <label class="check-item"><input type="checkbox" value="apprenti" onchange="tick(this)"> Apprentis</label>
+      <label class="check-item"><input type="checkbox" value="neo" onchange="tick(this)"> Néo-entrants</label>
+      <label class="check-item"><input type="checkbox" value="reoriente" onchange="tick(this)"> Réorientés</label>
+    </div>
+  </div>
+
+  <!-- BAC -->
+  <div class="field">
+    <label>Série du baccalauréat (filtres)</label>
+    <div class="check-group">
+      <label class="check-item"><input type="checkbox" value="bac_g" onchange="tick(this)"> Générale</label>
+      <label class="check-item"><input type="checkbox" value="bac_t" onchange="tick(this)"> Technologique</label>
+      <label class="check-item"><input type="checkbox" value="bac_p" onchange="tick(this)"> Professionnelle</label>
+    </div>
+  </div>
+  <hr class="sep">
+
+  <!-- FORMATION -->
+  <div class="field">
+    <label>Grands groupes de formation visés (filtres)</label>
+    <div class="check-group" id="formation">
+      <label class="check-item"><input type="checkbox" value="f_licence" onchange="tick(this)"> L1 / Licence</label>
+      <label class="check-item"><input type="checkbox" value="f_bts" onchange="tick(this)"> BTS / BTSA</label>
+      <label class="check-item"><input type="checkbox" value="f_but" onchange="tick(this)"> BUT / IUT</label>
+      <label class="check-item"><input type="checkbox" value="f_cpge" onchange="tick(this)"> CPGE – CPES</label>
+      <label class="check-item"><input type="checkbox" value="f_ing" onchange="tick(this)"> Formations ingénieurs</label>
+      <label class="check-item"><input type="checkbox" value="f_sante" onchange="tick(this)"> Secteur santé/social</label>
+      <label class="check-item"><input type="checkbox" value="f_las" onchange="tick(this)"> LAS / PASS</label>
+      <label class="check-item"><input type="checkbox" value="f_commerce" onchange="tick(this)"> Écoles de commerce</label>
+      <label class="check-item"><input type="checkbox" value="f_art" onchange="tick(this)"> Arts / Architecture</label>
+    </div>
+  </div>
+  <hr class="sep">
+
+  <!-- ADMISSION -->
+  <div class="field">
+    <label>Situation d'admission (filtres)</label>
+    <div class="check-group">
+      <label class="check-item"><input type="checkbox" value="a_proposition" onchange="tick(this)"> Avec proposition</label>
+      <label class="check-item"><input type="checkbox" value="sans_proposition" onchange="tick(this)"> Sans proposition</label>
+      <label class="check-item"><input type="checkbox" value="accepte" onchange="tick(this)"> Proposition acceptée</label>
+      <label class="check-item"><input type="checkbox" value="demission" onchange="tick(this)"> Démissionnaires</label>
+    </div>
+  </div>
+  <hr class="sep">
+
+  <!-- DONNÉES SUPPLÉMENTAIRES (onglet Candidat uniquement) -->
+  <div class="tab-candidat">
+  <div class="field">
+    <label>Données à inclure dans les résultats</label>
+    <div class="section-label">Toujours inclus : profil, scolarité, série bac, formation, admission</div>
+    <div class="check-group">
+      <label class="check-item"><input type="checkbox" value="d_bac" onchange="tick(this)"> Détail bac (mention, spécialités, année)</label>
+      <label class="check-item"><input type="checkbox" value="d_etablissement" onchange="tick(this)"> Établissement d'accueil (localisation)</label>
+      <label class="check-item"><input type="checkbox" value="d_voeux" onchange="tick(this)"> Détail vœux (nb PP/PC/apprentissage)</label>
+      <label class="check-item"><input type="checkbox" value="d_taux" onchange="tick(this)"> Taux recteur (boursiers, bacs pro...)</label>
+      <label class="check-item"><input type="checkbox" value="d_capacite" onchange="tick(this)"> Capacité formation (places, inscrits N-1)</label>
+      <label class="check-item"><input type="checkbox" value="d_langues" onchange="tick(this)"> Langues vivantes</label>
+      <label class="check-item"><input type="checkbox" value="d_parcours_plus" onchange="tick(this)"> Parcours+ (Q1 à Q10)</label>
+      <label class="check-item"><input type="checkbox" value="d_caes" onchange="tick(this)"> Colonnes CAES</label>
+      <label class="check-item"><input type="checkbox" value="d_rattachement" onchange="tick(this)"> Académie/Région de rattachement</label>
+    </div>
+  </div>
+  </div>
+  <!-- fin onglet Candidat (données) -->
+
+  <!-- DONNÉES ÉTABLISSEMENT (onglet Établissement uniquement) -->
+  <div class="tab-etablissement" style="display:none">
+  <div class="field">
+    <label>Données à inclure (établissement / formation)</label>
+    <div class="section-label">Toujours inclus : formation d'accueil, établissement d'accueil, localisation</div>
+    <div class="check-group">
+      <label class="check-item"><input type="checkbox" value="e_localisation" onchange="tick(this)"> Détail localisation (regroupement pays)</label>
+      <label class="check-item"><input type="checkbox" value="e_taux" onchange="tick(this)"> Taux recteur (boursiers, bacs pro...)</label>
+      <label class="check-item"><input type="checkbox" value="e_capacite" onchange="tick(this)"> Capacité formation (places, inscrits N-1)</label>
+      <label class="check-item"><input type="checkbox" value="e_voeux" onchange="tick(this)"> Vœux agrégés (apprentissage + phase complémentaire)</label>
+      <label class="check-item"><input type="checkbox" value="e_rattachement" onchange="tick(this)"> Académie/Région de rattachement</label>
+      <label class="check-item"><input type="checkbox" value="etab_nb_candidats" onchange="tick(this)"> Nombre de candidats par formation<span class="info-icon" tabindex="0" onclick="event.preventDefault();event.stopPropagation();">i<span class="tooltip-text">Ajoute Numéro Parcoursup* comme mesure à passer en agrégation Nombre dans BO, regroupée par formation.</span></span></label>
+    </div>
+  </div>
+  </div>
+  <!-- fin onglet Établissement -->
+
+  <button class="btn-generate" onclick="generate()">Générer les instructions WebI →</button>
+</div>
+
+<!-- RÉSULTAT -->
+<div class="result-panel">
+  <h2>
+    Instructions pour WebI
+    <button class="btn-copy" id="btn-copy" style="display:none" onclick="copyAll()">📋 Tout copier</button>
+  </h2>
+  <div class="empty-state" id="empty">
+    <div class="icon">📋</div>
+    <p>Configurez votre besoin à gauche<br>puis cliquez sur "Générer"</p>
+  </div>
+  <div id="result" style="display:none"></div>
+</div>
+</div>
+
+<script>
+// ── Données métier ────────────────────────────────────────────────────────────
+
+// GEO : uniquement des filtres prédéfinis (🟠) dans BO
+// Zone Pays Basque = filtre sur colonne "Zone du Pays Basque"
+// Départements = filtres sur "Département de l'établissement de la scolarité"
+const GEO = {
+  pays_basque: { col:'Zone du Pays Basque', val:'Oui' },
+  gironde:     { col:"Département de l'établissement de la scolarité", val:'33 - Gironde' },
+  dordogne:    { col:"Département de l'établissement de la scolarité", val:'24 - Dordogne' },
+  lot47:       { col:"Département de l'établissement de la scolarité", val:'47 - Lot-et-Garonne' },
+  landes:      { col:"Département de l'établissement de la scolarité", val:'40 - Landes' },
+  pa64:        { col:"Département de l'établissement de la scolarité", val:'64 - Pyrénées-Atlantiques' },
+};
+
+// PROFIL : les filtres prédéfinis BO (🟠) — ne vont PAS dans Objets du résultat
+// Pour avoir la valeur dans les données, on utilise les colonnes Oui/Non (🔵)
+const PROFIL_FILTRES = {
+  boursier:    { col:'Boursier certifié des lycées', val:'(filtre prédéfini — sélectionner dans Filtres de la requête)' },
+  non_boursier:{ col:"Boursier des lycées (Oui/Non)", val:'Non' },
+  apprenti:    { col:'Apprenti', val:'Oui' },
+  neo:         { col:'Néo-entrant / Réorienté', val:'Néo-entrant' },
+  reoriente:   { col:'Néo-entrant / Réorienté', val:'Réorienté' },
+};
+
+// Note : "Boursier certifié des lycées" est un filtre 🟠 prédéfini dans BO
+// Pour filtrer sur les boursiers, on le sélectionne directement dans Filtres de la requête
+const PROFIL_FILTRES_BO = {
+  boursier: { type:'predefined', label:'Boursier certifié des lycées', note:"Filtre prédéfini BO — glisser depuis l'arborescence vers Filtres de la requête" },
+  non_boursier: { type:'value', col:"Boursier des lycées (Oui/Non)", val:'Non' },
+  apprenti:     { type:'value', col:'Apprenti', val:'Oui' },
+  neo:          { type:'value', col:'Néo-entrant / Réorienté', val:'Néo-entrant' },
+  reoriente:    { type:'value', col:'Néo-entrant / Réorienté', val:'Réorienté' },
+};
+
+const BAC_FILTRES = {
+  bac_g: { type:'value', col:'Série de la Classe', val:'Générale' },
+  bac_t: { type:'value', col:'Série de la Classe', val:'Technologique' },
+  bac_p: { type:'value', col:'Série de la Classe', val:'Professionnelle' },
+};
+
+const FORMATION_VALS = {
+  f_licence: 'L1 – CUPGE – DEUST – DU',
+  f_bts:     'BTS – BTSA – DTS – DMA',
+  f_but:     'DUT',
+  f_cpge:    'CPGE – CPES',
+  f_ing:     "Formations d'ingénieurs",
+  f_sante:   'Secteur sanitaire et social',
+  f_las:     'LAS / PASS',
+  f_commerce:"Écoles de commerce",
+  f_art:     "Arts / Architecture",
+};
+
+const ADMISSION_FILTRES = {
+  a_proposition:   { type:'value', col:"A eu une proposition au cours de la procédure Parcoursup (Oui/Non)", val:'Oui' },
+  sans_proposition:{ type:'value', col:"A eu une proposition au cours de la procédure Parcoursup (Oui/Non)", val:'Non' },
+  accepte:         { type:'value', col:"A actuellement répondu favorablement à une proposition (Oui/Non)", val:'Oui' },
+  demission:       { type:'value', col:'Démission (Oui/Non)', val:'Oui' },
+};
+
+// ── Onglet Établissement : filtres propres à la granularité formation ───────
+// Valeurs "Public"/"Privé" non confirmées dans l'univers BO — à vérifier avant usage.
+const ETAB_FILTRES = {
+  apprentissage: { type:'value', col:'Formation en apprentissage (Oui / Non)', val:'Oui' },
+  selective:     { type:'value', col:'Formation sélective pour tous (Oui/Non)', val:'Oui' },
+  non_selective: { type:'value', col:'Formation sélective pour tous (Oui/Non)', val:'Non' },
+  public:        { type:'value', col:"Type d'établissement d'accueil", val:'Public' },
+  prive:         { type:'value', col:"Type d'établissement d'accueil", val:'Privé' },
+};
+
+// Alias des checkboxes "e_*" de l'onglet Établissement vers les dossiers COLS_OPTIONS
+// existants — pas de duplication de données, juste un mapping de clés distinctes
+// pour éviter toute collision avec les checkboxes "d_*" de l'onglet Candidat.
+const ETAB_OPTIONS_MAP = {
+  e_localisation: 'd_etablissement',
+  e_taux:         'd_taux',
+  e_capacite:     'd_capacite',
+  e_voeux:        'd_voeux',
+  e_rattachement: 'd_rattachement',
+};
+
+// ── Colonnes par dossier (🔵 dimensions + 🟡 indicateurs uniquement) ─────────
+// Les filtres 🟠 sont EXCLUS des colonnes — ils ne peuvent pas être dans Objets du résultat
+
+const COLS_BASE = [
+  { dossier:'Candidat', type:'dim', cols:[
+    'Numéro Parcoursup*',
+  ]},
+  { dossier:'Profil Statistique', type:'dim', cols:[
+    'Profil synthétique candidat','Profil','Complément de profil','Sexe',
+    "Néo-entrant / Réorienté",'Ancienneté du bac (en années)','Individu EFE',
+    'Nationalité UE','Type de nationalité (F / E)',
+  ]},
+  { dossier:'Bourses', type:'dim', cols:[
+    "Avis Conditionnel de Bourse (ACB)",'Boursier des lycées','Boursier',
+  ]},
+  { dossier:"Scolarité de l'année en cours", type:'dim', cols:[
+    'Section internationale',"Boursier des lycées (Oui/Non)",'Apprenti',
+    "Niveau d'études",'Type de la classe','Série de la Classe',
+    "Enseignement(s) de spécialité suivi(s)",'Libellé classe formation du candidat',
+    'Dominante','Spécialité','Code MEF de la scolarité',
+    "Candidat éligible à l'expérimentation STS","Au moins 1 avis favorable en STS (Oui/Non)",
+  ]},
+  { dossier:'Complément formation hors terminale', type:'dim', cols:[
+    "Type de formation de la scolarité","Domaine formation de la scolarité",
+    "Spécialité / mention formation de la scolarité",
+  ]},
+  { dossier:'Etablissement scolarité', type:'dim', cols:[
+    'Code UAI établissement','Etablissement',"Type d'établissement",
+    'Type de contrat établissement','Ministère de rattachement établissement',
+    "Etablissement Français à l'étranger (de l'année en cours)",
+  ]},
+  { dossier:'Localisation scolarité', type:'dim', cols:[
+    "Pays de l'établissement de la scolarité","Région de l'établissement de la scolarité",
+    "Académie de l'établissement de la scolarité","Département de l'établissement de la scolarité",
+    "Commune de l'établissement de la scolarité",
+  ]},
+  { dossier:'Formation (accueil)', type:'dim', cols:[
+    "Spécialité / mention formation d'accueil","Type de formation d'accueil",
+    "Domaine formation d'accueil","Grands groupes de formation d'accueil",
+    'Parcours','Formation LAS (Oui / Non)','Formation PPPE (Oui / Non)','LAS / PASS',
+    'Formation paramétrée ( Oui / Non)','Formation sélective pour tous (Oui/Non)',
+    'Formation en apprentissage (Oui / Non)','Formation certifiée (Oui / Non) (APP)',
+    'Mode de gestion des voeux Apprentissage','Formation en présentiel / distanciel',
+    'Formation prenant en compte les cordées (Oui / Non)','Formation ouvrant droit bourse (Oui / Non)',
+  ]},
+  { dossier:'Etablissement accueil', type:'dim', cols:[
+    "Code UAI établissement d'accueil","Etablissement d'accueil","Type d'établissement d'accueil",
+    "Type de contrat établissement d'accueil","Ministère de rattachement établissement d'accueil",
+  ]},
+  { dossier:'Localisation établissement accueil', type:'dim', cols:[
+    "Pays de l'établissement d'accueil","Région de l'établissement d'accueil",
+    "Académie de l'établissement d'accueil","Département de l'établissement d'accueil",
+    "Commune de l'établissement d'accueil",
+  ]},
+  { dossier:'Voeu – Phase Principale', type:'mix', cols:[
+    'Avis expérimentation STS','Avis classe passerelle STS',
+    'Séléctive / Non Sélective PP (pour le groupe de cddt)',
+    'Secteur / Hors Secteur (pour le groupe de cddt)',
+    "Académie / Hors académie PP (pour le groupe de cddt)",
+    'Situation du voeu en PP','Régime d\'hébergement',
+  ], indicateurs:[
+    'Nb de vœux PP','Nb de vœux confirmés PP','Nb de vœux classés PP',
+  ]},
+  { dossier:'Suivi campagne – Candidature', type:'dim', cols:[
+    "Candidat à la phase principale","Candidat à la phase d'apprentissage",
+    "Candidat à la phase complémentaire","Hors Parcoursup (Oui/Non)",
+    'Demande de césure (Oui/Non)','Formulation de candidatures hors Parcoursup (Oui/Non)',
+    'Projet personnel/professionnel hors Parcoursup (Oui/Non)',
+  ]},
+  { dossier:'Démission', type:'dim', cols:[
+    'Démission (Oui/Non)','Raison de la démission',
+  ]},
+  { dossier:'Admission', type:'dim', cols:[
+    "A eu une proposition au cours de la procédure Parcoursup (Oui/Non)",
+    "A actuellement répondu favorablement à une proposition (Oui/Non)",
+    "Etat d'admission Parcoursup",
+  ]},
+  { dossier:"Proposition d'admission", type:'mix', cols:[
+    "Type d'admission","Date de la proposition d'admission",
+    "Date limite de réponse à la proposition","Date de la réponse à la proposition",
+    "Situation de la proposition d'admission",
+    "Régime d'hébergement proposition","Type d'aménagement (Oui Si)",
+  ], indicateurs:[
+    'Nb de propositions Parcoursup',
+    'Nb de cddt ayant au moins une proposition Parcoursup',
+  ]},
+];
+
+const COLS_OPTIONS = {
+  d_bac:{ dossier:'Bac', type:'dim', cols:[
+    'BAC Français (Oui / Non)','Diplôme de niveau bac','Académie du bac','Néo bachelier',
+    'Type de série du bac','Série du bac','Dominante du bac','Spécialité du bac',
+    "Année d'obtention du bac","Mois d'obtention du bac",'Mention',
+    'Candidat libre au Bac (Oui / Non)','Enseignements de spécialité du bac','Parcours BFI',
+  ]},
+  d_etablissement:{ dossier:"Détail localisation établissement d'accueil", type:'dim', cols:[
+    "Regroupement de pays de l'établissement d'accueil",
+  ]},
+  d_voeux:{ dossier:'Vœux apprentissage + Phase Complémentaire', type:'mix', cols:[
+    "Situation du voeu en apprentissage","Séléctive / Non Sélective PC (pour le groupe de cddt)",
+    "Académie / Hors académie PC (pour le groupe de cddt)",'Situation du voeu en PC',
+  ], indicateurs:[
+    'Nb de vœux Apprentissage','Nb de vœux confirmés Apprentissage',
+    'Nb de vœux PC',
+  ]},
+  d_taux:{ dossier:'Taux recteur', type:'indicateur', indicateurs:[
+    'Taux Boursiers (%)','Taux Non Résidents (%)','Taux Bacs Pro (%)','Taux Bacs Techno (%)',
+  ]},
+  d_capacite:{ dossier:'Détail Capacité', type:'indicateur', indicateurs:[
+    'Nb places Parcoursup N-1','Nb total inscrits N-1','Nb inscrits via Parcoursup N-1',
+    'Nb inscrits hors Parcoursup N-1','Capacité d\'accueil totale',
+  ]},
+  d_langues:{ dossier:'Langues vivantes', type:'dim', cols:[
+    'Langue vivante A','Langue vivante B','Langue vivante C',
+  ]},
+  d_parcours_plus:{ dossier:'Parcours+', type:'dim', cols:[
+    'Q1 - Situation','Q2 - Activité professionnelle antérieure',
+    "Q3 - Type(s) de formation recherchée(s)","Q4 - Domaine(s) d'activité de la formation recherchée",
+    'Q5 - Formation continue (Oui/Non)','Q6 - Formation à distance (Oui/Non)',
+    'Q7 - Formation en alternance (Oui/Non)','Q8 - Conseil en Evolution Professionnelle (Oui/Non)',
+    'Q9 - Accompagnement par une Mission Locale (Oui/Non)','Q10 - Service civique (Oui/Non)',
+    'Transmission des réponses',
+  ]},
+  d_caes:{ dossier:'CAES', type:'dim', cols:[
+    'Académie de saisie CAES','Service de saisie CAES','CAES','Détail état CAES','Motif CAES',
+    'Proposition Hors Parcoursup (Oui/Non)','Candidat Accompagné en PAE au lycée (Oui/Non)',
+  ]},
+  d_rattachement:{ dossier:'Académie de rattachement', type:'dim', cols:[
+    'Académie de rattachement','Région de rattachement','Département de rattachement',
+  ]},
+};
+
+// ── Onglet Établissement : colonnes de base (granularité formation) ─────────
+// Dérivé de COLS_BASE — pas de duplication : seuls les dossiers dont la granularité
+// est "une ligne par formation d'accueil" sont conservés (pas de dossier candidat).
+const COLS_BASE_ETAB = COLS_BASE.filter(d =>
+  ['Formation (accueil)','Etablissement accueil','Localisation établissement accueil'].includes(d.dossier)
+);
+
+
+// ── Albert : analyse langage naturel → cochage automatique ───────────────────
+
+const ALBERT_SYSTEM = `Tu es un assistant spécialisé dans la construction de requêtes SAP BusinessObjects Parcoursup pour le SAIO de Bordeaux.
+Tu analyses une demande en langage naturel et tu retournes un JSON strict indiquant quels filtres et options cocher dans le générateur de requêtes.
+
+Réponds UNIQUEMENT avec un objet JSON valide, sans texte avant ou après, sans balises markdown.
+
+Structure du JSON attendu :
+{
+  "onglet": "candidat" | "etablissement",
+  "objectif": "liste" | "comptage" | "repartition",
+  "geo": ["academie"] | ["pays_basque"] | ["gironde"] | ["dordogne"] | ["lot47"] | ["landes"] | ["pa64"],
+  "profil": [] | sous-ensemble de ["boursier","non_boursier","apprenti","neo","reoriente"],
+  "bac": [] | sous-ensemble de ["bac_g","bac_t","bac_p"],
+  "formation": [] | sous-ensemble de ["f_licence","f_bts","f_but","f_cpge","f_ing","f_sante","f_las","f_commerce","f_art"],
+  "admission": [] | sous-ensemble de ["a_proposition","sans_proposition","accepte","demission"],
+  "options": [] | sous-ensemble de ["d_bac","d_etablissement","d_voeux","d_taux","d_capacite","d_langues","d_parcours_plus","d_caes","d_rattachement"],
+  "repart_dim": null | "serie_bac" | "departement" | "academie_rattachement" | "grands_groupes" | "apprentissage",
+  "explication": "courte phrase expliquant les choix faits (max 80 mots)"
+}
+
+Règles métier importantes :
+- Zone Pays Basque = périmètre géographique dans le 64 (Pyrénées-Atlantiques), pas une zone administrative nationale
+- "Boursier certifié des lycées" est un filtre prédéfini BO → utiliser "boursier" dans profil
+- Les filtres 🟠 BO (Inscrit, En terminale, etc.) ne peuvent pas aller dans les colonnes — ils servent uniquement à filtrer
+- CPGE = f_cpge ; BTS = f_bts ; Licence/L1 = f_licence ; BUT/IUT = f_but
+- Si la demande mentionne des spécialités de bac → ajouter "d_bac" dans options
+- Si la demande mentionne l'établissement d'accueil ou la localisation d'accueil → ajouter "d_etablissement"
+- Si la demande porte sur un comptage ou une répartition simple → objectif = "comptage" ou "repartition"
+- Si pas de périmètre géographique précisé → geo = ["academie"]
+- CAES = dossiers traités en Commission d'Accès à l'Enseignement Supérieur, absents de la BDD standard`;
+
+async function askAlbert() {
+  const input = document.getElementById('albert-input').value.trim();
+  const key   = document.getElementById('albert-key').value.trim();
+  const btn   = document.getElementById('btn-albert');
+  const spinner = document.getElementById('albert-spinner');
+  const btnTxt  = document.getElementById('albert-btn-txt');
+  const fb    = document.getElementById('albert-feedback');
+
+  if (!input) { showFeedback('Décrivez votre besoin dans la zone de texte.', 'err'); return; }
+  if (!key)   { showFeedback('Entrez votre clé API Albert.', 'err'); return; }
+
+  btn.disabled = true;
+  spinner.style.display = 'block';
+  btnTxt.textContent = 'Analyse…';
+  showFeedback('Albert analyse votre demande…', 'info');
+
+  try {
+    const resp = await fetch('https://albert.api.etalab.gouv.fr/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+      body: JSON.stringify({
+        model: 'meta-llama/Llama-3.1-8B-Instruct',
+        max_tokens: 1000,
+        messages: [
+          { role: 'system', content: ALBERT_SYSTEM },
+          { role: 'user', content: input }
+        ]
+      })
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error?.message || `Erreur HTTP ${resp.status}`);
+    }
+
+    const data = await resp.json();
+    const raw  = data.choices?.[0]?.message?.content || '';
+    // Nettoyer les éventuels blocs markdown
+    const clean = raw.replace(/```json\s*/g,'').replace(/```/g,'').trim();
+    let params;
+    try { params = JSON.parse(clean); }
+    catch(e) { throw new Error('Réponse JSON invalide : ' + raw.slice(0, 120)); }
+
+    applyAlbertParams(params);
+    showFeedback('✓ ' + (params.explication || 'Paramètres appliqués.'), 'ok');
+
+  } catch(e) {
+    showFeedback('Erreur : ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    spinner.style.display = 'none';
+    btnTxt.textContent = 'Analyser →';
+  }
+}
+
+function showFeedback(msg, type) {
+  const fb = document.getElementById('albert-feedback');
+  fb.textContent = msg;
+  fb.className = 'albert-feedback ' + type;
+  fb.style.display = 'block';
+}
+
+function applyAlbertParams(p) {
+  // Reset complet
+  document.querySelectorAll('.check-item input[type=checkbox]:not(.no-track)').forEach(cb => {
+    cb.checked = false;
+    cb.closest('.check-item').classList.remove('on');
+  });
+
+  // Onglet
+  if (p.onglet) switchTab(p.onglet);
+
+  // Objectif
+  if (p.objectif) {
+    const radio = document.querySelector('input[name=objectif][value="' + p.objectif + '"]');
+    if (radio) { radio.checked = true; syncObjectif(radio); }
+  }
+
+  // Répartition
+  if (p.repart_dim) {
+    const radio = document.querySelector('input[name=repart_dim][value="' + p.repart_dim + '"]');
+    if (radio) { radio.checked = true; }
+  }
+
+  // Géo
+  const geoVals = p.geo || ['academie'];
+  const academie = document.querySelector('#geo input[value="academie"]');
+  if (geoVals.includes('academie') || geoVals.length === 0) {
+    academie.checked = true;
+    academie.closest('.check-item').classList.add('on');
+  } else {
+    geoVals.forEach(v => {
+      const cb = document.querySelector('#geo input[value="' + v + '"]');
+      if (cb) { cb.checked = true; cb.closest('.check-item').classList.add('on'); }
+    });
+    academie.checked = false;
+    academie.closest('.check-item').classList.remove('on');
+  }
+
+  // Profil, bac, formation, admission, options
+  const allSets = [...(p.profil||[]), ...(p.bac||[]), ...(p.formation||[]), ...(p.admission||[]), ...(p.options||[])];
+  allSets.forEach(v => {
+    const cb = document.querySelector('input[type=checkbox][value="' + v + '"]:not(.no-track)');
+    if (cb) { cb.checked = true; cb.closest('.check-item').classList.add('on'); }
+  });
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────────
+
+// Groupes de critères mutuellement exclusifs : cocher l'un décoche automatiquement
+// l'autre, pour éviter de générer des filtres contradictoires (ex: Boursier=Oui ET Non).
+const EXCLUSIVE_GROUPS = {
+  boursier: 'bourse', non_boursier: 'bourse',
+  a_proposition: 'admission_prop', sans_proposition: 'admission_prop',
+  selective: 'formation_selective', non_selective: 'formation_selective',
+  public: 'type_etablissement', prive: 'type_etablissement',
+};
+
+function tick(cb){
+  cb.closest('.check-item').classList.toggle('on', cb.checked);
+  if(cb.checked && EXCLUSIVE_GROUPS[cb.value]){
+    const group = EXCLUSIVE_GROUPS[cb.value];
+    document.querySelectorAll('input[type=checkbox]').forEach(other=>{
+      if(other !== cb && EXCLUSIVE_GROUPS[other.value] === group && other.checked){
+        other.checked = false;
+        other.closest('.check-item').classList.remove('on');
+      }
+    });
+  }
+}
+function syncGeo(cb){
+  const academie = document.querySelector('#geo input[value="academie"]');
+  if(cb.value==='academie'){
+    if(!cb.checked) cb.checked=true; // toujours au moins "académie" si rien d'autre
+    document.querySelectorAll('#geo input:not([value="academie"])').forEach(i=>{ i.checked=false; i.closest('.check-item').classList.remove('on'); });
+  } else {
+    if(cb.checked){ academie.checked=false; academie.closest('.check-item').classList.remove('on'); }
+    else {
+      const anyDept = [...document.querySelectorAll('#geo input:not([value="academie"])')].some(i=>i.checked);
+      if(!anyDept){ academie.checked=true; academie.closest('.check-item').classList.add('on'); }
+    }
+  }
+  cb.closest('.check-item').classList.toggle('on', cb.checked);
+}
+function checked(selector){ return [...document.querySelectorAll(selector+' input:checked')].map(i=>i.value); }
+// .no-track exclut les radios "Objectif" / "Répartir par" : elles sont lues séparément
+// via getObjectif()/getRepartDim() et ne doivent pas polluer les filtres (profil/bac/adm/opts).
+function allChecked(){ return [...document.querySelectorAll('.check-item input:checked:not(.no-track)')].map(i=>i.value); }
+function getObjectif(){ const el = document.querySelector('input[name=objectif]:checked'); return el ? el.value : 'liste'; }
+function getRepartDim(){ const el = document.querySelector('input[name=repart_dim]:checked'); return el ? el.value : null; }
+
+function syncObjectif(cb){
+  document.querySelectorAll('#objectif .check-item').forEach(el=>el.classList.remove('on'));
+  cb.closest('.check-item').classList.add('on');
+  document.getElementById('repartition-field').style.display = (cb.value==='repartition') ? 'block' : 'none';
+}
+function syncRepart(cb){
+  document.querySelectorAll('#repart_dim .check-item').forEach(el=>el.classList.remove('on'));
+  cb.closest('.check-item').classList.add('on');
+}
+
+// ── Onglets ───────────────────────────────────────────────────────────────────
+let currentTab = 'candidat';
+function switchTab(tab){
+  currentTab = tab;
+  document.getElementById('tabbtn-candidat').classList.toggle('active', tab==='candidat');
+  document.getElementById('tabbtn-etablissement').classList.toggle('active', tab==='etablissement');
+  document.querySelectorAll('.tab-candidat').forEach(el=>{ el.style.display = (tab==='candidat') ? '' : 'none'; });
+  document.querySelectorAll('.tab-etablissement').forEach(el=>{ el.style.display = (tab==='etablissement') ? '' : 'none'; });
+  // Changer d'onglet invalide le résultat affiché (granularité différente)
+  document.getElementById('result').style.display='none';
+  document.getElementById('btn-copy').style.display='none';
+  document.getElementById('empty').style.display='block';
+}
+
+// ── Génération ────────────────────────────────────────────────────────────────
+function generate(){
+  if(currentTab==='etablissement') generateEtablissement();
+  else generateCandidat();
+}
+
+function generateCandidat(){
+  const vals = allChecked();
+  const geo = checked('#geo').filter(v=>v!=='academie');
+  const profil = vals.filter(v=>['boursier','non_boursier','apprenti','neo','reoriente'].includes(v));
+  const bac    = vals.filter(v=>v.startsWith('bac_'));
+  const form   = vals.filter(v=>v.startsWith('f_'));
+  const adm    = vals.filter(v=>['a_proposition','sans_proposition','accepte','demission'].includes(v));
+  const opts   = vals.filter(v=>v.startsWith('d_'));
+
+  // Construire filtres
+  const filtresPredefined = []; // filtres 🟠 BO (à glisser dans Filtres requête)
+  const filtresValeurs = [];    // filtres sur valeur d'une colonne 🔵
+
+  geo.forEach(g=>{ if(GEO[g]) filtresValeurs.push(GEO[g]); });
+
+  // Néo-entrant / Réorienté partagent la même colonne BO : si les deux sont cochés,
+  // il faut un OU sur une seule ligne de filtre, pas deux filtres contradictoires
+  // sur la même colonne (ce qui reviendrait implicitement à un ET impossible).
+  const entrantVals = profil.filter(v=>['neo','reoriente'].includes(v))
+    .map(v=>PROFIL_FILTRES_BO[v].val);
+  if(entrantVals.length){
+    filtresValeurs.push({col:'Néo-entrant / Réorienté', val: entrantVals.join(' OU ')});
+  }
+
+  profil.filter(v=>!['neo','reoriente'].includes(v)).forEach(p=>{
+    const f = PROFIL_FILTRES_BO[p];
+    if(!f) return;
+    if(f.type==='predefined') filtresPredefined.push(f);
+    else filtresValeurs.push({col:f.col, val:f.val});
+  });
+
+  const bacVals = bac.map(b=>BAC_FILTRES[b]).filter(Boolean);
+  if(bacVals.length && bacVals.length < 3){
+    filtresValeurs.push({col:'Série de la Classe', val:bacVals.map(b=>b.val).join(' OU ')});
+  }
+
+  const formVals = form.map(f=>FORMATION_VALS[f]).filter(Boolean);
+  if(formVals.length){
+    filtresValeurs.push({col:"Grands groupes de formation d'accueil", val:formVals.join(' OU ')});
+  }
+
+  adm.forEach(a=>{ const f=ADMISSION_FILTRES[a]; if(f) filtresValeurs.push({col:f.col,val:f.val}); });
+
+  const objectif = getObjectif();
+  const repartDim = getRepartDim();
+
+  // Construire colonnes
+  // IMPORTANT : deep clone — sinon le filter() de dédup ci-dessous modifie
+  // directement les objets sources (COLS_BASE/COLS_OPTIONS), qui restent alors
+  // amputés lors des générations suivantes.
+  let dossiers;
+  if(objectif==='comptage' || objectif==='repartition'){
+    // Mode minimal : les filtres (géo, profil, bac...) s'appliquent à toute la requête
+    // sans avoir besoin d'être dans les Objets du résultat. Pas besoin des 111 colonnes
+    // de COLS_BASE pour compter ou répartir des candidats.
+    const colsMin = ['Numéro Parcoursup*'];
+    if(objectif==='repartition' && repartDim) colsMin.push(repartDim);
+    dossiers = [{ dossier:'Candidat', type:'dim', cols: colsMin }];
+  } else {
+    dossiers = structuredClone(COLS_BASE);
+  }
+  opts.forEach(o=>{ if(COLS_OPTIONS[o]) dossiers.push(structuredClone(COLS_OPTIONS[o])); });
+
+  // Dédupliquer
+  const seen = new Set();
+  dossiers.forEach(d=>{
+    if(d.cols) d.cols = d.cols.filter(c=>{ if(seen.has(c)) return false; seen.add(c); return true; });
+    if(d.indicateurs) d.indicateurs = d.indicateurs.filter(c=>{ if(seen.has(c)) return false; seen.add(c); return true; });
+  });
+
+  const totalDim = dossiers.reduce((s,d)=>(s+(d.cols||[]).length),0);
+  const totalInd = dossiers.reduce((s,d)=>(s+(d.indicateurs||[]).length),0);
+
+  renderResult(dossiers, filtresPredefined, filtresValeurs, totalDim, totalInd, opts.includes('d_caes'), objectif);
+}
+
+function generateEtablissement(){
+  const vals = allChecked();
+  const geo    = checked('#geo').filter(v=>v!=='academie');
+  const profil = vals.filter(v=>['boursier','non_boursier','apprenti','neo','reoriente'].includes(v));
+  const bac    = vals.filter(v=>v.startsWith('bac_'));
+  const form   = vals.filter(v=>v.startsWith('f_'));
+  const adm    = vals.filter(v=>['a_proposition','sans_proposition','accepte','demission'].includes(v));
+  const etabCrit = vals.filter(v=>ETAB_FILTRES[v]);
+  const opts   = vals.filter(v=>ETAB_OPTIONS_MAP[v]);
+  const nbCandidats = vals.includes('etab_nb_candidats');
+
+  const filtresPredefined = [];
+  const filtresValeurs = [];
+
+  geo.forEach(g=>{ if(GEO[g]) filtresValeurs.push(GEO[g]); });
+
+  // Même règle que pour l'onglet Candidat : neo/reoriente partagent une colonne BO,
+  // donc un OU sur une seule ligne de filtre si les deux sont cochés.
+  const entrantVals = profil.filter(v=>['neo','reoriente'].includes(v))
+    .map(v=>PROFIL_FILTRES_BO[v].val);
+  if(entrantVals.length){
+    filtresValeurs.push({col:'Néo-entrant / Réorienté', val: entrantVals.join(' OU ')});
+  }
+
+  profil.filter(v=>!['neo','reoriente'].includes(v)).forEach(p=>{
+    const f = PROFIL_FILTRES_BO[p];
+    if(!f) return;
+    if(f.type==='predefined') filtresPredefined.push(f);
+    else filtresValeurs.push({col:f.col, val:f.val});
+  });
+
+  const bacVals = bac.map(b=>BAC_FILTRES[b]).filter(Boolean);
+  if(bacVals.length && bacVals.length < 3){
+    filtresValeurs.push({col:'Série de la Classe', val:bacVals.map(b=>b.val).join(' OU ')});
+  }
+
+  const formVals = form.map(f=>FORMATION_VALS[f]).filter(Boolean);
+  if(formVals.length){
+    filtresValeurs.push({col:"Grands groupes de formation d'accueil", val:formVals.join(' OU ')});
+  }
+
+  adm.forEach(a=>{ const f=ADMISSION_FILTRES[a]; if(f) filtresValeurs.push({col:f.col,val:f.val}); });
+  etabCrit.forEach(c=>{ const f=ETAB_FILTRES[c]; filtresValeurs.push({col:f.col, val:f.val}); });
+
+  // Colonnes : base établissement (deep clone — même précaution que pour COLS_BASE)
+  // + dossiers COLS_OPTIONS référencés via ETAB_OPTIONS_MAP.
+  let dossiers = structuredClone(COLS_BASE_ETAB);
+  if(nbCandidats) dossiers.unshift({ dossier:'Candidat', type:'dim', cols:['Numéro Parcoursup*'] });
+  opts.forEach(o=>{
+    const key = ETAB_OPTIONS_MAP[o];
+    if(COLS_OPTIONS[key]) dossiers.push(structuredClone(COLS_OPTIONS[key]));
+  });
+
+  const seen = new Set();
+  dossiers.forEach(d=>{
+    if(d.cols) d.cols = d.cols.filter(c=>{ if(seen.has(c)) return false; seen.add(c); return true; });
+    if(d.indicateurs) d.indicateurs = d.indicateurs.filter(c=>{ if(seen.has(c)) return false; seen.add(c); return true; });
+  });
+
+  const totalDim = dossiers.reduce((s,d)=>(s+(d.cols||[]).length),0);
+  const totalInd = dossiers.reduce((s,d)=>(s+(d.indicateurs||[]).length),0);
+
+  renderResult(dossiers, filtresPredefined, filtresValeurs, totalDim, totalInd, false, nbCandidats ? 'etab_comptage' : 'etab_liste');
+}
+
+function renderResult(dossiers, filtresPredefined, filtresValeurs, totalDim, totalInd, withCaes, objectif){
+  document.getElementById('empty').style.display='none';
+  const res = document.getElementById('result');
+  res.style.display='block';
+  document.getElementById('btn-copy').style.display='inline-block';
+
+  let h='';
+
+  if(withCaes){
+    h+=`<div class="warning">⚠️ <strong>Colonnes CAES :</strong> La plupart des candidats n'ont pas de dossier CAES — ces colonnes seront vides pour eux. Elles permettent d'identifier les rares candidats traités en commission CAES.</div>`;
+  }
+
+  if(objectif==='comptage' || objectif==='repartition'){
+    h+=`<div class="warning" style="background:#EFF6FF;border-color:#BFDBFE;color:#1E3A8A">ℹ️ <strong>Mode ${objectif==='comptage'?'comptage':'répartition'} :</strong> l'univers BO_Parcoursup_2025 n'a pas d'indicateur "Nb de candidats" prédéfini. Dans le tableau du rapport WebI, faites un clic droit sur la colonne <strong>Numéro Parcoursup*</strong> → <code>Fonctions de calcul → Nombre</code> (ou insérez une variable <code>=Count([Numéro Parcoursup*])</code>) pour obtenir le décompte${objectif==='repartition'?' par catégorie une fois le tableau croisé avec la dimension de regroupement':''}.</div>`;
+  }
+  if(objectif==='etab_liste' || objectif==='etab_comptage'){
+    h+=`<div class="warning" style="background:#EFF6FF;border-color:#BFDBFE;color:#1E3A8A">ℹ️ <strong>Mode établissement :</strong> en ne sélectionnant pas <strong>Numéro Parcoursup*</strong>, BO regroupe automatiquement le résultat sur une ligne par formation d'accueil.${objectif==='etab_comptage' ? ' Pour obtenir le nombre de candidats par formation, faites un clic droit sur <strong>Numéro Parcoursup*</strong> → <code>Fonctions de calcul → Nombre</code>, tableau croisé avec les colonnes de formation en ligne.' : ''}</div>`;
+  }
+
+  // Instructions
+  const nbFiltres = filtresPredefined.length + filtresValeurs.length;
+  h+=`<div class="instructions"><h3>✅ Instructions étape par étape</h3><ol class="step-list">
+    <li>Dans BO, créez un nouveau document → choisissez <code>BO_Parcoursup_2025</code></li>
+    <li>Dans <strong>Objets du résultat</strong> : ajoutez les <strong>${totalDim} dimensions</strong> et <strong>${totalInd} indicateurs</strong> listés ci-dessous</li>
+    ${nbFiltres ? `<li>Dans <strong>Filtres de la requête</strong> : ajoutez les <strong>${nbFiltres} filtre${nbFiltres>1?'s':''}</strong> listés ci-dessous</li>` : '<li>Aucun filtre — extraction complète du périmètre académique</li>'}
+    <li>Cliquez sur <code>Exécuter</code> (2 à 5 minutes selon le volume)</li>
+    ${objectif==='comptage' ? '<li>Dans le tableau du rapport, passez <code>Numéro Parcoursup*</code> en agrégation <code>Nombre</code> pour obtenir le total</li>' : ''}
+    ${objectif==='repartition' ? '<li>Créez un tableau croisé avec votre dimension de regroupement en ligne et <code>Numéro Parcoursup*</code> en <code>Nombre</code></li>' : ''}
+    ${objectif==='etab_comptage' ? '<li>Dans le tableau du rapport, passez <code>Numéro Parcoursup*</code> en agrégation <code>Nombre</code>, regroupé par formation</li>' : ''}
+    <li>Exportez : <code>Fichier → Enregistrer sous → Excel</code></li>
+    <li>Importez dans Grist → ouvrez le widget Parcoursup Data Copilot</li>
+  </ol></div>`;
+
+  // Légende
+  h+=`<div class="legend">
+    <span>🔵 Dimension (colonne de données)</span>
+    <span>🟡 Indicateur (mesure/calcul)</span>
+    <span>🟠 Filtre prédéfini BO</span>
+  </div>`;
+
+  // Colonnes
+  let colsHtml='';
+  dossiers.forEach(d=>{
+    const hasCols = d.cols && d.cols.length;
+    const hasInd  = d.indicateurs && d.indicateurs.length;
+    if(!hasCols && !hasInd) return;
+    colsHtml+=`<div class="dossier"><div class="dossier-name">📁 ${d.dossier}</div><div class="col-list">`;
+    if(hasCols) d.cols.forEach(c=>{ colsHtml+=`<span class="col-chip">🔵 ${c}</span>`; });
+    if(hasInd) d.indicateurs.forEach(c=>{ colsHtml+=`<span class="col-chip indicateur">🟡 ${c}</span>`; });
+    colsHtml+=`</div></div>`;
+  });
+
+  h+=`<div class="result-bloc">
+    <div class="rb-head">📂 Objets du résultat <span class="count">${totalDim} dim · ${totalInd} indic</span></div>
+    <div class="rb-body">${colsHtml}</div>
+  </div>`;
+
+  // Filtres
+  if(filtresPredefined.length || filtresValeurs.length){
+    let fh='<div class="filter-list">';
+    filtresPredefined.forEach(f=>{
+      fh+=`<div class="filter-item"><span class="arr">🟠</span><div><strong>${f.label}</strong><br><span style="font-size:11px;color:var(--gris)">${f.note}</span></div></div>`;
+    });
+    filtresValeurs.forEach(f=>{
+      fh+=`<div class="filter-item"><span class="arr">▶</span><div><strong>${f.col}</strong> = <span class="val">${f.val}</span></div></div>`;
+    });
+    fh+='</div>';
+    h+=`<div class="result-bloc">
+      <div class="rb-head">🔽 Filtres de la requête <span class="count">${filtresPredefined.length+filtresValeurs.length}</span></div>
+      <div class="rb-body">${fh}</div>
+    </div>`;
+  } else {
+    h+=`<div class="result-bloc">
+      <div class="rb-head">🔽 Filtres de la requête</div>
+      <div class="rb-body" style="color:var(--gris);font-style:italic">Aucun filtre — extraction complète du périmètre académique de Bordeaux</div>
+    </div>`;
+  }
+
+  res.innerHTML=h;
+}
+
+function copyAll(){
+  const chips = [...document.querySelectorAll('.col-chip')].map(c=>c.textContent.replace(/^[🔵🟡] /,''));
+  const filtres = [...document.querySelectorAll('.filter-item')].map(f=>f.textContent.trim().replace(/\s+/g,' '));
+  let t='=== OBJETS DU RÉSULTAT ===\n'+chips.join('\n')+'\n\n';
+  if(filtres.length) t+='=== FILTRES DE LA REQUÊTE ===\n'+filtres.join('\n');
+  navigator.clipboard.writeText(t).then(()=>{
+    const b=document.getElementById('btn-copy');
+    b.textContent='✓ Copié !';
+    setTimeout(()=>b.textContent='📋 Tout copier',2000);
+  });
+}
+</script>
+</body>
+</html>
