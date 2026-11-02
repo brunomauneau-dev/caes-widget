@@ -16,7 +16,7 @@ Permet aux agents SAIO (Bordeaux) d'analyser la base Parcoursup en langage natur
 | `js/config.js` | État global, constantes, Storage, thèmes infographies |
 | `js/knowledge.js` | Glossaire Parcoursup, base de connaissances (KB), open data |
 | `js/documents.js` | Requêtes locales Grist, extraction, export |
-| `js/planner.js` | Détection d'intention, classification colonnes (`columnKind`) |
+| `js/planner.js` | Détection d'intention, classification colonnes (`columnKind` : nom → abréviations → contenu) |
 | `js/dataEngine.js` | Calculs locaux : pivot, group_by, compare, stats, export Excel/PDF |
 | `js/infographic.js` | Génération HTML infographies, few-shot prompt, thèmes charte État |
 | `js/sessions.js` | Sessions, filtres persistants, compositeur infographies, barre d'action |
@@ -51,7 +51,7 @@ Table Grist additionnelle (chargée via GitHub Actions) :
 
 ## Suite de tests
 
-17 fichiers, 384 tests. Depuis la racine du repo :
+18 fichiers, 422 tests. Depuis la racine du repo :
 
 ```bash
 npm test
