@@ -13,7 +13,7 @@
   const STOPWORDS = new Set('le la les un une des du de d l et ou a au aux en avec sans pour par dans sur sous entre vers chez qui que quoi dont est sont ayant avoir plus moins nombre combien candidats candidat formation formations academie académie etablissement établissement classe serie série bac zone'.split(/\s+/));
 
   function nrm(s) {
-    if (typeof normalizeText === 'function') return normalizeText(String(s ?? ''));
+    if (typeof normalizeText === 'function') return normalizeText(String(s ?? '').replace(/œ/g, 'oe').replace(/Œ/g, 'OE').replace(/æ/g, 'ae'));
     return String(s ?? '')
       .toLowerCase()
       .replace(/œ/g, 'oe').replace(/æ/g, 'ae')
@@ -161,10 +161,16 @@
 
   // Valeurs de la colonne dans la table active (Grist en priorité), si dispo.
   const _valueCache = new Map();
+  let _tableCache = { src: null, table: null };
   function activeValuesFor(col) {
     try {
       let table = null;
-      if (typeof buildGristQueryTable === 'function') table = buildGristQueryTable();
+      if (typeof buildGristQueryTable === 'function') {
+        // Reconstruire la table Grist une seule fois par jeu d'enregistrements
+        const src = (typeof gristRecords !== 'undefined') ? gristRecords : null;
+        if (src && _tableCache.src === src) table = _tableCache.table;
+        else { table = buildGristQueryTable(); _tableCache = { src, table }; }
+      }
       if ((!table || !table.objects || !table.objects.length) && typeof getActiveQueryTables === 'function') table = (getActiveQueryTables() || [])[0];
       if (!table || !table.objects || !table.objects.length) return null;
       const key = `${col}|${table.objects.length}`;
@@ -753,6 +759,8 @@
   // depuis le schéma de colonnes réel, sans dupliquer cette logique de classification).
   window.plannerColumnKind = columnKindSmart;
   window.plannerColumnKindFromValues = kindFromValues;
+  // Rôle accueil / origine, y compris pour les noms abrégés (ACC, SCO, ORIG…)
+  window.plannerColumnRole = (col) => columnRole(`${col} ${expandAbbreviations(col)}`);
 
   window.buildPlannerPlan = function buildPlannerPlan(question, filterContextText, table, forcedTool = null) {
     if (!table || !table.objects || !table.objects.length) return null;
