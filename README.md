@@ -30,6 +30,12 @@ Fichiers de données (chargés dynamiquement depuis la racine) :
 | `parcoursup-kb-index-v2.json` | Index hybride de la KB (recherche par terme) |
 | `parcoursup-opendata-reference-v1.json` | Référentiel national open data Parcoursup |
 
+Source par défaut (sans table Grist ni fichier) :
+
+| Source | Rôle |
+|---|---|
+| API open data `fr-esr-parcoursup` | Au démarrage, si aucune table Grist ni aucun fichier n'est fourni, le widget charge l'open data Parcoursup **France entière** de la **session la plus récente publiée** (détectée automatiquement, repli sur 2025). Une ligne = une formation. Priorité : table Grist > fichiers déposés > open data. Code : `loadDefaultOpenDataTable()` dans `js/knowledge.js`. |
+
 Table Grist additionnelle (chargée via GitHub Actions) :
 
 | Table | Rôle |
@@ -51,7 +57,7 @@ Table Grist additionnelle (chargée via GitHub Actions) :
 
 ## Suite de tests
 
-19 fichiers, 438 tests. Depuis la racine du repo :
+20 fichiers, 462 tests. Depuis la racine du repo :
 
 ```bash
 npm test
