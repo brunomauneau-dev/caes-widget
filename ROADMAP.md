@@ -52,6 +52,7 @@ parcoursup-opendata-reference-v1.json
 | T4  | Synchronisation script timing (`defer` + init guards) | ✅ |
 | CI  | Tests lancés automatiquement par GitHub Actions à chaque push (`tests.yml`, `npm test`) + ménage du repo (doublons JSON, fichiers obsolètes) | ✅ |
 | COL | Détection des colonnes dans une table inconnue : abréviations (`LIB_ACA_ACC`, `DEP_SCO`, `Bac`…) puis contenu (académies, départements, séries, formations, sexe, établissements). Colonnes techniques jamais reclassées (`test_column_detection.js`) | ✅ |
+| ALB | Albert reçoit le sens détecté de chaque colonne (section « Sens des colonnes » de la synthèse) ; colonnes reconnues prioritaires dans les profils. Correctif : ligature « œ » perdue par `normalizeText` (« vœux » non reconnu dans le widget réel) | ✅ |
 | PN  | Données nationales Parcoursup n-1 → Grist : GitHub Actions (`load-parcoursup.yml`) + script Python (`scripts/load_parcoursup_to_grist.py`) + table `Parcoursup_National` (631 lignes, académie Bordeaux, session 2025) + intégration `knowledge.js` (`loadParcoursupNational`, `buildNationalDataContext`) | ✅ |
 
 ---
@@ -60,4 +61,4 @@ parcoursup-opendata-reference-v1.json
 
 - Mise à jour KB vers v3 (`build_parcoursup_kb_v3.py` prêt dans `scripts/`)
 - Export PDF multi-blocs
-- Étendre la détection par contenu à `documents.js` (ontologie) et `knowledge.js` (alias), encore basés sur le nom seul
+- Nettoyer le code mort de `documents.js` (`PARCOURSUP_ONTOLOGY_RULES`, `classifyParcoursupColumn`, jamais appelés)

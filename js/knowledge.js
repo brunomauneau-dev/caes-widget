@@ -54,6 +54,7 @@ const COLUMN_ALIASES = [
   { match: /n[ée]o.?bachelier/i, alias: 'vient d\'obtenir le bac cette année (≠ réorientation/reprise)' },
   { match: /a (eu|re[çc]u).*proposition/i, alias: 'a au moins une offre (≠ acceptée)' },
   { match: /r[ée]pondu favorablement|proposition.*accept[ée]e/i, alias: 'a confirmé/accepté une offre = admission effective' },
+  { match: /\b(nb|nombre|total)\b.*v(oe|œ)ux?/i, alias: 'nombre de vœux du candidat (valeur numérique, à additionner ou moyenner)' },
   { match: /voe?u.*confirm[ée]/i, alias: 'voeu validé après formulation (≠ simplement formulé)' },
   { match: /voe?u.*class[ée]/i, alias: 'voeu positionné dans l\'ordre de préférence (PP uniquement)' },
   { match: /phase principale|\bPP\b/i, alias: 'période de la procédure avant la phase complémentaire' },

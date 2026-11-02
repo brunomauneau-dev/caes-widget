@@ -103,6 +103,8 @@ function buildCrossTabs(headers, dataRows, totalRows) {
    compte pas. */
 function normalizeText(v) {
   return String(v ?? '')
+    // Ligatures avant NFD : sinon « vœux » devient « v ux » et n'est plus reconnu
+    .replace(/œ/g, 'oe').replace(/Œ/g, 'OE').replace(/æ/g, 'ae').replace(/Æ/g, 'AE')
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .replace(/[’']/g, ' ')
@@ -373,6 +375,53 @@ function scoreColumnForSummary(col) {
   );
 }
 
+/* Sens détecté d'une colonne (planner.js : nom → abréviations → contenu),
+   transmis à Albert pour qu'il comprenne aussi les tables aux colonnes mal
+   nommées. Renvoie null si la colonne n'est pas reconnue. */
+const DETECTED_KIND_LABELS = {
+  zone_basque: 'Zone Pays Basque', boursier: 'statut boursier', nb_voeux: 'nombre de vœux',
+  voeu: 'vœux', bac_series: 'série / type de bac', academie: 'académie', departement: 'département',
+  commune: 'commune', formation: 'formation', admission: 'proposition / admission',
+  apprentissage: 'apprentissage', sexe: 'sexe', year: 'année / session',
+  etablissement_accueil: 'établissement d\'accueil', etablissement_origine_nom: 'établissement d\'origine',
+  etablissement: 'établissement'
+};
+const DETECTED_KIND_SCORES = {
+  zone_basque: 20, formation: 14, etablissement_accueil: 14, academie: 12, departement: 10,
+  boursier: 8, bac_series: 8, sexe: 8, apprentissage: 8, admission: 8, nb_voeux: 6, voeu: 6,
+  commune: 6, etablissement: 5, etablissement_origine_nom: 5, year: 4
+};
+
+function detectColumnMeaning(col, rows) {
+  if (typeof window === 'undefined' || typeof window.plannerColumnKind !== 'function') return null;
+  let kind = 'generic';
+  try {
+    // Valeurs de la table analysée, pour la détection par le contenu
+    const values = rows ? topCountsForRows(rows, col, 250).top.map(x => ({ value: x.value, count: x.count })) : undefined;
+    kind = window.plannerColumnKind(col, values) || 'generic';
+  } catch (e) { return null; }
+  if (!DETECTED_KIND_LABELS[kind]) return null;
+  let role = {};
+  try { role = (typeof window.plannerColumnRole === 'function' && window.plannerColumnRole(col)) || {}; } catch (e) { role = {}; }
+  let label = DETECTED_KIND_LABELS[kind];
+  const n = normalizeText(col);
+  if (kind === 'formation' && /enseignements? .*specialite|specialites? .*suivi/.test(n)) {
+    // Spécialités du lycée, pas une formation du supérieur
+    return { kind, role, label: 'enseignements de spécialité suivis au lycée' };
+  }
+  if (kind === 'formation' && !role.accueil) label = 'formation / spécialité';
+  if (['academie', 'departement', 'commune', 'formation'].includes(kind)) {
+    if (role.accueil) label += ' d\'accueil (formation acceptée)';
+    else if (role.origine) label += ' d\'origine (scolarité)';
+  }
+  return { kind, role, label };
+}
+
+function findColumnByMeaning(meanings, test) {
+  for (const [col, m] of meanings) if (m && test(m)) return col;
+  return null;
+}
+
 function buildFullTableSynthesis(table, question = '') {
   if (!table || !table.objects || !table.objects.length) return '';
   const rows = table.objects;
@@ -387,14 +436,38 @@ function buildFullTableSynthesis(table, question = '') {
   out += `Important : cette synthèse est calculée sur toutes les lignes, pas seulement sur un aperçu.\n\n`;
 
   // Colonnes principales : colonnes métier + colonnes dont le nom est cité dans la question.
+  // Le score par nom est complété par le sens détecté : une colonne mal nommée
+  // mais reconnue (abréviation ou contenu) n'est plus reléguée en fin de liste.
+  // Les colonnes techniques (score négatif) restent écartées.
+  const meanings = new Map(headers.map(col => [col, detectColumnMeaning(col, rows)]));
+  const summaryScore = col => {
+    const byName = scoreColumnForSummary(col);
+    if (byName < 0) return byName;
+    const m = meanings.get(col);
+    return Math.max(byName, m ? (DETECTED_KIND_SCORES[m.kind] || 0) : 0);
+  };
   const selectedCols = headers
-    .map(col => ({ col, score: scoreColumnForSummary(col) + (q && q.includes(normalizeText(col)) ? 12 : 0) }))
+    .map(col => ({ col, score: summaryScore(col) + (q && q.includes(normalizeText(col)) ? 12 : 0) }))
     .filter(x => x.score > -10)
     .sort((a,b) => b.score - a.score)
     .slice(0, 14)
     .map(x => x.col);
 
   out += `Colonnes principales repérées : ${selectedCols.join(' | ')}\n\n`;
+
+  // Carte des colonnes : sens détecté automatiquement + définition métier
+  const mapLines = headers.map(col => {
+    const m = meanings.get(col);
+    const alias = (typeof columnAlias === 'function') ? columnAlias(col) : '';
+    if (!m && !alias) return null;
+    return `- ${col} → ${m ? m.label : 'variable'}${alias}`;
+  }).filter(Boolean);
+  if (mapLines.length) {
+    out += `### Sens des colonnes (détecté automatiquement d'après le nom, les abréviations ou le contenu)\n`;
+    out += mapLines.join('\n') + '\n';
+    out += `Utilise ce sens pour interpréter les colonnes, même si leur nom est abrégé ou peu explicite. Les colonnes absentes de cette liste n'ont pas été reconnues : ne leur prête pas un sens Parcoursup sans indice dans leurs valeurs.\n\n`;
+  }
+
   out += `### Profils des colonnes utiles\n`;
   selectedCols.forEach(col => {
     const cat = topCountsForRows(rows, col, 10);
@@ -414,9 +487,13 @@ function buildFullTableSynthesis(table, question = '') {
   });
 
   // Croisements Parcoursup très utiles pour les synthèses générales.
-  const zoneCol = findBestColumn(headers, [/zone.*pays.*basque|pays.*basque|zone/], []);
-  const groupCol = findBestColumn(headers, [/grands? groupes?.*formation.*accueil.*acceptee|grands? groupes?.*formation|formation.*accueil.*acceptee/], []);
-  const acadCol = findBestColumn(headers, [/academie/], [/scolarite|origine|lycee/]);
+  // Repli sur le sens détecté si aucun intitulé ne correspond
+  const zoneCol = findBestColumn(headers, [/zone.*pays.*basque|pays.*basque|zone/], [])
+    || findColumnByMeaning(meanings, m => m.kind === 'zone_basque');
+  const groupCol = findBestColumn(headers, [/grands? groupes?.*formation.*accueil.*acceptee|grands? groupes?.*formation|formation.*accueil.*acceptee/], [])
+    || findColumnByMeaning(meanings, m => m.kind === 'formation' && m.role.accueil);
+  const acadCol = findBestColumn(headers, [/academie/], [/scolarite|origine|lycee/])
+    || findColumnByMeaning(meanings, m => m.kind === 'academie' && !m.role.origine);
 
   if (zoneCol) {
     const z = topCountsForRows(rows, zoneCol, 8);

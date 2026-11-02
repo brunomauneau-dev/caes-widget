@@ -51,7 +51,7 @@ Table Grist additionnelle (chargée via GitHub Actions) :
 
 ## Suite de tests
 
-18 fichiers, 422 tests. Depuis la racine du repo :
+19 fichiers, 438 tests. Depuis la racine du repo :
 
 ```bash
 npm test
