@@ -414,7 +414,12 @@ function updateSourceHub() {
   } else {
     gristCard.className = 'source-card';
     gristCard.querySelector('.sc-badge').textContent = 'inactive';
-    gristDetail.textContent = 'Aucune table connectée.';
+    const def = defaultOpenDataLabel();
+    gristDetail.textContent = def
+      ? `Aucune table connectée — analyse par défaut : ${def}. Une ligne = une formation.`
+      : (typeof defaultOpenDataState !== 'undefined' && defaultOpenDataState === 'error'
+          ? 'Aucune table connectée. Open data Parcoursup indisponible pour le moment.'
+          : 'Aucune table connectée.');
     if (gristActions) gristActions.style.display = 'none';
     if (columnsCard) columnsCard.style.display = 'none';
   }
@@ -510,8 +515,18 @@ function removeDoc(id, e) {
   updateChatSub();
 }
 
+// Libellé court de la source par défaut (open data), ou '' si inactive
+function defaultOpenDataLabel() {
+  if (typeof defaultOpenDataState === 'undefined') return '';
+  if (defaultOpenDataState === 'loading') return 'Chargement de l\'open data Parcoursup…';
+  const t = (typeof getDefaultOpenDataTable === 'function') ? getDefaultOpenDataTable() : null;
+  if (t) return `Open data Parcoursup ${t.session} · France entière · ${t.objects.length.toLocaleString('fr-FR')} formations`;
+  return '';
+}
+
 function renderContextPills() {
   const wrap = document.getElementById('context-pills');
+  if (!wrap) return;
   if (gristRecords && gristRecords.length) {
     const uploaded = documents.filter(d => d.status === 'ok').length;
     wrap.innerHTML = `<span class="context-pill">Source prioritaire : Grist (${gristRecords.length.toLocaleString('fr-FR')} lignes)</span>` + (uploaded ? `<span class="context-pill none">${uploaded} fichier${uploaded>1?'s':''} en complément</span>` : '');
@@ -523,7 +538,7 @@ function renderContextPills() {
     if (allOk.length) {
       wrap.innerHTML = `<span class="context-pill">Contexte : tous les documents (${allOk.length})</span>`;
     } else {
-      wrap.innerHTML = `<span class="context-pill none">Aucun document chargé</span>`;
+      wrap.innerHTML = `<span class="context-pill${defaultOpenDataLabel() ? '' : ' none'}">${escapeHtml(defaultOpenDataLabel() || 'Aucun document chargé')}</span>`;
     }
     return;
   }
@@ -537,7 +552,7 @@ function updateChatSub() {
   if (gristRecords.length) {
     txt = `${gristRecords.length.toLocaleString('fr-FR')} lignes Grist · source prioritaire`;
     if (ok) txt += ` · ${ok} fichier${ok>1?'s':''} complémentaire${ok>1?'s':''}`;
-  } else if (total === 0) txt = 'Aucun document chargé';
+  } else if (total === 0) txt = (typeof defaultOpenDataLabel === 'function' && defaultOpenDataLabel()) || 'Aucun document chargé';
   else if (ok < total) txt = `${ok}/${total} documents prêts`;
   else txt = `${ok} document${ok>1?'s':''} prêt${ok>1?'s':''}`;
   const chatSub = document.getElementById('chat-sub');
@@ -640,7 +655,8 @@ function buildDynamicSuggestions(max = 6) {
   // sait déjà reconstruire les bons en-têtes dans ce cas (voir documents.js) —
   // le Data Engine s'en sert pour ses propres réponses, les suggestions doivent
   // faire de même pour rester cohérentes avec ce que l'utilisateur voit ensuite.
-  const table = buildGristQueryTable();
+  let table = buildGristQueryTable();
+  if ((!table || !table.headers || !table.headers.length) && typeof getActiveQueryTables === 'function') table = (getActiveQueryTables() || [])[0] || null;
   if (!table || !table.headers || !table.headers.length) return null;
   const fields = table.headers.filter(f => f !== 'id' && f !== 'manualSort');
   const seenKinds = new Map(); // kind -> nom de colonne (le premier rencontré dans l'ordre du schéma)
@@ -737,6 +753,9 @@ ${localAnalysis.text}
     const fields = Object.keys(gristRecords[0]);
     const preview = gristRecords.slice(0, 12).map(r => fields.map(f => r[f]).join(' | ')).join('\n');
     context += `\n\n=== APERÇU GRIST (12 premières lignes, seulement illustratif) ===\nColonnes brutes: ${fields.join(' | ')}\n${preview}`;
+  } else if (!docsToUse.length && typeof getDefaultOpenDataTable === 'function' && getDefaultOpenDataTable()) {
+    // Aucune table ni fichier : open data Parcoursup par défaut
+    context += `\n\n${buildFullTableSynthesis(getDefaultOpenDataTable(), localAnalysis?.question || '')}`;
   }
 
   return context.trim();
