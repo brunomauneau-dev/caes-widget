@@ -113,10 +113,23 @@ describe('infographic.js — police Marianne et variables CSS thème dynamiques'
 
 // ─── (5) index.html — cache-busting à jour ───────────────────────────────────
 describe('index.html — cache-busting à jour', () => {
-  assert(/config\.js\?v=27\.5\.8/.test(indexSrc), 'config.js bumpé v27.5.7');
-  assert(/infographic\.js\?v=27\.5\.10/.test(indexSrc), 'infographic.js bumpé v27.5.9');
-  assert(/dataEngine\.js\?v=27.5.19/.test(indexSrc), 'dataEngine.js bumpé v27.5.19');
-  assert(/sessions\.js\?v=27\.5\.16/.test(indexSrc), 'sessions.js bumpé v27.5.15');
+  // Vérifie une version minimale (et non une version exacte) : les bumps
+  // ultérieurs ne doivent pas faire échouer ce test.
+  const ver = (file) => {
+    const m = indexSrc.match(new RegExp(file.replace('.', '\\.') + '\\?v=([0-9.]+)'));
+    return m ? m[1].split('.').map(Number) : null;
+  };
+  const atLeast = (v, min) => {
+    if (!v) return false;
+    for (let i = 0; i < min.length; i++) {
+      if ((v[i] || 0) !== min[i]) return (v[i] || 0) > min[i];
+    }
+    return true;
+  };
+  assert(atLeast(ver('config.js'), [27, 5, 8]), 'config.js bumpé ≥ v27.5.8');
+  assert(atLeast(ver('infographic.js'), [27, 5, 10]), 'infographic.js bumpé ≥ v27.5.10');
+  assert(atLeast(ver('dataEngine.js'), [27, 5, 19]), 'dataEngine.js bumpé ≥ v27.5.19');
+  assert(atLeast(ver('sessions.js'), [27, 5, 16]), 'sessions.js bumpé ≥ v27.5.16');
 });
 
 // ─── (6) Logo Parcoursup dans le héro ─────────────────────────────────────

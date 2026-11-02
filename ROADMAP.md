@@ -1,6 +1,6 @@
 # Roadmap — Parcoursup Data Copilot
 
-> État au 27/07/2026. Tout ce qui est en dessous est livré et stable.
+> État au 02/11/2026. Tout ce qui est en dessous est livré et stable.
 
 ---
 
@@ -50,6 +50,7 @@ parcoursup-opendata-reference-v1.json
 | PR5 | Copilot feel (layout plein écran, panneau sources, mini-suggestions) | ✅ |
 | T2  | Garde-fous DOM sur tous les modules | ✅ |
 | T4  | Synchronisation script timing (`defer` + init guards) | ✅ |
+| CI  | Tests lancés automatiquement par GitHub Actions à chaque push (`tests.yml`, `npm test`) + ménage du repo (doublons JSON, fichiers obsolètes) | ✅ |
 | PN  | Données nationales Parcoursup n-1 → Grist : GitHub Actions (`load-parcoursup.yml`) + script Python (`scripts/load_parcoursup_to_grist.py`) + table `Parcoursup_National` (631 lignes, académie Bordeaux, session 2025) + intégration `knowledge.js` (`loadParcoursupNational`, `buildNationalDataContext`) | ✅ |
 
 ---
