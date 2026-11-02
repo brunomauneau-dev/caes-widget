@@ -84,6 +84,121 @@
     return 'generic';
   }
 
+  /* ─────────── Détection renforcée pour les tables inconnues ───────────
+     columnKind() reconnaît les intitulés « longs » de l'export académique.
+     Pour une table dont les colonnes sont nommées autrement, deux filets de
+     sécurité s'appliquent UNIQUEMENT quand columnKind() renvoie 'generic' :
+       1. abréviations courantes (LIB_ACA_ACC, DEP_SCO, Dpt, Etab, Bac…) ;
+       2. contenu de la colonne (noms d'académies, de départements, séries
+          de bac, types de formation, sexe…).
+     Les colonnes techniques (code, UAI, numéro, identifiant…) ne sont jamais
+     reclassées. Les colonnes déjà reconnues par leur nom ne changent pas. */
+
+  const ABBREVIATIONS = {
+    aca: 'academie', acad: 'academie', acade: 'academie',
+    dep: 'departement', dept: 'departement', dpt: 'departement', depart: 'departement',
+    com: 'commune', comm: 'commune',
+    etab: 'etablissement', etb: 'etablissement', eta: 'etablissement', etabl: 'etablissement',
+    sco: 'scolarite', scol: 'scolarite', orig: 'origine',
+    acc: 'accueil', accu: 'accueil', accpt: 'acceptee',
+    form: 'formation', frm: 'formation', spe: 'specialite', spec: 'specialite', fil: 'filiere',
+    nbr: 'nb', vx: 'voeux', voe: 'voeux', prop: 'proposition', adm: 'admission',
+    app: 'apprenti', appr: 'apprenti', sex: 'sexe', bours: 'boursier', bour: 'boursier',
+    ser: 'serie', bac: 'serie bac', ann: 'annee', lib: 'libelle', cp: 'code postal', cod: 'code'
+  };
+
+  function expandAbbreviations(col) {
+    const words = String(col ?? '').toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .split(/[^a-z0-9]+/).filter(Boolean);
+    // « serie bac » seulement si la série n'est pas déjà nommée
+    const hasSerie = words.some(w => w === 'serie' || w === 'ser');
+    return words.map(w => (w === 'bac' && hasSerie) ? w : (ABBREVIATIONS[w] || w)).join(' ');
+  }
+
+  function isTechnicalName(c) {
+    return /\b(num[eé]ro|numero|code|uai|identifiant|id|insee|siret|minist[eè]re|ministere|contrat|postal|manualsort)\b/.test(c);
+  }
+
+  const ACADEMIES = ['aix marseille','amiens','besancon','bordeaux','clermont ferrand','corse','creteil','dijon','grenoble','guadeloupe','guyane','lille','limoges','lyon','martinique','mayotte','montpellier','nancy metz','nantes','nice','normandie','caen','rouen','orleans tours','paris','poitiers','reims','rennes','la reunion','reunion','strasbourg','toulouse','versailles','polynesie francaise','nouvelle caledonie','wallis et futuna','saint pierre et miquelon'];
+  const DEPARTEMENTS = ['ain','aisne','allier','alpes de haute provence','hautes alpes','alpes maritimes','ardeche','ardennes','ariege','aube','aude','aveyron','bouches du rhone','calvados','cantal','charente','charente maritime','cher','correze','corse du sud','haute corse','cote d or','cotes d armor','creuse','dordogne','doubs','drome','eure','eure et loir','finistere','gard','haute garonne','gers','gironde','herault','ille et vilaine','indre','indre et loire','isere','jura','landes','loir et cher','loire','haute loire','loire atlantique','loiret','lot','lot et garonne','lozere','maine et loire','manche','marne','haute marne','mayenne','meurthe et moselle','meuse','morbihan','moselle','nievre','nord','oise','orne','pas de calais','puy de dome','pyrenees atlantiques','hautes pyrenees','pyrenees orientales','bas rhin','haut rhin','rhone','haute saone','saone et loire','sarthe','savoie','haute savoie','paris','seine maritime','seine et marne','yvelines','deux sevres','somme','tarn','tarn et garonne','var','vaucluse','vendee','vienne','haute vienne','vosges','yonne','territoire de belfort','essonne','hauts de seine','seine saint denis','val de marne','val d oise','guadeloupe','martinique','guyane','la reunion','reunion','mayotte'];
+  const ACADEMIE_SET = new Set(ACADEMIES);
+  const DEPARTEMENT_SET = new Set(DEPARTEMENTS);
+
+  // Part (pondérée par le nombre de lignes) des valeurs qui satisfont test()
+  function valueShare(values, test) {
+    let total = 0, ok = 0;
+    values.forEach(v => {
+      const n = Number(v.count) || 1;
+      total += n;
+      if (test(nrm(v.value))) ok += n;
+    });
+    return total ? ok / total : 0;
+  }
+
+  function kindFromValues(values) {
+    const vals = (values || []).filter(v => String(v.value ?? '').trim() !== '');
+    if (!vals.length) return 'generic';
+    const normed = vals.map(v => nrm(v.value));
+    // Booléens et nombres : le contenu ne dit rien du sens de la colonne
+    if (normed.every(v => /^(oui|non|yes|no|true|false|vrai|faux|0|1)$/.test(v))) return 'generic';
+    if (normed.filter(v => /^-?\d+([ .,]\d+)?$/.test(v)).length >= normed.length * 0.8) return 'generic';
+    // Codes UAI (7 chiffres + 1 lettre) → identifiant technique
+    if (normed.filter(v => /^\d{7}[a-z]$/.test(v)).length >= normed.length * 0.8) return 'generic';
+
+    const distinct = vals.length;
+    const stripAcad = v => v.replace(/^(academie|acad|aca)( de| d)? /, '').replace(/^(de|d) /, '');
+    const stripDept = v => v.replace(/^\d{1,3}[ab]? /, '').replace(/^(departement|dept|dpt)( de la| du| des| de| d)? /, '');
+
+    if (distinct <= 3 && normed.every(v => /^(f|m|h|feminin|masculin|femme|homme|fille|garcon|femmes|hommes)$/.test(v))) return 'sexe';
+    if (distinct <= 40 && valueShare(vals, v => /\b(general|generale|technologique|professionnel|professionnelle|stmg|sti2d|st2s|stl|std2a|stav|s2tmd|sthr|tmd|bac pro|non bachelier|dael)\b/.test(v)) >= 0.6) return 'bac_series';
+    if (distinct >= 2 && distinct <= 40 && valueShare(vals, v => ACADEMIE_SET.has(stripAcad(v))) >= 0.7) return 'academie';
+    if (distinct >= 2 && valueShare(vals, v => DEPARTEMENT_SET.has(stripDept(v))) >= 0.7) return 'departement';
+    if (valueShare(vals, v => /\b(bts|btsa|but|dut|licence|cpge|dcg|dn made|bachelor|ifsi|pass|las|cupge|deust|dts|dma|classe preparatoire|formation d ingenieur|ecole d ingenieur|mention complementaire)\b/.test(v)) >= 0.5) return 'formation';
+    if (valueShare(vals, v => /\b(lycee|lyc|college|universite|iut|ecole|institut|cfa|legt|lgt|lpo|lp|campus|faculte)\b/.test(v)) >= 0.5) return 'etablissement';
+    return 'generic';
+  }
+
+  // Valeurs de la colonne dans la table active (Grist en priorité), si dispo.
+  const _valueCache = new Map();
+  function activeValuesFor(col) {
+    try {
+      let table = null;
+      if (typeof buildGristQueryTable === 'function') table = buildGristQueryTable();
+      if ((!table || !table.objects || !table.objects.length) && typeof getActiveQueryTables === 'function') table = (getActiveQueryTables() || [])[0];
+      if (!table || !table.objects || !table.objects.length) return null;
+      const key = `${col}|${table.objects.length}`;
+      if (_valueCache.has(key)) return _valueCache.get(key);
+      const headers = table.headers || Object.keys(table.objects[0] || {});
+      if (!headers.includes(col)) return null;
+      const vals = valuesFor(table, col, 250);
+      if (_valueCache.size > 500) _valueCache.clear();
+      _valueCache.set(key, vals);
+      return vals;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /* Point d'entrée public : nom de colonne, puis abréviations, puis contenu.
+     `values` (optionnel) : [{value, count}] ; sinon lus dans la table active. */
+  function columnKindSmart(col, values) {
+    const byName = columnKind(col);
+    if (byName !== 'generic') return byName;
+    const c = nrm(col);
+    if (isTechnicalName(c)) return 'generic';
+
+    const expanded = expandAbbreviations(col);
+    if (expanded !== c) {
+      if (isTechnicalName(expanded)) return 'generic';
+      const byAbbrev = columnKind(expanded);
+      if (byAbbrev !== 'generic') return byAbbrev;
+    }
+
+    const vals = values || activeValuesFor(col);
+    return vals ? kindFromValues(vals) : 'generic';
+  }
+
   function columnPriority(entry, q = '') {
     const c = nrm(entry.column);
     const k = entry.kind;
@@ -191,8 +306,9 @@
       const entry = {
         column: col,
         norm: nrm(col),
-        kind: columnKind(col),
-        role: columnRole(col),
+        kind: columnKindSmart(col, vals),
+        // Rôle (accueil / origine) calculé aussi sur le nom désabrégé
+        role: columnRole(`${col} ${expandAbbreviations(col)}`),
         values: vals,
         type: inferType(vals),
         priority: 0
@@ -635,7 +751,8 @@
 
   // Exposée pour PR4.2 (suggestions de questions guidées générées dynamiquement
   // depuis le schéma de colonnes réel, sans dupliquer cette logique de classification).
-  window.plannerColumnKind = columnKind;
+  window.plannerColumnKind = columnKindSmart;
+  window.plannerColumnKindFromValues = kindFromValues;
 
   window.buildPlannerPlan = function buildPlannerPlan(question, filterContextText, table, forcedTool = null) {
     if (!table || !table.objects || !table.objects.length) return null;
