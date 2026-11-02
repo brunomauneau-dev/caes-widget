@@ -34,7 +34,7 @@ Table Grist additionnelle (chargée via GitHub Actions) :
 
 | Table | Rôle |
 |---|---|
-| `Parcoursup_National` | Données nationales Parcoursup n-1 (académie Bordeaux, session 2025, 631 lignes). Rechargeable manuellement via `.github/workflows/load-parcoursup.yml`. |
+| `Parcoursup_National` | Données nationales Parcoursup n-1 (académie Bordeaux, session 2025, 631 lignes). Rechargeable manuellement via l'onglet *Actions* → `.github/workflows/load-parcoursup.yml`. |
 
 ---
 
@@ -51,28 +51,26 @@ Table Grist additionnelle (chargée via GitHub Actions) :
 
 ## Suite de tests
 
-16 fichiers, ~371 tests. Depuis la racine du repo :
+17 fichiers, 384 tests. Depuis la racine du repo :
 
 ```bash
-node js/sessions.test.js
-node js/pr12.test.js
-node js/pr21.test.js
-node js/pr22.test.js
-node js/test_pr41.js
-node js/pr31.test.js
-node js/test_t4.js
-node js/test_action_bar.js
-node js/test_clear_titles.js
-node js/pr32.test.js
-node js/pr42.test.js
-node js/test_dom_guards.js
-node js/test_copilot_feel.js
-node js/test_script_timing.js
-node js/test_patch_ui.js
-node js/test_planner_columnkind.js
+npm test
 ```
 
-Tous les fichiers de test sont des modules ESM. Le repo doit avoir `"type": "module"` dans `package.json`.
+Cette commande lance tous les fichiers `js/*.test.js` et `js/test_*.js` et s'arrête au premier échec.
+Les tests sont aussi lancés **automatiquement par GitHub à chaque modification** (onglet *Actions* du repo, workflow `Tests`) : une coche verte ✅ signifie que tout passe, une croix rouge ❌ qu'un test a échoué.
+
+Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package.json`).
+
+---
+
+## Outils annexes
+
+| Fichier | Rôle |
+|---|---|
+| `generateur_bo.html` | Générateur de requêtes SAP BusinessObjects (page autonome, indépendante du widget) |
+| `scripts/load_parcoursup_to_grist.py` | Chargement de la table `Parcoursup_National` (lancé par `.github/workflows/load-parcoursup.yml`) |
+| `scripts/build_parcoursup_kb_v3.py` | Construction de la future KB v3 (non encore utilisée) |
 
 ---
 

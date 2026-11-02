@@ -1,16 +1,10 @@
 {
-  "name": "albert-api-proxy",
-  "version": "1.0.0",
-  "description": "Proxy CORS minimal pour relayer les appels d'un widget navigateur vers Albert API (Etalab/DINUM)",
-  "main": "server.js",
+  "name": "parcoursup-data-copilot",
+  "version": "27.6.0",
+  "private": true,
+  "description": "Widget Grist d'analyse Parcoursup (SAIO Bordeaux) — aucun build, ce fichier sert uniquement à exécuter les tests en ESM",
   "type": "module",
   "scripts": {
-    "start": "node server.js"
-  },
-  "engines": {
-    "node": "20.x"
-  },
-  "dependencies": {
-    "express": "^4.19.2"
+    "test": "for f in js/*.test.js js/test_*.js; do node \"$f\" || exit 1; done"
   }
 }
