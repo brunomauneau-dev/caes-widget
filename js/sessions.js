@@ -212,6 +212,11 @@ function _shortFilterValue(f) {
   if (/boursier/.test(col) && /boursier des lyc/i.test(v)) return 'boursiers';
   if (/boursier/.test(col) && /non/i.test(v)) return 'non-boursiers';
   if (/boursier/.test(col)) return 'boursiers';
+  // v27.8 — état codé (1 / VRAI / Oui) : on nomme l'état d'après la colonne (« apprentis », pas « 1 »)
+  if (/^(1|vrai|true|oui)$/i.test(v.trim())) {
+    if (/appren|appr\b/.test(col)) return 'apprentis';
+    if (/basque/.test(col)) return 'basques';
+  }
   if (/cpge|cpes/i.test(v)) return 'CPGE';
   if (/\bbts\b|\bbtsa\b/i.test(v)) return 'BTS';
   if (/\bdut\b|\bbut\b/i.test(v)) return 'DUT';
@@ -490,6 +495,10 @@ function extractBlockTitle(exec, question) {
     // v27.7 — open data : une ligne = une formation (pas un candidat)
     const unite = exec.plan?.table?.rowUnit === 'formation' ? 'formation' : 'candidat';
     return `${n} ${unite}${count > 1 ? 's' : ''}${fPart}`;
+  }
+  if (tool === 'sum') {
+    const sum = exec.result?.sum ?? '';
+    return `${Number(sum).toLocaleString('fr-FR')} ${exec.result?.unite || ''}${fPart}`;
   }
   if (tool === 'compare') {
     const groups = (exec.plan?.compareGroups || []).map(g => g.label || '').filter(Boolean).join(' vs ');

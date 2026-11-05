@@ -171,11 +171,31 @@ function isPopulationFilterFollowUp(question) {
     || /^(non[- ]?boursiers?|boursiers?|non[- ]?basques?|basques?|non[- ]?admis|admis|non[- ]?apprentis?|apprentis?)\s*\??$/.test(q);
 }
 
+// v27.8 — nom de colonne + sa forme développée (BOURS → boursier, LIB_ACA_ACC → libelle academie accueil)
+function _hx(h) {
+  const dev = (typeof plannerExpandAbbreviations === 'function') ? plannerExpandAbbreviations(h) : '';
+  return normalizeText(`${h} ${dev}`);
+}
+function _distinctValues(table, col) {
+  return [...new Set((table?.objects || []).map(r => String(r?.[col] ?? '').trim()).filter(Boolean))];
+}
+
+// v27.8 — colonne d'état (oui/non, VRAI/FAUX, 1/0, « Boursier des lycées / Non boursier ») et non une mesure
+// chiffrée (« % d'admis boursiers », « Dont effectif des admis boursiers ») : seule une colonne d'état sert de filtre.
+function _isEtatCol(table, h) {
+  const vals = _distinctValues(table, h);
+  if (!vals.length) return false;
+  if (vals.length <= 6) return true;
+  return vals.filter(v => /^-?\d+([.,]\d+)?$/.test(v)).length < vals.length * 0.5;
+}
+
 function findColumnByConceptStrict(table, concept) {
   const headers = table?.headers || Object.keys(table?.objects?.[0] || {});
+  const ETATS = ['boursier', 'basque', 'apprenti'];
   const scored = headers.map(h => {
-    const hn = normalizeText(h);
+    const hn = _hx(h);
     let score = 0;
+    if (ETATS.includes(concept) && !_isEtatCol(table, h)) return { h, score: 0 };
     if (concept === 'boursier' && /boursier/.test(hn)) score += 100;
     if (concept === 'basque' && /pays.*basque|zone.*basque/.test(hn)) score += 100;
     if (concept === 'academie_accueil' && /acad[eé]mie/.test(hn) && /accueil|accept/.test(hn)) score += 100;
@@ -183,7 +203,7 @@ function findColumnByConceptStrict(table, concept) {
     if (concept === 'formation_groupe' && /grands?.*groupes?.*formation|groupe.*formation/.test(hn)) score += 100;
     if (concept === 'etablissement_origine' && /[eé]tablissement|lyc[eé]e/.test(hn) && /scolarit[eé]|origine|scolaire/.test(hn)) {
       score += 100;
-      if (!/d[eé]partement|commune|code|uai|minist[eè]re|type|contrat|rattachement/.test(hn)) score += 60;
+      if (!/d[eé]partement|commune|code|uai|minist[eè]re|type|contrat|rattachement|acad[eé]mie|r[eé]gion/.test(hn)) score += 60;
     }
     if (concept === 'etablissement_accueil' && /[eé]tablissement|lyc[eé]e/.test(hn) && /accueil|accept/.test(hn) && !/acad[eé]mie|commune|sp[eé]cialit[eé]|mention|groupe|formation/.test(hn)) score += 100;
     if (concept === 'commune_origine' && /commune/.test(hn) && /scolarit[eé]|origine/.test(hn)) score += 100;
@@ -199,6 +219,13 @@ function findColumnByConceptStrict(table, concept) {
 function pickColumnValue(table, col, kind) {
   const vals = Array.from(new Set((table?.objects || []).map(r => r?.[col]).filter(v => v !== undefined && v !== null && String(v).trim() !== '').map(v => String(v).trim())));
   const normVals = vals.map(v => ({ raw: v, n: normalizeText(v) }));
+  // v27.8 — colonnes d'état écrites Oui/Non, VRAI/FAUX, true/false, 1/0 : la valeur réelle du fichier, jamais une valeur supposée
+  const OUI = /^(oui|o|yes|y|vrai|true|1|x)$/, NON = /^(non|n|no|faux|false|0)$/;
+  const etatOui = normVals.find(x => OUI.test(x.n)), etatNon = normVals.find(x => NON.test(x.n));
+  if (etatOui && etatNon && normVals.length <= 3) {
+    if (kind === 'boursier_oui' || kind === 'oui') return etatOui.raw;
+    if (kind === 'boursier_non' || kind === 'non') return etatNon.raw;
+  }
   if (kind === 'boursier_oui') {
     return (normVals.find(x => /boursier/.test(x.n) && !/non/.test(x.n)) || normVals.find(x => /^oui$|yes|true|1/.test(x.n)))?.raw || 'Oui';
   }
@@ -261,6 +288,47 @@ function strictFiltersFromQuestion(table, question) {
     }
   }
 
+  // v27.8 — statut public / privé, sélectivité, région, « à <ville> » (open data et fichiers de formations)
+  const headersS = (table?.headers || Object.keys(table?.objects?.[0] || {})).filter(Boolean);
+  const statutCol = headersS.find(h => /statut|secteur/.test(_hx(h)) && _distinctValues(table, h).some(v => /^public/.test(normalizeText(v))));
+  if (statutCol) {
+    const vals = _distinctValues(table, statutCol);
+    const pub = vals.find(v => /^public/.test(normalizeText(v)));
+    const priv = vals.filter(v => /^prive/.test(normalizeText(v)));
+    if (/\bpubli(c|cs|que|ques)\b/.test(q) && !/\bprive(e|s|es)?\b/.test(q)) add(statutCol, pub, 'eq');
+    else if (/\bprive(e|s|es)?\b/.test(q) && !/\bpubli(c|cs|que|ques)\b/.test(q)) {
+      const sc = /sous contrat/.test(q) ? priv.find(v => /sous contrat/.test(normalizeText(v))) : null;
+      if (sc) add(statutCol, sc, 'eq');
+      else if (priv.length === 1) add(statutCol, priv[0], 'eq');
+      else if (pub) add(statutCol, pub, 'neq');
+    }
+  }
+  const selCol = headersS.find(h => /selectiv/.test(_hx(h)));
+  if (selCol && /\bselecti(f|fs|ve|ves|vite)\b/.test(q)) {
+    const non = /\bnon selecti/.test(q);
+    const v = _distinctValues(table, selCol).find(x => { const n = normalizeText(x); return non ? /non selecti/.test(n) : (/selecti/.test(n) && !/\bnon\b/.test(n)); });
+    if (v) add(selCol, v, 'eq');
+  }
+  const regCol = headersS.find(h => /\bregion\b/.test(_hx(h)) && !/code/.test(_hx(h)));
+  if (regCol) {
+    const v = _distinctValues(table, regCol).filter(x => normalizeText(x).length >= 4).sort((a, b) => b.length - a.length)
+      .find(x => new RegExp(`(^| )${normalizeText(x)}( |$)`).test(q));
+    if (v) add(regCol, v, 'eq');
+  }
+  const comCols = headersS.filter(h => /commune|ville/.test(_hx(h)) && !/code|insee|postal/.test(_hx(h)));
+  if (comCols.length) {
+    const veutOrigine = /venant|issus?|originaires?|provenant|scolaris|origine/.test(q);
+    const ordre = comCols.slice().sort((a, b) => {
+      const ra = (typeof plannerColumnRole === 'function') ? plannerColumnRole(a) : {}, rb = (typeof plannerColumnRole === 'function') ? plannerColumnRole(b) : {};
+      return veutOrigine ? (rb.origine ? 1 : 0) - (ra.origine ? 1 : 0) : (rb.accueil ? 1 : 0) - (ra.accueil ? 1 : 0);
+    });
+    for (const col of ordre) {
+      const v = _distinctValues(table, col).filter(x => normalizeText(x).length >= 3).sort((a, b) => b.length - a.length)
+        .find(x => new RegExp(`(^| )a ${normalizeText(x)}( |$)`).test(q));
+      if (v) { out.push({ col, value: v, op: 'eq', label: null, source: 'commune_a' }); break; }
+    }
+  }
+
   // Etablissement d\'origine : "venant du/de", "issus du/de", "originaires du/de"
   const _etablPattern = /(?:venant\s+(?:du|de(?:\s+l[ae']?)?)|provenant\s+(?:du|de)|originaires?\s+(?:du|de)|issus?\s+(?:du|de)|qui\s+viennent\s+(?:du|de)|scolaris[eé]e?s?\s+(?:au|[àa]))\s*(?:lyc[eé]e|[eé]tablissement)?\s+([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ\s\-']{2,45}?)(?:\s*[?!.]|$)/i;
   const _etablMatch = (question || '').match(_etablPattern);
@@ -287,7 +355,8 @@ function replaceConceptFiltersWithStrict(plan, question) {
 
   const onlyBoursier = /^(combien|nombre|effectif|total)\s+(de\s+)?(candidats\s+)?(non\s+)?boursiers?\s*\??$/.test(q);
   if (onlyBoursier) {
-    plan.filters = strict.filter(f => /boursier/i.test(f.col));
+    const viaStrict = strict.filter(f => /boursier/.test(_hx(f.col)));
+    plan.filters = viaStrict.length ? viaStrict : (plan.filters || []).filter(f => /boursier/.test(_hx(f.col)));
     plan.mentionedCols = Array.from(new Set([...(plan.mentionedCols || []), ...plan.filters.map(f => f.col)]));
     return plan;
   }
@@ -731,8 +800,13 @@ function formationTermsInfo(table) {
     const vals = sample.map(r => r?.[h]).filter(v => v !== undefined && v !== null && String(v).trim() !== '');
     return vals.length > 0 && vals.filter(v => /[a-zA-ZÀ-ÿ]/.test(String(v))).length >= vals.length * 0.8;
   };
-  const cols = headers.filter(h => FORMATION_COL_RE.test(h) && !NOT_FORMATION_COL_RE.test(h) && textual(h));
-  const geoCols = headers.filter(h => GEO_COL_RE.test(h) && !cols.includes(h));
+  // v27.8 — noms abrégés développés (GRP_FORM_ACC) et, à défaut, colonnes reconnues par leur contenu (« Colonne J »)
+  const parContenu = h => {
+    if (typeof plannerColumnKind !== 'function' || typeof uniqueValues !== 'function') return false;
+    try { return plannerColumnKind(h, uniqueValues(table, h, 200)) === 'formation'; } catch (e) { return false; }
+  };
+  const cols = headers.filter(h => textual(h) && !NOT_FORMATION_COL_RE.test(_hx(h)) && (FORMATION_COL_RE.test(_hx(h)) || parContenu(h)));
+  const geoCols = headers.filter(h => GEO_COL_RE.test(_hx(h)) && !cols.includes(h));
   const words = new Set(), geo = new Set();
   const seen = new Set();
   table.objects.forEach(r => {
@@ -758,12 +832,11 @@ function formationTermsInfo(table) {
   return info;
 }
 
-// Forme du mot présente dans les intitulés (« licences » → « licence »), ou null
+// Formes du mot présentes dans les intitulés (« écoles » → [écoles, école]), ou null
 function formationWordForm(token, info) {
-  if (info.words.has(token)) return token;
   const sing = token.replace(/(s|x)$/, '');
-  if (sing !== token && sing.length >= 3 && info.words.has(sing)) return sing;
-  return null;
+  const formes = [...new Set([token, sing, token + 's'])].filter(w => w.length >= 3 && info.words.has(w));
+  return formes.length ? formes : null;
 }
 
 // Mots de la question à chercher dans les intitulés, et mots d'option introuvables
@@ -785,8 +858,8 @@ function formationTermsFromQuestion(table, question, otherFilters = []) {
     if (tok.length < 3 || /^\d+$/.test(tok) || FORMATION_TERM_STOP.has(tok) || covered.has(tok)) return;
     const form = formationWordForm(tok, info);
     if (!form) { if (forced.has(tok)) out.missing.push(labelFor(tok)); return; }
-    if (info.geo.has(form) && !forced.has(tok)) return; // Bordeaux, Gironde… : des lieux, pas des formations
-    if (out.terms.includes(form)) return;
+    if (form.some(w => info.geo.has(w)) && !forced.has(tok)) return; // Bordeaux, Gironde… : des lieux, pas des formations
+    if (out.terms.some(t => t.some(w => form.includes(w)))) return;
     out.terms.push(form);
     out.labels.push(labelFor(tok));
   });
@@ -812,7 +885,7 @@ function applyFormationTerms(plan) {
   if (found.missing.length) plan.unresolvedTerms = found.missing;
   if (!found.terms.length) return plan;
   const formFilters = (plan.filters || []).filter(f => isFormationFilter(f) && f.source !== 'termes_formation');
-  const coveredByPlanner = formFilters.length && found.terms.every(t => formFilters.some(f => normalizeText(f.value).split(' ').includes(t)));
+  const coveredByPlanner = formFilters.length && found.terms.every(t => formFilters.some(f => normalizeText(f.value).split(' ').some(w => t.includes(w))));
   if (coveredByPlanner) return plan;
   plan.filters = [...others, makeFormationTermsFilter(plan.table, found.terms, found.labels)];
   plan.mentionedCols = Array.from(new Set([...(plan.mentionedCols || []), ...info.cols]));
@@ -861,6 +934,82 @@ function applyListMode(plan) {
   return plan;
 }
 
+// v27.8 — open data (une ligne = une formation) : « combien de places / candidats / admis » = somme d'effectifs,
+// pas le nombre de formations.
+const MESURES_SOMME = [
+  { re: /\bplaces?\b|\bcapacites?\b/, col: /capacit/, unite: 'places' },
+  { re: /\bcandidates\b/, col: /effectif des candidates/, unite: 'candidates' },
+  { re: /\bboursiers?\b.*\badmis\b|\badmis\b.*\bboursiers?\b/, col: /admis boursiers/, unite: 'admis boursiers' },
+  { re: /\badmis(es)?\b|\bont accepte\b/, col: /ayant accepte.*admis/, unite: 'admis' },
+  { re: /\bpropositions?\b/, col: /recu une proposition/, unite: 'propositions' },
+  { re: /\bcandidats?\b|\bcandidatures?\b|\bvoeux\b/, col: /effectif total des candidats pour une formation/, unite: 'candidats' },
+];
+function applyMeasureSum(plan) {
+  if (!plan || !plan.table || plan.tool !== 'count_rows' || plan.table.rowUnit !== 'formation') return plan;
+  const q = normalizeText(plan.question || '');
+  if (/\b(combien|nombre) d(e|es)? ?(formations?|filieres?|offres?|etablissements?)\b/.test(q)) return plan;
+  const headers = plan.table.headers || [];
+  for (const m of MESURES_SOMME) {
+    if (!m.re.test(q)) continue;
+    const col = headers.find(h => m.col.test(normalizeText(h)));
+    if (!col) continue;
+    plan.tool = 'sum';
+    plan.sumCol = col;
+    plan.sumUnit = m.unite;
+    return plan;
+  }
+  return plan;
+}
+
+// v27.8 — garde-fou : un critère cité dans la question (boursiers, filles, apprentis, Pays Basque, public/privé,
+// sélective, lycée X, Gironde…) qui n'a donné aucun filtre → on s'arrête au lieu de répondre sur tout le fichier.
+const CONCEPTS_A_FILTRER = [
+  { re: /\bboursiers?\b|\bbourse\b/, mot: 'boursiers', ok: t => /bours/.test(t) },
+  { re: /\b(filles?|femmes?|feminins?|garcons?|hommes?|masculins?)\b/, mot: 'filles / garçons', ok: (t, f) => /sexe|genre/.test(t) || /^(f|m|h|feminin|masculin|femmes?|hommes?|filles?|garcons?)$/.test(normalizeText(f.value)) || (typeof plannerColumnKind === 'function' && plannerColumnKind(f.col) === 'sexe') },
+  { re: /\bapprenti(e|s|es)?\b|\bapprentissage\b|\balternance\b/, mot: 'apprentis', ok: t => /appr|altern/.test(t) },
+  { re: /\bbasques?\b/, mot: 'Pays Basque', ok: t => /basque/.test(t) },
+  { re: /\bpubli(c|cs|que|ques)\b|\bprive(e|s|es)?\b/, mot: 'public / privé', ok: t => /publi|priv|statut|secteur/.test(t) },
+  { re: /\bselecti(f|fs|ve|ves)\b/, mot: 'sélective', ok: t => /selecti/.test(t) },
+];
+const LIEUX_AMBIGUS = new Set('somme manche nord lot var ain cher orne oise eure gers aube aude gard jura tarn indre doubs loire marne meuse vienne creuse rhone yonne'.split(' '));
+function conceptsNonFiltres(plan) {
+  if (!plan || !plan.table || ['compare', 'chart_current', 'export_current_excel', 'export_current_csv'].includes(plan.tool)) return [];
+  const q = normalizeText(plan.question || '');
+  const filtres = (plan.filters || []).filter(Boolean);
+  // la colonne analysée ou additionnée compte aussi (« admis boursiers » → colonne « admis boursiers »)
+  const cibles = [plan.targetCol, plan.targetCol2, plan.sumCol].filter(Boolean).map(c => ({ col: c, value: '' }));
+  const texte = f => `${_hx(f.col)} ${normalizeText(f.value)} ${normalizeText(f.label || '')}`;
+  const manque = [];
+  CONCEPTS_A_FILTRER.forEach(c => {
+    if (!c.re.test(q)) return;
+    if (![...filtres, ...cibles].some(f => c.ok(texte(f), f))) manque.push(c.mot);
+  });
+  const lycee = q.match(/\blycee ([a-z]{3,})/);
+  if (lycee && !['general', 'generale', 'professionnel', 'technologique', 'agricole', 'origine', 'accueil'].includes(lycee[1])
+    && !filtres.some(f => normalizeText(f.value).split(' ').includes(lycee[1]))) manque.push(`lycée ${lycee[1]}`);
+  const lieux = (typeof plannerGeoNames !== 'undefined' && Array.isArray(plannerGeoNames)) ? plannerGeoNames : [];
+  lieux.forEach(l => {
+    if (l.length < 4 || LIEUX_AMBIGUS.has(l) || !new RegExp(`(^| )${l}( |$)`).test(q)) return;
+    if (!filtres.some(f => normalizeText(f.value).includes(l) || (f.terms || []).some(t => (Array.isArray(t) ? t : [t]).includes(l)))) manque.push(l);
+  });
+  return [...new Set(manque)];
+}
+function unresolvedConceptExecution(plan, manque, raison) {
+  const cols = (plan.table.headers || []).filter(h => !/^(id|manualSort)$/i.test(String(h)));
+  const quoi = raison || `je n'ai trouvé dans les données aucune colonne ni valeur pour « ${manque.join(' », « ')} »`;
+  const html = `<h4>Critère non reconnu</h4><p>Pour cette question, ${escapeHtml(quoi)} (${escapeHtml(plan.table.name || 'table active')}). `
+    + `Je ne donne donc pas de chiffre, plutôt qu'un résultat sur tout le fichier.</p>`
+    + (() => {
+      // colonnes chiffrées liées au critère (« % d'admis boursiers ») : elles mesurent, elles ne sélectionnent pas de lignes
+      const racines = (manque || []).map(m => normalizeText(m).split(' ')[0].slice(0, 5)).filter(r => r.length >= 4);
+      const liees = cols.filter(h => racines.some(r => _hx(h).includes(r)) && !_isEtatCol(plan.table, h));
+      return liees.length ? `<p>Colonnes chiffrées liées : ${liees.map(h => `« ${escapeHtml(h)} »`).join(', ')}. Elles donnent des effectifs ou des pourcentages par ligne, pas un critère pour choisir des lignes : demandez par exemple « combien d'admis ${escapeHtml(manque[0])} » ou « ${escapeHtml(manque[0])} moyen ».</p>` : '';
+    })()
+    + `<p><strong>Colonnes disponibles</strong> : ${cols.slice(0, 25).map(escapeHtml).join(' · ')}${cols.length > 25 ? ' …' : ''}</p>`
+    + `<p style="font-size:12px;color:var(--gris3)">Reformulez avec le nom d'une colonne ou une valeur présente dans le fichier, ou renommez la colonne concernée (par exemple « Boursier »).</p>`;
+  return { kind: 'unresolved', plan, result: { missing: manque, suggestions: [] }, text: `NON RECONNU : ${quoi}`, html };
+}
+
 // Calcul arrêté : un terme de la question ne correspond à aucune formation
 function unresolvedFormationExecution(plan, missing, termFilter) {
   const info = formationTermsInfo(plan.table);
@@ -904,7 +1053,8 @@ function inferMeasureIntent(question) {
   // Pattern valide : "répartition des formations par académie", "croise académie et formation"
   const _pivotByPar = q.match(/(?:r[eé]partition|distribution)\s+(?:des?|du|d[''´]|la|le)\s+(.+?)\s+par\s+([a-z\s]{3,40})(?:\s|$)/);
   if (_pivotByPar) {
-    const _isF = s => /formation|fili[eè]re|sp[eé]cialit[eé]|bts|but|licence|cpge|pr[eé]pa|dut|l1|grands?\s*groupe/.test(s);
+    // v27.8 — seulement les noms génériques : « des BTS » est un filtre, pas une dimension du croisement
+    const _isF = s => /formation|fili[eè]re|sp[eé]cialit[eé]|grands?\s*groupe/.test(s);
     const _isA = s => /acad[eé]mi/.test(s);
     const _isS = s => /s[eé]rie|bac|type\s+bac/.test(s);
     const d1 = _pivotByPar[1], d2 = _pivotByPar[2];
@@ -1027,7 +1177,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
     // à partir de filtres structurés validés, jamais depuis les résultats calculés
     // (moyenne, médiane, valeur de tableau, etc.).
     const plannerPlan = buildPlannerPlan(question, question, table, tool);
-    if (plannerPlan) return inheritConversationContext(applyListMode(applyFormationTerms(plannerPlan)), question);
+    if (plannerPlan) return inheritConversationContext(applyMeasureSum(applyListMode(applyFormationTerms(plannerPlan))), question);
   }
 
   // Fallback V16 si planner indisponible.
@@ -1037,7 +1187,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
   // V25.1 — idem : le fallback ne doit pas analyser le contexte textuel
   // précédent comme s'il s'agissait de la question utilisateur.
   const filters = detectFilters(table, normalizeText(question || ''), targetCol);
-  return inheritConversationContext(applyListMode(applyFormationTerms({
+  return inheritConversationContext(applyMeasureSum(applyListMode(applyFormationTerms({
     tool,
     table,
     filters,
@@ -1045,7 +1195,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
     mentionedCols,
     question,
     createdAt: new Date().toISOString()
-  })), question);
+  }))), question);
 }
 
 
@@ -1168,7 +1318,43 @@ function renderCurrentChartExecution(plan) {
 // V23.4 — garde-fou final anti-filtres parasites.
 // Cette fonction s'exécute juste avant le Data Engine. Elle empêche le planner
 // d'entraîner des filtres issus de colonnes détectées ou de valeurs exemples.
+// v27.8 — une même valeur trouvée dans deux colonnes (académie d'origine ET d'accueil, lycée d'origine ET d'accueil) :
+// on ne garde que la colonne voulue par la question, sinon le croisement des deux filtres vide le résultat.
+// « à Bordeaux » désigne la ville : le filtre d'académie de même nom est retiré (sauf si « académie » est écrit).
+function resolveRoleDuplicates(plan) {
+  if (!plan || !Array.isArray(plan.filters) || plan.filters.length < 2) return plan;
+  const q = normalizeText(plan.question || '');
+  const role = c => (typeof plannerColumnRole === 'function') ? plannerColumnRole(c) : { accueil: /accueil|accept/.test(_hx(c)), origine: /origine|scolarit/.test(_hx(c)) };
+  const veutOrigine = /venant|issus?|originaires?|provenant|scolaris|\borigine\b|\bd origine\b/.test(q);
+  const commune = plan.filters.filter(f => f.source === 'commune_a');
+  let filters = plan.filters;
+  if (commune.length && !/academi|departement|region/.test(q)) {
+    const vals = new Set(commune.map(f => normalizeText(f.value)));
+    filters = filters.filter(f => f.source === 'commune_a' || f.op === 'contains_all' || !vals.has(normalizeText(f.value)));
+  }
+  const groupes = new Map();
+  filters.forEach(f => {
+    if (!f || f.op === 'contains_all') return;
+    const k = `${f.op || 'eq'}|${normalizeText(f.value)}`;
+    if (!groupes.has(k)) groupes.set(k, []);
+    groupes.get(k).push(f);
+  });
+  const retirer = new Set();
+  groupes.forEach(g => {
+    const cols = new Set(g.map(f => f.col));
+    if (cols.size < 2) return;
+    const voulu = g.find(f => veutOrigine ? role(f.col).origine : role(f.col).accueil) || g[0];
+    g.forEach(f => { if (f !== voulu) retirer.add(f); });
+  });
+  plan.filters = filters.filter(f => !retirer.has(f));
+  return plan;
+}
+
 function finalSanitizeAnalysisPlan(plan) {
+  return resolveRoleDuplicates(_finalSanitizeAnalysisPlanBase(plan));
+}
+
+function _finalSanitizeAnalysisPlanBase(plan) {
   if (!plan) return plan;
   const q = normalizeText(plan.question || '');
   const state = getDataEngineState();
@@ -1190,7 +1376,9 @@ function finalSanitizeAnalysisPlan(plan) {
   };
 
   if (onlyBoursier) {
-    plan.filters = strict.filter(f => /boursier/i.test(f.col));
+    // v27.8 — colonne boursier reconnue aussi sous un nom abrégé (BOURS) : filtre du planner gardé
+    const viaStrict = strict.filter(f => /boursier/.test(_hx(f.col)));
+    plan.filters = viaStrict.length ? viaStrict : (plan.filters || []).filter(f => /boursier/.test(_hx(f.col)));
     plan.tool = 'count_rows';
     plan.targetCol = null;
     plan.targetCol2 = null;
@@ -1209,25 +1397,16 @@ function finalSanitizeAnalysisPlan(plan) {
       const cn = normalizeText(f.col);
       const val = normalizeText(f.value);
 
-      // V25.1 — garde-fou mémoire étanche.
-      // Une question explicite ne peut conserver qu'un filtre dont le concept ET
-      // la valeur sont réellement présents dans la question utilisateur.
-      // Les valeurs calculées précédemment (ex. moyenne/médiane 22) sont exclues.
-      if (/voeu|vœu/.test(cn)) {
-        if (!/voeu|vœu|voeux|vœux/.test(q)) return false;
-        if (/^\d+(?:[,.]\d+)?$/.test(val) && !new RegExp(`(^|\\D)${String(f.value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\D|$)`).test(plan.question || '')) return false;
-        return true;
-      }
-      // Pour chaque type de colonne : retourner true si le concept est dans la question,
-      // false sinon (fix v27.5.5 — le return false final supprimait les filtres valides)
-      if (/commune/.test(cn)) return /commune|ville/.test(q);
-      if (/etablissement|[eé]tablissement/.test(cn)) return /etablissement|[eé]tablissement|iut|universit|lyc[eé]e|cfa/.test(q);
-      if (/acad[eé]mie/.test(cn)) return /acad[eé]mie|bordeaux|toulouse|poitiers|limoges|paris|hors|sauf/.test(q);
-      if (/boursier/.test(cn)) return /boursier|bourse/.test(q);
-      if (/pays.*basque|zone.*basque/.test(cn)) return /basque|pays basque/.test(q);
-      if (/s[eé]rie|classe|bac/.test(cn)) return /bac|s[eé]rie|general|professionnel|technologique|stmg|sti2d|st2s|stl|std2a|stav/.test(q);
-      if (/formation|groupe|sp[eé]cialit[eé]|mention/.test(cn)) return /formation|but|dut|bts|licence|cpge|prepa|fili[eè]re|sp[eé]cialit[eé]/.test(q);
-      return false; // type de colonne non reconnu : exclure par défaut
+      // V25.1 — garde-fou mémoire étanche : une valeur numérique (ex. moyenne 22 calculée avant)
+      // n'est conservée que si elle figure dans la question.
+      if (/voeu|vœu/.test(cn) && !/voeu|vœu|voeux|vœux/.test(q)) return false;
+      // v27.8 — sauf colonne d'état codée 1 / 0 (Apprenti = 1) : c'est un état, pas un chiffre calculé
+      const etat01 = table && _distinctValues(table, f.col).every(x => /^(0|1)$/.test(String(x).trim()));
+      if (!etat01 && /^\d+(?:[,.]\d+)?$/.test(val) && !new RegExp(`(^|\\D)${String(f.value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\D|$)`).test(plan.question || '')) return false;
+      // v27.8 — depuis V25.1 le planner ne lit que la question : ses filtres en viennent.
+      // L'ancien tri par nom de colonne (« formation », « boursier »…) écartait à tort les filtres
+      // des colonnes abrégées (BOURS, GRP_FORM_ACC) ou nommées autrement (« Département de l'établissement »).
+      return true;
     });
     plan.filters = mergeFiltersUnique(kept, strict);
     return plan;
@@ -1643,6 +1822,8 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
   }
   // v27.7 — terme de formation introuvable, ou termes jamais réunis : on s'arrête (pas de total faux)
   if (plan.tool !== 'compare' && plan.tool !== 'chart_current' && plan.tool !== 'export_current_excel' && plan.tool !== 'export_current_csv') {
+    const manque = conceptsNonFiltres(plan);
+    if (manque.length) return unresolvedConceptExecution(plan, manque);
     const termFilter = (plan.filters || []).find(f => f && f.op === 'contains_all');
     if (plan.unresolvedTerms && plan.unresolvedTerms.length) return unresolvedFormationExecution(plan, plan.unresolvedTerms, termFilter);
     if (termFilter && !applyLocalActionFilters(plan.table.objects || [], [termFilter]).length) return unresolvedFormationExecution(plan, [], termFilter);
@@ -1702,6 +1883,13 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     rememberDataEngineExecution(exec);
     return exec;
   }
+  if (plan.tool === 'sum') {
+    const sum = rows.reduce((t, r) => { const x = Number(String(r?.[plan.sumCol] ?? '').replace(',', '.')); return isFinite(x) ? t + x : t; }, 0);
+    const result = { sum, count: rows.length, total: (plan.table.objects || []).length, col: plan.sumCol, unite: plan.sumUnit };
+    const exec = { kind: 'sum', plan, result, text: `SOMME ${plan.sumCol} = ${sum}`, html: renderDataEngineResultHtml('sum', plan, result) };
+    rememberDataEngineExecution(exec);
+    return exec;
+  }
   if (plan.tool === 'group_by' || plan.tool === 'top') {
     const col = plan.targetCol || plan.mentionedCols?.[0];
     if (!col) return null;
@@ -1735,8 +1923,14 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
   }
   if (plan.tool === 'stats') {
     const inferredStatsCol = inferNumericStatsColumn(plan.table, plan.question);
-    const col = inferredStatsCol || plan.targetCol || plan.mentionedCols?.[0];
-    if (!col) return null;
+    // v27.8 — plus de repli sur une colonne au hasard (numéro de candidat, session) : on le dit
+    // repli seulement si la question ne précise pas la mesure (« quelle est la moyenne ? ») ; « moyenne des vœux »
+    // sans colonne vœux reconnue → arrêt, pas la moyenne d'une autre colonne
+    const precise = normalizeText(plan.question || '').split(' ').some(w => w.length >= 4 && !STATS_MOTS_VIDES.has(w) && !/^(candidat|candidats|formation|formations|eleves|lignes)$/.test(w));
+    const repli = precise ? null : [plan.targetCol, ...(plan.mentionedCols || [])].find(c => c && !_isIdentifiantCol(c, plan.table)
+      && numericStats(plan.table.objects || [], c).numericCount >= Math.max(5, (plan.table.objects || []).length * 0.1));
+    const col = inferredStatsCol || repli;
+    if (!col) return unresolvedConceptExecution(plan, [], 'aucune colonne numérique ne correspond à la question');
     const stats = numericStats(rows, col);
     const exec = {
       kind: 'stats',
@@ -1791,20 +1985,34 @@ function numericStats(rows, col) {
 }
 
 
+// v27.8 — colonne numérique désignée par la question (« capacité », « taux d'accès », « vœux »).
+// Jamais un identifiant, un code ou la session (moyenne « 2025 »). null si la question ne désigne aucune colonne.
+const STATS_MOTS_VIDES = new Set('nombre moyen moyenne moyennes median mediane minimum maximum total dont pour avec parmi des les une quel quelle quels quelles est sont combien'.split(' '));
+function _isIdentifiantCol(h, table) {
+  if (/\b(id|identifiant|numero|session|annee|code|uai|cp|siret|insee)\b/.test(_hx(h))) return true;
+  // par le contenu : des entiers tous différents sur toutes les lignes (1, 2, 3…) = un numéro, pas une mesure
+  const rows = table?.objects || [];
+  if (rows.length < 20) return false;
+  const vals = rows.map(r => r?.[h]).filter(v => v !== '' && v !== null && v !== undefined);
+  return vals.length === rows.length && vals.every(v => Number.isInteger(Number(v))) && new Set(vals.map(String)).size === vals.length;
+}
 function inferNumericStatsColumn(table, question) {
   const q = normalizeText(question || '');
+  const motsQ = q.split(' ').filter(w => w.length >= 4 && !STATS_MOTS_VIDES.has(w));
+  const proche = (a, b) => a === b || a.replace(/(s|x)$/, '') === b.replace(/(s|x)$/, '');
   const headers = table.headers || Object.keys(table.objects?.[0] || {});
-  const candidates = headers.filter(h => h && !/^(id|manualSort)$/i.test(String(h))).map(h => {
-    const hn = normalizeText(h);
+  const candidates = headers.filter(h => h && !/^(id|manualSort)$/i.test(String(h)) && !_isIdentifiantCol(h, table)).map(h => {
+    const hn = _hx(h);
+    const stats = numericStats(table.objects || [], h);
+    if (stats.numericCount < Math.max(5, (table.objects || []).length * 0.1)) return null;
     let score = 0;
-    if (/voeu|vœu|voeux|vœux/.test(q) && /voeu|vœu|voeux|vœux/.test(hn)) score += 120;
+    if (/voeu|voeux/.test(q) && /voeu|voeux/.test(hn)) score += 120;
     if (/confirm/.test(q) && /confirm/.test(hn)) score += 80;
     if (/class/.test(q) && /class/.test(hn)) score += 50;
-    if (/moyen|moyenne/.test(q)) score += 10;
-    const stats = numericStats(table.objects || [], h);
-    if (stats.numericCount >= Math.max(5, (table.objects || []).length * 0.1)) score += 80;
+    const motsH = hn.split(' ').filter(w => w.length >= 4);
+    motsQ.forEach(w => { if (motsH.some(m => proche(m, w))) score += 60; });
     return { col: h, score, stats };
-  }).filter(x => x.score > 80).sort((a,b)=>b.score-a.score);
+  }).filter(x => x && x.score > 0).sort((a, b) => b.score - a.score);
   return candidates[0]?.col || null;
 }
 
@@ -1815,6 +2023,7 @@ function dataEngineResultToContext(exec) {
   let out = `=== DATA ENGINE V22 — RÉSULTAT CALCULÉ SUR LIGNES BRUTES ===\n`;
   out += `Outil : ${p.tool}\nSource : ${p.table?.source || 'Données'} · ${p.table?.name || 'table'}\nFiltres : ${filters}\n`;
   if (exec.kind === 'count') out += `Résultat : ${exec.result.count} ligne(s) sur ${exec.result.total}.\n`;
+  if (exec.kind === 'sum') out += `Résultat : ${exec.result.sum} ${exec.result.unite} (somme de « ${exec.result.col} ») sur ${exec.result.count} formation(s).\n`;
   if (exec.kind === 'unresolved') out += `Résultat : aucun calcul. ${exec.text}\nIntitulés proches : ${(exec.result?.suggestions || []).map(s => s.value).join(' ; ')}\n`;
   if (exec.kind === 'group_by' || exec.kind === 'top') {
     out += `Colonne de répartition : ${p.targetCol}\nLignes retenues : ${exec.result.total}\nValeurs renseignées : ${exec.result.filled}\n`;
@@ -1896,6 +2105,10 @@ function renderDataEngineResultHtml(tool, plan, result) {
     const clearTitle = (typeof extractBlockTitle === 'function') ? extractBlockTitle({ plan, result }, '') : 'Comptage';
     return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p>Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ${unit(result.count)} correspondant à la demande (${pct} du jeu de données).</p><p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
   }
+  if (tool === 'sum') {
+    const clearTitle = (typeof extractBlockTitle === 'function') ? extractBlockTitle({ plan, result }, '') : `${result.sum} ${result.unite}`;
+    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p>Il y a <strong>${result.sum.toLocaleString('fr-FR')}</strong> ${escapeHtml(result.unite)} au total, sur <strong>${result.count.toLocaleString('fr-FR')}</strong> ${unit(result.count)} retenue${result.count > 1 ? 's' : ''} (somme de la colonne « ${escapeHtml(result.col)} »).</p><p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
+  }
   if (tool === 'group_by' && plan.listMode) {
     // v27.7 — liste complète des intitulés distincts
     const rows = result.rows || [];
@@ -1941,5 +2154,5 @@ function shouldAnswerLocallyWithoutAlbert(exec) {
   // Les requêtes de comptage/répartition simples doivent être résolues par le moteur,
   // sinon Albert risque de répondre à partir d'un résumé incomplet.
   // v27.7 — « unresolved » : terme introuvable, on le dit plutôt que de laisser Albert inventer
-  return ['count','group_by','top','pivot','stats','export','compare','unresolved'].includes(exec.kind);
+  return ['count','group_by','top','pivot','stats','export','compare','unresolved','sum'].includes(exec.kind);
 }
