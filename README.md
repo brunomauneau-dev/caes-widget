@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-24 fichiers, 761 tests. Depuis la racine du repo :
+24 fichiers, 764 tests. Depuis la racine du repo :
 
 ```bash
 npm test

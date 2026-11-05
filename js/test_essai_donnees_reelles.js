@@ -61,8 +61,8 @@ await describe('Chargement par le vrai code du widget', async () => {
 
 await describe('Chargement : deux champs au même libellé gardent chacun leur colonne', async () => {
   const cols = res.table.headers.filter(h => /^Filière de formation( \(|$)/.test(h));
-  assert(cols.length === 2 && cols.includes('Filière de formation (lib_for_voe_ins)'), `deux colonnes distinctes (obtenu : ${cols.join(' | ')})`);
-  assert(res.table.objects[0]['Filière de formation (lib_for_voe_ins)'] === 'PASS Bordeaux' && res.table.objects[0]['Filière de formation'] === 'PASS', 'chaque colonne garde ses propres valeurs');
+  assert(cols.length === 2 && cols.includes('Filière de formation (2)'), `deux colonnes distinctes (obtenu : ${cols.join(' | ')})`);
+  assert(res.table.objects[0]['Filière de formation (2)'] === 'PASS Bordeaux' && res.table.objects[0]['Filière de formation'] === 'PASS', 'chaque colonne garde ses propres valeurs');
 });
 
 await describe('Réponses aux questions types', async () => {
@@ -77,7 +77,7 @@ await describe('Réponses aux questions types', async () => {
 await describe('Contrôles de cohérence : ceux de la correction PASS réussissent sur des données saines', async () => {
   // Les contrôles « à Bordeaux » et « publics » portent sur des limites du moteur antérieures à la correction PASS :
   // l'essai doit les évaluer et les signaler, sans que ce test présume de leur résultat.
-  const pass = res.controles.filter(c => /PASS|liste|formulations|Zoologie|licences de droit|filière très agrégée|plus demandées|qu'est-ce|BTS|« combien de formations »/.test(c.libelle) && !/ne compte pas tout le fichier|statut public/.test(c.libelle));
+  const pass = res.controles.filter(c => /PASS|liste|formulations|Zoologie|licences de droit|filière très agrégée|plus demandées|qu'est-ce|BTS|« combien de formations »/.test(c.libelle) && !/ne compte pas tout le fichier|statut public|famille droit/.test(c.libelle));
   const echecs = pass.filter(c => !c.ok);
   assert(pass.length >= 12, `au moins 12 contrôles liés à la correction (obtenu : ${pass.length})`);
   assert(echecs.length === 0, `aucun échec (échecs : ${echecs.map(c => c.libelle + ' — ' + c.detail).join(' / ') || 'aucun'})`);

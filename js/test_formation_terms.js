@@ -123,6 +123,10 @@ describe('Variantes reconnues', () => {
   assert(ask(ctx, 'combien de PASS ?').exec.result.count === 100, 'ponctuation ignorée');
   assert(ask(ctx, 'Combien de formations PASS option droit ?').exec.result.count === 40, 'majuscules / minuscules indifférentes');
   assert(ask(ctx, 'combien de licences de droit').exec.result.count === 200, '« licences de droit » → Licence Droit (200), pas PASS option Droit');
+  // Cas réel : la famille « Licence - Droit, économie, gestion » contient aussi « licence » et « droit »
+  const fam = makeCtx({ ...opendata(), objects: [...opendataRows(), ...Array.from({ length: 50 }, () => Object.fromEntries(H.map((h, j) => [h, [2025, 'Public', 'Université', 'Pau', 'Bordeaux', 'Licence', 'Licence - Droit, économie, gestion', 'Licence - Économie', 'Économie', 100][j]])))] });
+  assert(ask(fam, 'combien de licences de droit').exec.result.count === 200, '« licences de droit » → la colonne la plus précise (200), pas toute la famille droit-économie-gestion (250)');
+  assert(ask(fam, 'combien de licences économie').exec.result.count === 50, '« licences économie » → 50');
   const r = ask(ctx, 'quelles sont les options du PASS');
   assert(r.plan?.listMode === true && values(r.exec) === 'PASS option Biologie:60 | PASS option Droit:40', '« quelles sont les options du PASS » → liste');
 });

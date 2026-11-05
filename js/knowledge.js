@@ -609,7 +609,7 @@ async function loadDefaultOpenDataTable() {
       const l = label(n);
       const k = (vus.get(l) || 0) + 1;
       vus.set(l, k);
-      return k > 1 ? `${l} (${n})` : l;
+      return k > 1 ? `${l} (${k})` : l;
     });
     const objects = raw.map(row => {
       const o = {};

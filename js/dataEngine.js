@@ -887,7 +887,19 @@ function applyFormationTerms(plan) {
   const formFilters = (plan.filters || []).filter(f => isFormationFilter(f) && f.source !== 'termes_formation');
   const coveredByPlanner = formFilters.length && found.terms.every(t => formFilters.some(f => normalizeText(f.value).split(' ').some(w => t.includes(w))));
   if (coveredByPlanner) return plan;
-  plan.filters = [...others, makeFormationTermsFilter(plan.table, found.terms, found.labels)];
+  const filtre = makeFormationTermsFilter(plan.table, found.terms, found.labels);
+  // v27.8 — si une seule colonne contient tous les mots, on prend la plus précise (le moins de lignes) :
+  // « licences de droit » = « Licence - Droit », pas toute la famille « Licence - Droit, économie, gestion ».
+  // Sinon (« CPGE » + « MPSI » dans deux colonnes différentes), on cherche sur toutes les colonnes ensemble.
+  if (found.terms.length > 1) {
+    let meilleure = null;
+    info.cols.forEach(c => {
+      const n = applyLocalActionFilters(plan.table.objects || [], [{ ...filtre, cols: [c] }]).length;
+      if (n > 0 && (!meilleure || n < meilleure.n)) meilleure = { c, n };
+    });
+    if (meilleure) filtre.cols = [meilleure.c];
+  }
+  plan.filters = [...others, filtre];
   plan.mentionedCols = Array.from(new Set([...(plan.mentionedCols || []), ...info.cols]));
   return plan;
 }
