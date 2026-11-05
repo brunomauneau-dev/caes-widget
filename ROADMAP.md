@@ -55,6 +55,7 @@ parcoursup-opendata-reference-v1.json
 | ALB | Albert reçoit le sens détecté de chaque colonne (section « Sens des colonnes » de la synthèse) ; colonnes reconnues prioritaires dans les profils. Correctif : ligature « œ » perdue par `normalizeText` (« vœux » non reconnu dans le widget réel) | ✅ |
 | OD  | Sans table : open data Parcoursup France entière, session la plus récente détectée automatiquement, en-têtes lisibles, Albert prévenu qu'une ligne = une formation. Clé API Grist retirée du script de chargement | ✅ |
 | SRC | Sélecteur de source toujours visible : open data n-1 au lancement, table Grist sur choix, import Excel/CSV (bouton ou glisser-déposer, onglets, en-têtes sous titres). Réintroduit l'import de fichier retiré le 01/07 | ✅ |
+| FIC | Tests « fiches métiers » (5 jeux fictifs : SAIO, proviseur, CIO, responsable de formation, chargé d'études). Ont révélé et corrigé : boursier en O/N compté 0 ; « genre » non relié à Sexe ; statut « Admis » non reconnu ; filtres sur colonnes au nom non standard supprimés (« filles » → tout le monde) ; « répartition par <nom de colonne> » ignorant la colonne citée ; **information absente comptée comme tout le monde (« 80 boursiers »)** ; onglet « Notice » importé à la place des données | ✅ |
 | PN  | Données nationales Parcoursup n-1 → Grist : GitHub Actions (`load-parcoursup.yml`) + script Python (`scripts/load_parcoursup_to_grist.py`) + table `Parcoursup_National` (631 lignes, académie Bordeaux, session 2025) + intégration `knowledge.js` (`loadParcoursupNational`, `buildNationalDataContext`) | ✅ |
 
 ---

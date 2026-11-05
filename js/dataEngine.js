@@ -200,16 +200,16 @@ function pickColumnValue(table, col, kind) {
   const vals = Array.from(new Set((table?.objects || []).map(r => r?.[col]).filter(v => v !== undefined && v !== null && String(v).trim() !== '').map(v => String(v).trim())));
   const normVals = vals.map(v => ({ raw: v, n: normalizeText(v) }));
   if (kind === 'boursier_oui') {
-    return (normVals.find(x => /boursier/.test(x.n) && !/non/.test(x.n)) || normVals.find(x => /^oui$|yes|true|1/.test(x.n)))?.raw || 'Oui';
+    return (normVals.find(x => /boursier/.test(x.n) && !/non/.test(x.n)) || normVals.find(x => /^oui$|^o$|yes|true|1/.test(x.n)))?.raw || 'Oui';
   }
   if (kind === 'boursier_non') {
-    return (normVals.find(x => /non.*boursier|non/.test(x.n)) || normVals.find(x => /^non$|no|false|0/.test(x.n)))?.raw || 'Non';
+    return (normVals.find(x => /non.*boursier|non/.test(x.n)) || normVals.find(x => /^non$|^n$|no|false|0/.test(x.n)))?.raw || 'Non';
   }
   if (kind === 'oui') {
-    return (normVals.find(x => /^oui$|yes|true|1/.test(x.n)) || normVals.find(x => /oui/.test(x.n)))?.raw || 'oui';
+    return (normVals.find(x => /^oui$|^o$|yes|true|1/.test(x.n)) || normVals.find(x => /oui/.test(x.n)))?.raw || 'oui';
   }
   if (kind === 'non') {
-    return (normVals.find(x => /^non$|no|false|0/.test(x.n)) || normVals.find(x => /^non/.test(x.n)))?.raw || 'Non';
+    return (normVals.find(x => /^non$|^n$|no|false|0/.test(x.n)) || normVals.find(x => /^non/.test(x.n)))?.raw || 'Non';
   }
   return vals[0];
 }
@@ -1020,6 +1020,25 @@ function finalSanitizeAnalysisPlan(plan) {
       if (/pays.*basque|zone.*basque/.test(cn)) return /basque|pays basque/.test(q);
       if (/s[eé]rie|classe|bac/.test(cn)) return /bac|s[eé]rie|general|professionnel|technologique|stmg|sti2d|st2s|stl|std2a|stav/.test(q);
       if (/formation|groupe|sp[eé]cialit[eé]|mention/.test(cn)) return /formation|but|dut|bts|licence|cpge|prepa|fili[eè]re|sp[eé]cialit[eé]/.test(q);
+      // Colonne au nom non standard (table inconnue) : on garde le filtre si
+      // la valeur est citée dans la question (« filles » → Genre = Fille) ou
+      // si le sens détecté de la colonne correspond à la question.
+      if (val.length >= 3 && q.includes(val)) return true;
+      const kind = (typeof window !== 'undefined' && typeof window.plannerColumnKind === 'function') ? window.plannerColumnKind(f.col) : 'generic';
+      const KIND_CONCEPTS = {
+        admission: /admis|admise|admission|accept|favorable|proposition|refus|attente/,
+        sexe: /sexe|genre|fille|garcon|homme|femme|masculin|feminin/,
+        bac_series: /bac|s[eé]rie|voie|general|professionnel|technologique|stmg|sti2d|st2s|stl|std2a|stav/,
+        departement: /d[eé]partement|dpt|gironde|landes|dordogne|pyrenees|lot et garonne/,
+        apprentissage: /apprenti|apprentissage/,
+        boursier: /boursier|bourse/,
+        zone_basque: /basque/,
+        academie: /acad[eé]mie|bordeaux|toulouse|poitiers|limoges|paris/,
+        formation: /formation|but|dut|bts|licence|cpge|prepa|fili[eè]re|sp[eé]cialit[eé]/,
+        nb_voeux: /voeu|voeux/,
+        voeu: /voeu|voeux/
+      };
+      if (KIND_CONCEPTS[kind]) return KIND_CONCEPTS[kind].test(q);
       return false; // type de colonne non reconnu : exclure par défaut
     });
     plan.filters = mergeFiltersUnique(kept, strict);
@@ -1418,9 +1437,62 @@ function renderCompareHtml(plan, result) {
   return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p>Base comparée : <strong>${baseTotal.toLocaleString('fr-FR')}</strong> lignes.</p><section class="de-section de-population" style="margin:12px 0;padding:12px;border:1px solid var(--gris2,#e5e7eb);border-radius:10px;background:#fff"><div style="overflow:auto"><table style="border-collapse:separate;border-spacing:0;width:100%;font-size:12px;min-width:360px"><tbody><tr><th style="text-align:left;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Population</th><th style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Nombre</th><th style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Part</th></tr>${tableRows}</tbody></table></div>${missingNote}</section>${filtersHtml}${insights}${charts}${statsTable}${detailsTables}${debug}`;
 }
 
+/* ─────────── Garde-fou : information demandée absente de la source ───────────
+   Sans ce contrôle, « Combien de boursiers ? » sur une table sans colonne
+   boursier comptait TOUTES les lignes et l'affichait comme « calcul exact ».
+   Si la question porte sur une notion qu'aucune colonne de la source ne
+   contient, le moteur le dit au lieu de donner un chiffre faux. */
+const QUESTION_CONCEPTS = [
+  { label: 'statut boursier', q: /\bboursier|\bbourse/, kinds: ['boursier'] },
+  { label: 'zone Pays Basque', q: /basque/, kinds: ['zone_basque'] },
+  { label: 'sexe / genre', q: /\b(filles?|garcons?|femmes?|hommes?|sexe|genre|feminin|masculin)\b/, kinds: ['sexe'] },
+  { label: 'académie', q: /\bacademie/, kinds: ['academie'] },
+  { label: 'apprentissage', q: /\bapprenti/, kinds: ['apprentissage'] },
+  { label: 'département', q: /\bdepartement/, kinds: ['departement'] },
+  { label: 'série / voie du bac', q: /\bseries?\b|\bvoies?\b/, kinds: ['bac_series'] },
+  { label: 'admission / proposition', q: /\badmis|\bpropositions?\b/, kinds: ['admission'] },
+  { label: 'vœux', q: /\bvoeux?\b/, kinds: ['nb_voeux', 'voeu'] },
+  { label: 'commune', q: /\bcommunes?\b|\bvilles?\b/, kinds: ['commune'] },
+];
+
+function missingConceptsForQuestion(table, question) {
+  if (!table || !table.objects || !table.objects.length) return [];
+  if (typeof window === 'undefined' || typeof window.plannerColumnKind !== 'function') return [];
+  const q = normalizeText(question || '');
+  const asked = QUESTION_CONCEPTS.filter(c => c.q.test(q));
+  if (!asked.length) return [];
+  const headers = (table.headers || Object.keys(table.objects[0] || {})).filter(h => h && !/^(id|manualSort)$/i.test(h));
+  const kinds = new Set(headers.map(h => {
+    try {
+      const values = topCountsForRows(table.objects, h, 250).top.map(x => ({ value: x.value, count: x.count }));
+      return window.plannerColumnKind(h, values);
+    } catch (e) { return 'generic'; }
+  }));
+  return asked
+    .filter(c => !c.kinds.some(k => kinds.has(k)))
+    // Un intitulé qui nomme la notion compte aussi (colonne au contenu atypique)
+    .filter(c => !headers.some(h => c.q.test(normalizeText(h))))
+    .map(c => c.label);
+}
+
+function renderMissingConceptHtml(plan, missing) {
+  const src = (typeof activeSourceLabel === 'function') ? activeSourceLabel() : (plan.table?.name || 'la source active');
+  return `<div class="de-missing" style="border-left:3px solid #d97706;background:#fffbeb;padding:10px 12px;border-radius:8px">` +
+    `<strong>Information absente de la source active</strong><br>` +
+    `La source « ${escapeHtml(src)} » ne contient pas de colonne sur : <strong>${missing.map(escapeHtml).join(', ')}</strong>. ` +
+    `Je ne peux donc pas calculer ce résultat sans risquer un chiffre faux.<br>` +
+    `<span style="color:var(--gris3,#6b7280)">Changez de source avec le sélecteur sous la conversation, ou importez un fichier qui contient cette information.</span></div>`;
+}
+
 function runDataEnginePlan(plan, persistentFiltersOverride) {
   plan = finalSanitizeAnalysisPlan(plan);
   if (!plan || !plan.table) return null;
+  if (!['chart_current', 'export_current_excel', 'export_current_csv'].includes(plan.tool)) {
+    const missing = missingConceptsForQuestion(plan.table, plan.question);
+    if (missing.length) {
+      return { kind: 'missing', plan, result: { missing }, text: `MISSING = ${missing.join(', ')}`, html: renderMissingConceptHtml(plan, missing) };
+    }
+  }
   // Re-injection des filtres persistants APRES le sanitize.
   // Comparaison par COLONNE uniquement (pas par {col,op,value}) pour éviter
   // d'ajouter "Zone = oui" quand la question a explicitement posé "Zone ≠ oui".
@@ -1600,6 +1672,7 @@ function dataEngineResultToContext(exec) {
   const filters = (p.filters || []).map(f => `${f.col} ${f.op === 'neq' ? '≠' : '='} "${f.value}"`).join(' ; ') || 'aucun';
   let out = `=== DATA ENGINE V22 — RÉSULTAT CALCULÉ SUR LIGNES BRUTES ===\n`;
   out += `Outil : ${p.tool}\nSource : ${p.table?.source || 'Données'} · ${p.table?.name || 'table'}\nFiltres : ${filters}\n`;
+  if (exec.kind === 'missing') out += `Résultat : impossible — la source ne contient pas de colonne sur : ${(exec.result.missing || []).join(', ')}.\n`;
   if (exec.kind === 'count') out += `Résultat : ${exec.result.count} ligne(s) sur ${exec.result.total}.\n`;
   if (exec.kind === 'group_by' || exec.kind === 'top') {
     out += `Colonne de répartition : ${p.targetCol}\nLignes retenues : ${exec.result.total}\nValeurs renseignées : ${exec.result.filled}\n`;
@@ -1714,5 +1787,7 @@ function shouldAnswerLocallyWithoutAlbert(exec) {
   if (!exec) return false;
   // Les requêtes de comptage/répartition simples doivent être résolues par le moteur,
   // sinon Albert risque de répondre à partir d'un résumé incomplet.
-  return ['count','group_by','top','pivot','stats','export','compare'].includes(exec.kind);
+  // 'missing' : l'information demandée n'existe pas dans la source → on le dit
+  // directement, plutôt que de laisser Albert improviser un chiffre.
+  return ['count','group_by','top','pivot','stats','export','compare','missing'].includes(exec.kind);
 }

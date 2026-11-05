@@ -141,7 +141,7 @@
     if (!vals.length) return 'generic';
     const normed = vals.map(v => nrm(v.value));
     // Booléens et nombres : le contenu ne dit rien du sens de la colonne
-    if (normed.every(v => /^(oui|non|yes|no|true|false|vrai|faux|0|1)$/.test(v))) return 'generic';
+    if (normed.every(v => /^(oui|non|yes|no|true|false|vrai|faux|0|1|o|n)$/.test(v))) return 'generic';
     if (normed.filter(v => /^-?\d+([ .,]\d+)?$/.test(v)).length >= normed.length * 0.8) return 'generic';
     // Codes UAI (7 chiffres + 1 lettre) → identifiant technique
     if (normed.filter(v => /^\d{7}[a-z]$/.test(v)).length >= normed.length * 0.8) return 'generic';
@@ -151,6 +151,7 @@
     const stripDept = v => v.replace(/^\d{1,3}[ab]? /, '').replace(/^(departement|dept|dpt)( de la| du| des| de| d)? /, '');
 
     if (distinct <= 3 && normed.every(v => /^(f|m|h|feminin|masculin|femme|homme|fille|garcon|femmes|hommes)$/.test(v))) return 'sexe';
+    if (distinct <= 12 && valueShare(vals, v => /^(admis|admise|non admis|refuse|refusee|accepte|acceptee|proposition acceptee|proposition refusee|en attente|en liste d attente|liste d attente|desiste|desistee|demission|demissionnaire)$/.test(v)) >= 0.6) return 'admission';
     if (distinct <= 40 && valueShare(vals, v => /\b(general|generale|technologique|professionnel|professionnelle|stmg|sti2d|st2s|stl|std2a|stav|s2tmd|sthr|tmd|bac pro|non bachelier|dael)\b/.test(v)) >= 0.6) return 'bac_series';
     if (distinct >= 2 && distinct <= 40 && valueShare(vals, v => ACADEMIE_SET.has(stripAcad(v))) >= 0.7) return 'academie';
     if (distinct >= 2 && valueShare(vals, v => DEPARTEMENT_SET.has(stripDept(v))) >= 0.7) return 'departement';
@@ -332,7 +333,8 @@
   /* ═══════════════════════ VALUE ALIASES ═══════════════════════ */
 
   function booleanValue(entry, yes) {
-    const wanted = yes ? ['oui','yes','true','vrai','1'] : ['non','no','false','faux','0'];
+    // « O/N » (fréquent dans les exports de lycée) compte comme Oui/Non
+    const wanted = yes ? ['oui','yes','true','vrai','1','o','y'] : ['non','no','false','faux','0','n'];
     return (entry.values || []).find(v => wanted.includes(nrm(v.value))) || null;
   }
 
@@ -403,7 +405,7 @@
     if (k === 'academie' && /(academie|académie|academique|hors bordeaux|bordeaux|toulouse|poitiers|limoges)/.test(q)) s += 80;
     if (k === 'admission' && /(admis|admission|accept|favorable|proposition acceptee|réponse favorable|reponse favorable)/.test(q)) s += 80;
     if (k === 'apprentissage' && /(apprenti|apprentissage)/.test(q)) s += 80;
-    if (k === 'sexe' && /(sexe|homme|femme|masculin|feminin|féminin)/.test(q)) s += 60;
+    if (k === 'sexe' && /(sexe|genre|homme|femme|masculin|feminin|féminin|fille|garcon|garçon)/.test(q)) s += 60;
     if (k === 'departement' && /(departement|département|gironde|landes|pyrenees|pyrénées)/.test(q)) s += 60;
     if (k === 'commune' && /(commune|ville)/.test(q)) s += 55;
     return s;
@@ -439,7 +441,7 @@
     if (k === 'academie') return /academie|académie|academique|bordeaux|toulouse|poitiers|limoges/.test(q);
     if (k === 'departement') return /departement|département|gironde|landes|pyrenees|pyrénées/.test(q);
     if (k === 'commune') return /commune|ville/.test(q);
-    if (k === 'sexe') return /sexe|homme|femme|masculin|feminin|féminin|fille|garcon|garçon/.test(q);
+    if (k === 'sexe') return /sexe|genre|homme|femme|masculin|feminin|féminin|fille|garcon|garçon/.test(q);
     if (k === 'voeu') return /voeu|voeux|vœu|vœux/.test(q);
     if (k === 'year') return /annee|année|session|campagne|202[0-9]/.test(q);
     return true;
@@ -650,7 +652,8 @@
       // Ne déclencher que si la question parle d'un statut candidat, pas seulement d'une colonne formation d'accueil acceptée.
       const e = bestColumn(schema, x => x.kind === 'admission', q);
       if (e) {
-        const v = booleanValue(e, true) || findValue(e, ['oui','true','1']);
+        // Colonne Oui/Non, ou colonne de statut en clair (« Admis », « Proposition acceptée »)
+        const v = booleanValue(e, true) || findValue(e, ['oui','true','1','admis','admise','accepte','acceptee','proposition acceptee']);
         if (v) upsertCandidateFilter(filters, { entry: e, item: v, alias: 'admis / réponse favorable', op: 'eq', score: 235 }, reasons);
       }
     }
@@ -683,6 +686,9 @@
         let s = contextScore(e, q) + columnPriority(e, q) / 3;
         const ctoks = tokens(e.column);
         phraseTokens.forEach(t => { if (ctoks.includes(t) || e.norm.includes(t)) s += 28; });
+        // Colonne citée par son nom complet (« répartition par statut de la
+        // candidature ») : c'est elle, quel que soit le score métier des autres.
+        if (e.norm.length >= 4 && ` ${ph} `.includes(` ${e.norm} `)) s += 250;
 
         if (/academie|academique/.test(ph) && e.kind === 'academie') s += e.role.accueil ? 140 : 45;
         if (/serie|bac/.test(ph) && e.kind === 'bac_series') {

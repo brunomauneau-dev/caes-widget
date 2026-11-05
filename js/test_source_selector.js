@@ -92,7 +92,7 @@ await describe('Import Excel (classeur simulé, plusieurs onglets)', async () =>
     })[ws] }
   };
   const t = await run(ctx, 'importSpreadsheetFile')(fakeFile('suivi.xlsx', 'x'));
-  assert(t.sheetName === 'Données', 'onglet vide ignoré : premier onglet avec des données retenu');
+  assert(t.sheetName === 'Données', 'onglet vide ignoré : l\'onglet le plus fourni est retenu');
   assert(t.headers.join('|') === 'Nom|Série|Date', 'en-têtes trouvés sous le titre');
   assert(t.objects[0].Date === '2026-06-30', 'dates converties en texte AAAA-MM-JJ');
   run(ctx, 'selectImportedSheet("Bilan")');
@@ -100,6 +100,20 @@ await describe('Import Excel (classeur simulé, plusieurs onglets)', async () =>
   let err = '';
   try { run(ctx, 'selectImportedSheet("Notice")'); } catch (e) { err = e.message; }
   assert(/ne contient pas de données/.test(err), 'onglet vide choisi → message clair');
+});
+
+await describe('Classeur avec onglet « Notice » en premier', async () => {
+  const ctx = makeCtx();
+  ctx.XLSX = {
+    read: () => ({ SheetNames: ['Notice', 'Export'], Sheets: { Notice: 'n', Export: 'e' } }),
+    utils: { sheet_to_json: ws => ({
+      n: [['Export BusinessObjects — mode d\'emploi'], ['Ne pas modifier ce fichier'], ['Contact : SAIO']],
+      e: [['Nom', 'Boursier'], ['Dupont', 'Oui'], ['Martin', 'Non']],
+    })[ws] }
+  };
+  const t = await run(ctx, 'importSpreadsheetFile')(fakeFile('export.xlsx', 'x'));
+  assert(t.sheetName === 'Export', 'onglet de texte (une colonne) ignoré au profit du vrai tableau');
+  assert(t.headers.join('|') === 'Nom|Boursier', 'en-têtes du vrai tableau');
 });
 
 await describe('Fichiers refusés', async () => {

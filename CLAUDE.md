@@ -13,6 +13,8 @@ L'utilisateur n'est pas développeur. Il faut lui expliquer simplement ce qui ch
 - **Les tests ne font aucun appel réseau** : les API (open data, Albert, Cloudflare) sont simulées.
 - **Lancer toute la suite avant chaque commit :** `npm test`. Elle s'arrête au premier fichier en échec, donc lancer aussi chaque fichier séparément pour voir tous les échecs. GitHub Actions (`tests.yml`) relance la suite à chaque push.
 - **Interface modifiée :** vérifier aussi dans Chromium (Playwright). Simuler `window.grist` avec `addInitScript`, sinon `albert.js` s'arrête sur `grist.ready`. Simuler aussi les API avec `page.route`.
+- **Fiches métiers :** toute évolution de la détection de colonnes, du planner ou du moteur doit garder `js/test_fiches_metiers.js` au vert. Quand une réponse fausse est signalée, ajouter la question et sa valeur attendue (recalculée sur les lignes) dans `tests/fixtures/fiches_metiers.mjs`. Données toujours fictives.
+- **Ne jamais afficher un chiffre faux comme « calcul exact ».** Si l'information demandée n'existe pas dans la source, le moteur doit le dire (`missingConceptsForQuestion` dans `dataEngine.js`).
 - **Mettre à jour le nombre de tests** dans le README (section « Suite de tests »).
 
 Format d'un fichier de test : module ESM autonome, avec les fonctions `assert(cond, libellé)` et `describe(...)`. Il affiche `Résultat : N ✓  M ✗  (T tests)` et sort avec `process.exit(1)` en cas d'échec. Prendre modèle sur `js/test_source_selector.js`.

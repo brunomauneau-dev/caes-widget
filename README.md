@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-23 fichiers, 498 tests. Depuis la racine du repo :
+22 fichiers, 618 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -87,6 +87,32 @@ npm test
 
 Cette commande lance tous les fichiers `js/*.test.js` et `js/test_*.js` et s'arrête au premier échec.
 Les tests sont aussi lancés **automatiquement par GitHub à chaque modification** (onglet *Actions* du repo, workflow `Tests`) : une coche verte ✅ signifie que tout passe, une croix rouge ❌ qu'un test a échoué.
+
+### Fiches métiers (données fictives)
+
+`tests/fixtures/fiches_metiers.mjs` décrit 5 jeux de données **fictifs**, un par métier, avec leur façon de nommer les colonnes :
+
+| Fiche | Fichier | Particularités |
+|---|---|---|
+| SAIO / rectorat | `saio_export_bo_academie.xlsx` | Export BO, intitulés longs, lignes de titre au-dessus |
+| Proviseur de lycée | `proviseur_suivi_terminales.csv` | En-têtes abrégés (`SERIE_BAC`, `LIB_FORM_ACC`), boursier en O/N |
+| Psy-EN / CIO | `cio_suivi_entretiens.xlsx` | Colonnes courtes (`Genre`, `Dpt`, `Voie`) : le sens se lit dans les valeurs |
+| Responsable de formation | `formation_bts_candidatures.xlsx` | Statut en clair (Admis / liste d'attente / refusé) |
+| Chargé d'études | `etudes_formations_agregees.csv` | Une ligne par formation (capacités, vœux, admis) |
+
+`js/test_fiches_metiers.js` importe chaque fichier par le vrai chemin d'import, puis vérifie :
+- le sens détecté de chaque colonne ;
+- la réponse exacte aux questions métier, recalculée indépendamment du moteur ;
+- ce qu'Albert reçoit ;
+- qu'une question sur une information **absente** du fichier ne produit pas de chiffre.
+
+Les fichiers prêts à importer à la main dans le widget sont dans `tests/fixtures/fichiers/`. Pour les régénérer :
+
+```bash
+npm install --no-save xlsx@0.18.5 && node tests/fixtures/generer_fichiers.mjs
+```
+
+**Quand un bug de réponse est signalé,** ajoutez la question et la valeur attendue à la fiche concernée, ou créez une fiche.
 
 Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package.json`).
 

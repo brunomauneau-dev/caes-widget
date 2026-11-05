@@ -370,11 +370,15 @@ async function importSpreadsheetFile(file) {
     if (typeof XLSX === 'undefined') throw new Error('La bibliothèque de lecture Excel n\'est pas chargée. Rechargez le widget.');
     const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
     const sheets = workbook.SheetNames || [];
-    // Premier onglet qui contient des données
-    let sheet = sheets[0], table = null;
+    // Onglet qui contient le vrai tableau : on ignore les onglets « Notice »
+    // ou « Sommaire » (une seule colonne de texte) et on retient le plus
+    // fourni (lignes × colonnes). À égalité, le premier.
+    let sheet = sheets[0], table = null, best = -1;
     for (const sh of sheets) {
-      table = buildImportedTable(file.name, sheets.length > 1 ? sh : '', sheetRows(workbook, sh));
-      if (table) { sheet = sh; break; }
+      const t = buildImportedTable(file.name, sheets.length > 1 ? sh : '', sheetRows(workbook, sh));
+      if (!t) continue;
+      const score = t.headers.length >= 2 ? t.objects.length * t.headers.length : 0;
+      if (score > best) { best = score; table = t; sheet = sh; }
     }
     info = { name: file.name, sheets, sheet, workbook, table };
   }
