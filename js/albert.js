@@ -14,7 +14,7 @@ function closeConfig() {
 }
 async function clearConfig() {
   if (!confirm('Effacer la clé API sauvegardée ?')) return;
-  albertConfig = { key: '', endpoint: 'https://app-6fb1a617-d3e3-4989-9dcb-b396964f246e.cleverapps.io/v1/chat/completions', model: 'openweight-large' };
+  albertConfig = { key: '', endpoint: ALBERT_DEFAULT_ENDPOINT, model: 'openweight-large' };
   try {
     await Storage.delete('albert-config');
   } catch(e) {}
@@ -53,7 +53,11 @@ async function loadAlbertConfig() {
     const saved = await Storage.get('albert-config');
     if (saved && saved.value) {
       const parsed = JSON.parse(saved.value);
+      // Ancien proxy (Clever Cloud, arrêté) mémorisé → nouvelle adresse
+      const obsolete = !parsed.endpoint || ALBERT_OBSOLETE_ENDPOINTS.some(re => re.test(parsed.endpoint));
+      if (obsolete) parsed.endpoint = ALBERT_DEFAULT_ENDPOINT;
       albertConfig = { ...albertConfig, ...parsed };
+      if (obsolete) { try { await Storage.set('albert-config', JSON.stringify(albertConfig)); } catch (e) {} }
       updateConfigStatusBadge();
     }
   } catch(e) {

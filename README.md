@@ -54,7 +54,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 | `server.js` | Proxy Express (Clever Cloud) : relaie `/v1/*` vers Albert API en ajoutant la clé et les en-têtes CORS. `/health` → `{"status":"ok"}` |
 | `package.json` | `start: node server.js` + dépendance `express` — **indispensables** au déploiement |
 
-- **Option gratuite recommandée : Cloudflare Workers** — code `proxy/cloudflare-worker.js`, guide pas à pas `proxy/README.md`.
+- **En service : Cloudflare Workers (gratuit)** — `https://albert-proxy.bruno-mauneau.workers.dev` (vérification : `/health`). Code `proxy/cloudflare-worker.js`, guide `proxy/README.md`. Adresse par défaut du widget : `ALBERT_DEFAULT_ENDPOINT` dans `js/config.js` ; une ancienne adresse Clever Cloud mémorisée dans le navigateur est remplacée automatiquement.
 - Option historique : **Clever Cloud** (application `caes-widget`, payante), redéployée automatiquement à chaque fusion sur `main`. Arrêtée le 05/11/2026 (facture impayée).
 - Variables d'environnement à définir dans Clever Cloud : `ALBERT_API_KEY` (obligatoire), `ALBERT_BASE_URL` (défaut : `https://albert.api.etalab.gouv.fr`), `ALLOWED_ORIGIN` (défaut : `*`).
 - Adresse utilisée par le widget : réglage ⚙️ « endpoint » (`js/config.js`).

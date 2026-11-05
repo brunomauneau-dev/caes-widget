@@ -72,9 +72,15 @@ const INFOGRAPH_THEMES = [
 ];
 let _icState = { blocks: [], theme: 'bleu-france', dragSrcIdx: null };
 
+// Proxy Albert : Cloudflare Workers (gratuit) — voir proxy/README.md
+const ALBERT_DEFAULT_ENDPOINT = 'https://albert-proxy.bruno-mauneau.workers.dev/v1/chat/completions';
+// Anciennes adresses du proxy, remplacées automatiquement si elles sont
+// encore mémorisées dans le navigateur d'un utilisateur
+const ALBERT_OBSOLETE_ENDPOINTS = [/cleverapps\.io/i];
+
 let albertConfig = {
   key: '',
-  endpoint: 'https://app-6fb1a617-d3e3-4989-9dcb-b396964f246e.cleverapps.io/v1/chat/completions',
+  endpoint: ALBERT_DEFAULT_ENDPOINT,
   model: 'openweight-large'
 };
 
