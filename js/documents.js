@@ -194,26 +194,206 @@ function buildGristQueryTable() {
   return { source: 'Grist', name: 'Table Grist connectée', headers: allFields, objects: gristRecords };
 }
 
-function getActiveQueryTables() {
-  // Priorité absolue à Grist : si une table est connectée, on analyse ses lignes,
-  // pas le résumé Excel éventuellement déposé dans le widget.
-  const gristTable = buildGristQueryTable();
-  if (gristTable && gristTable.objects && gristTable.objects.length) return [gristTable];
+/* ═══════════════════════ SOURCE ACTIVE ═══════════════════════
+   Une seule source à la fois, choisie dans le sélecteur au-dessus de la
+   zone de question :
+   - 'opendata' (par défaut au lancement) : open data Parcoursup n-1
+   - 'grist'    : la table Grist liée au widget (sur choix explicite)
+   - 'file'     : un fichier Excel / CSV importé (reste dans le navigateur)
+   Si la source choisie n'est pas disponible, on se replie sur l'open data. */
+let activeSourceKind = 'opendata';
+let importedFile = null; // { name, sheets: [noms], sheet, workbook, table }
 
-  const selected = documents.filter(d => selectedDocIds.has(d.id) && d.status === 'ok' && d.tables && d.tables.length);
-  const docsToUse = selected.length ? selected : documents.filter(d => d.status === 'ok' && d.tables && d.tables.length);
-  const tables = [];
-  docsToUse.forEach(doc => {
-    doc.tables.forEach(table => {
-      tables.push({ ...table, source: 'Excel', docName: doc.name });
-    });
+function getActiveSourceKind() {
+  if (activeSourceKind === 'grist' && (typeof gristRecords === 'undefined' || !gristRecords || !gristRecords.length)) return 'opendata';
+  if (activeSourceKind === 'file' && !(importedFile && importedFile.table)) return 'opendata';
+  return activeSourceKind;
+}
+
+function isGristSourceActive() {
+  return getActiveSourceKind() === 'grist';
+}
+
+function refreshSourceUI() {
+  ['updateSourceHub', 'renderContextPills', 'updateChatSub', 'renderSuggestions', 'renderMiniSuggestions'].forEach(fn => {
+    try { if (typeof window !== 'undefined' && typeof window[fn] === 'function') window[fn](); } catch (e) { /* UI absente */ }
   });
-  // Ni Grist ni fichier : open data Parcoursup (session la plus récente)
-  if (!tables.length && typeof getDefaultOpenDataTable === 'function') {
+}
+
+// Change de source. Le contexte d'analyse (filtres, historique) est remis à
+// zéro : des filtres posés sur une source n'ont pas de sens sur une autre.
+function setActiveSource(kind) {
+  const next = ['opendata', 'grist', 'file'].includes(kind) ? kind : 'opendata';
+  const changed = next !== getActiveSourceKind();
+  activeSourceKind = next;
+  if (changed && typeof resetContextSilent === 'function') { try { resetContextSilent(); } catch (e) {} }
+  refreshSourceUI();
+  return getActiveSourceKind();
+}
+
+function clearImportedFile() {
+  importedFile = null;
+  if (activeSourceKind === 'file') setActiveSource('opendata');
+  else refreshSourceUI();
+}
+
+function getActiveQueryTables() {
+  const kind = getActiveSourceKind();
+  if (kind === 'grist') {
+    const gristTable = buildGristQueryTable();
+    if (gristTable && gristTable.objects && gristTable.objects.length) return [gristTable];
+  }
+  if (kind === 'file' && importedFile && importedFile.table) return [importedFile.table];
+
+  // Open data Parcoursup (source par défaut)
+  if (typeof getDefaultOpenDataTable === 'function') {
     const def = getDefaultOpenDataTable();
     if (def && def.objects && def.objects.length) return [def];
   }
-  return tables;
+  return [];
+}
+
+/* ─────────── Import d'un fichier Excel / CSV ───────────
+   Le fichier est lu dans le navigateur (rien n'est envoyé ailleurs) et
+   transformé en table : en-têtes + lignes. Gère les exports dont la
+   ligne d'en-têtes n'est pas la première (titres, lignes vides au-dessus). */
+const IMPORT_EXTENSIONS = /\.(xlsx|xlsm|xls|ods|csv|txt)$/i;
+const IMPORT_MAX_BYTES = 50 * 1024 * 1024;
+
+function cellToValue(v) {
+  if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v)) {
+    const p = n => String(n).padStart(2, '0');
+    return `${v.getFullYear()}-${p(v.getMonth() + 1)}-${p(v.getDate())}`;
+  }
+  if (typeof v === 'string') return v.trim();
+  return v === null || v === undefined ? '' : v;
+}
+
+// Tableau de lignes (tableaux de cellules) → table { headers, objects }
+function rowsToTable(rows) {
+  const clean = (rows || []).map(r => (r || []).map(cellToValue));
+  const filled = r => r.filter(c => c !== '' && c !== null && c !== undefined).length;
+  const nonEmpty = clean.filter(r => filled(r) > 0);
+  if (!nonEmpty.length) return null;
+  const maxCols = Math.max(...nonEmpty.slice(0, 50).map(filled));
+  // Ligne d'en-têtes : la première (parmi les 15 premières) assez remplie,
+  // composée surtout de textes
+  let h = clean.findIndex((r, i) => i < 15 && filled(r) >= Math.max(2, Math.ceil(maxCols * 0.6))
+    && r.filter(c => typeof c === 'string' && c !== '').length >= filled(r) * 0.6);
+  if (h < 0) h = clean.findIndex(r => filled(r) > 0);
+  const raw = clean[h];
+  const width = Math.max(raw.length, ...clean.slice(h + 1, h + 200).map(r => r.length));
+  const seen = new Map();
+  const headers = [];
+  for (let i = 0; i < width; i++) {
+    let name = String(raw[i] ?? '').replace(/\s+/g, ' ').trim() || `Colonne ${i + 1}`;
+    const n = (seen.get(name) || 0) + 1;
+    seen.set(name, n);
+    if (n > 1) name = `${name} (${n})`;
+    headers.push(name);
+  }
+  const objects = clean.slice(h + 1).filter(r => filled(r) > 0).map(r => {
+    const o = {};
+    headers.forEach((hd, i) => { o[hd] = r[i] ?? ''; });
+    return o;
+  });
+  // Colonnes entièrement vides et sans en-tête : retirées
+  const keep = headers.filter((hd, i) => String(raw[i] ?? '').trim() !== '' || objects.some(o => o[hd] !== ''));
+  if (keep.length !== headers.length) objects.forEach(o => headers.forEach(hd => { if (!keep.includes(hd)) delete o[hd]; }));
+  return { headers: keep, objects };
+}
+
+function decodeText(buffer) {
+  const utf8 = new TextDecoder('utf-8').decode(buffer);
+  if (!utf8.includes('�')) return utf8.replace(/^﻿/, '');
+  try { return new TextDecoder('windows-1252').decode(buffer); } catch (e) { return utf8; }
+}
+
+function parseDelimitedText(text) {
+  const first = (text.split(/\r?\n/).find(l => l.trim()) || '');
+  const count = ch => first.split(ch).length - 1;
+  const sep = [';', '\t', ','].sort((a, b) => count(b) - count(a))[0];
+  const rows = [];
+  let row = [], cur = '', inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else inQ = false; }
+      else cur += c;
+    } else if (c === '"') inQ = true;
+    else if (c === sep) { row.push(cur); cur = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(cur); rows.push(row); row = []; cur = '';
+    } else cur += c;
+  }
+  if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
+  // Nombres « à la française » (1 234,5) → nombres
+  return rows.map(r => r.map(v => {
+    const t = String(v).trim();
+    if (/^0\d/.test(t)) return t; // codes (postal, département…) : zéro initial conservé
+    if (/^-?\d{1,3}([ \u00a0\u202f]?\d{3})*([.,]\d+)?$|^-?\d+([.,]\d+)?$/.test(t)) {
+      const x = Number(t.replace(/[ \u00a0\u202f]/g, '').replace(',', '.'));
+      if (isFinite(x)) return x;
+    }
+    return t;
+  }));
+}
+
+function buildImportedTable(fileName, sheetName, rows) {
+  const t = rowsToTable(rows);
+  if (!t || !t.objects.length) return null;
+  return {
+    source: 'Fichier',
+    name: sheetName ? `${fileName} — ${sheetName}` : fileName,
+    fileName, sheetName: sheetName || '',
+    headers: t.headers, objects: t.objects
+  };
+}
+
+function sheetRows(workbook, sheetName) {
+  const ws = workbook.Sheets[sheetName];
+  if (!ws) return [];
+  return XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true, blankrows: false });
+}
+
+async function importSpreadsheetFile(file) {
+  if (!file) throw new Error('Aucun fichier.');
+  if (!IMPORT_EXTENSIONS.test(file.name || '')) throw new Error('Format non pris en charge : importez un fichier Excel (.xlsx, .xls) ou CSV.');
+  if (file.size > IMPORT_MAX_BYTES) throw new Error('Fichier trop volumineux (plus de 50 Mo) : importez-le plutôt dans Grist (Ajouter → Importer depuis un fichier).');
+  const buffer = await file.arrayBuffer();
+  let info;
+  if (/\.(csv|txt)$/i.test(file.name)) {
+    const table = buildImportedTable(file.name, '', parseDelimitedText(decodeText(buffer)));
+    info = { name: file.name, sheets: [], sheet: '', workbook: null, table };
+  } else {
+    if (typeof XLSX === 'undefined') throw new Error('La bibliothèque de lecture Excel n\'est pas chargée. Rechargez le widget.');
+    const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+    const sheets = workbook.SheetNames || [];
+    // Premier onglet qui contient des données
+    let sheet = sheets[0], table = null;
+    for (const sh of sheets) {
+      table = buildImportedTable(file.name, sheets.length > 1 ? sh : '', sheetRows(workbook, sh));
+      if (table) { sheet = sh; break; }
+    }
+    info = { name: file.name, sheets, sheet, workbook, table };
+  }
+  if (!info.table) throw new Error('Aucune donnée tabulaire trouvée dans ce fichier.');
+  importedFile = info;
+  setActiveSource('file');
+  return info.table;
+}
+
+function selectImportedSheet(sheetName) {
+  if (!importedFile || !importedFile.workbook) return null;
+  const table = buildImportedTable(importedFile.name, sheetName, sheetRows(importedFile.workbook, sheetName));
+  if (!table) throw new Error(`L'onglet « ${sheetName} » ne contient pas de données.`);
+  importedFile.sheet = sheetName;
+  importedFile.table = table;
+  if (typeof resetContextSilent === 'function') { try { resetContextSilent(); } catch (e) {} }
+  activeSourceKind = 'file';
+  refreshSourceUI();
+  return table;
 }
 
 

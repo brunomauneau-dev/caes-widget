@@ -725,7 +725,7 @@ function renderActiveSession() {
         <div class="empty-state" id="empty-state">
           <div class="es-icon">💬</div>
           <div class="es-title">Posez une question sur vos documents</div>
-          <div class="es-sub">Nouvelle session : le contexte d'analyse est vide. Les sources chargées et la connexion Grist restent disponibles.</div>
+          <div class="es-sub">Par défaut, le widget analyse l'open data Parcoursup de la dernière session publiée. Pour travailler sur votre table Grist ou un fichier Excel/CSV, utilisez le sélecteur de source sous la conversation, ou glissez votre fichier ici.</div>
           <div class="suggestions" id="suggestions"></div>
         </div>`;
     }

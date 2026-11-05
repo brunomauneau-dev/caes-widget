@@ -107,13 +107,14 @@ await describe('Chargement de la table par défaut', async () => {
   assert(/UNE LIGNE = UNE FORMATION/.test(synth), 'Albert est prévenu : une ligne = une formation, pas un candidat');
   assert(/session 2026/.test(synth), 'Albert connaît la session');
 
+  // Nouvelle règle : l'open data reste la source tant qu'on n'en choisit pas une autre
   run(ctx, 'gristRecords = [{ id: 1, Nom: "a" }, { id: 2, Nom: "b" }]');
   const withGrist = run(ctx, 'getActiveQueryTables()');
-  assert(withGrist.length === 1 && withGrist[0].source === 'Grist', 'une table Grist reste prioritaire sur l\'open data');
-  run(ctx, 'gristRecords = []');
-  run(ctx, 'documents = [{ id: "d1", name: "f.xlsx", status: "ok", tables: [{ name: "Feuil1", headers: ["A"], objects: [{ A: 1 }] }] }]');
-  const withDoc = run(ctx, 'getActiveQueryTables()');
-  assert(withDoc.length === 1 && withDoc[0].source === 'Excel', 'un fichier déposé reste prioritaire sur l\'open data');
+  assert(withGrist.length === 1 && withGrist[0].isDefault, 'table Grist liée mais non choisie → l\'open data reste la source active');
+  run(ctx, 'setActiveSource("grist")');
+  const chosen = run(ctx, 'getActiveQueryTables()');
+  assert(chosen.length === 1 && chosen[0].source === 'Grist', 'table Grist choisie dans le sélecteur → source active');
+  run(ctx, 'setActiveSource("opendata"); gristRecords = []');
 });
 
 await describe('Repli et erreurs', async () => {
@@ -135,11 +136,9 @@ await describe('Démarrage automatique', async () => {
   const ctx = makeCtx();
   run(ctx, 'gristRecords = [{ id: 1, Nom: "a" }]');
   run(ctx, 'maybeLoadDefaultOpenData()');
-  assert(!calls.some(u => u.includes('/exports/csv') && u.includes('refine=')), 'table Grist présente → l\'open data n\'est pas téléchargé');
-  run(ctx, 'gristRecords = []');
-  run(ctx, 'maybeLoadDefaultOpenData()');
   await new Promise(r => setTimeout(r, 20));
-  assert(calls.some(u => u.includes('/exports/csv') && u.includes('refine=')), 'aucune table → l\'open data est téléchargé');
+  assert(calls.some(u => u.includes('/exports/csv') && u.includes('refine=')), 'open data téléchargé au lancement, même si une table Grist est liée');
+  assert(run(ctx, 'getActiveSourceKind()') === 'opendata', 'source active au lancement : open data');
 });
 
 console.log('\n' + '─'.repeat(50));

@@ -165,7 +165,10 @@
   function activeValuesFor(col) {
     try {
       let table = null;
-      if (typeof buildGristQueryTable === 'function') {
+      const kind = (typeof getActiveSourceKind === 'function') ? getActiveSourceKind() : 'grist';
+      if (kind !== 'grist' && typeof getActiveQueryTables === 'function') {
+        table = (getActiveQueryTables() || [])[0] || null;
+      } else if (typeof buildGristQueryTable === 'function') {
         // Reconstruire la table Grist une seule fois par jeu d'enregistrements
         const src = (typeof gristRecords !== 'undefined') ? gristRecords : null;
         if (src && _tableCache.src === src) table = _tableCache.table;
@@ -173,7 +176,7 @@
       }
       if ((!table || !table.objects || !table.objects.length) && typeof getActiveQueryTables === 'function') table = (getActiveQueryTables() || [])[0];
       if (!table || !table.objects || !table.objects.length) return null;
-      const key = `${col}|${table.objects.length}`;
+      const key = `${table.name || ''}|${col}|${table.objects.length}`;
       if (_valueCache.has(key)) return _valueCache.get(key);
       const headers = table.headers || Object.keys(table.objects[0] || {});
       if (!headers.includes(col)) return null;
