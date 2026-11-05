@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-22 fichiers, 532 tests. Depuis la racine du repo :
+23 fichiers, 561 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -91,6 +91,17 @@ Les tests sont aussi lancés **automatiquement par GitHub à chaque modification
 Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package.json`).
 
 ---
+
+
+## Essai sur données réelles
+
+Les tests ci-dessus utilisent des données simulées. Pour vérifier le moteur sur **l'open data Parcoursup réel** :
+
+1. Onglet **Actions** du repo → **Essai sur données réelles** (colonne de gauche).
+2. Bouton **Run workflow** → (facultatif) ajouter des questions, séparées par « ; » → **Run workflow**.
+3. Après une minute environ, cliquer sur l'exécution : le **résumé** affiche les contrôles de cohérence (✅ / ❌) puis les réponses du moteur à chaque question. Le rapport est aussi téléchargeable (*essai-resultats*).
+
+Le script (`scripts/essai_donnees_reelles.mjs`) charge les vrais fichiers `js/` du widget, comme le navigateur, sans Albert ni Grist : il montre ce que le moteur de calcul répond. Lecture seule. Une croix rouge signifie qu'au moins un contrôle de cohérence a échoué (ex. une question sur une formation qui compte tout le fichier).
 
 ## Outils annexes
 
