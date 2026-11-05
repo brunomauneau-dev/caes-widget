@@ -149,7 +149,9 @@ export function controler(resultats) {
   if (R.droit && R.pass) ctl('« PASS option Droit » : un nombre plausible, ou « non trouvé » (jamais tout le fichier)', (R.droit.kind === 'count' && R.droit.count > 0 && R.droit.count < R.pass.count) || R.droit.kind === 'unresolved', `${R.droit.reponse} · PASS : ${R.pass.count ?? '?'}`);
   if (R.liste1) ctl('« liste complète des filières de PASS » : une liste, pas un export', R.liste1.kind === 'group_by' && R.liste1.liste, R.liste1.reponse);
   if (R.liste1 && R.pass) ctl('la liste des PASS couvre exactement les PASS comptés (lignes + sans valeur)', R.liste1.total === R.pass.count && somme(R.liste1) + (R.liste1.sansValeur || 0) === R.pass.count, `liste : ${R.liste1.total ?? '?'} · somme des lignes : ${somme(R.liste1)} · sans valeur : ${R.liste1.sansValeur || 0} · PASS : ${R.pass.count ?? '?'}`);
-  if (R.liste1) ctl('la colonne listée est remplie pour au moins 80 % des PASS', R.liste1.total && (R.liste1.sansValeur || 0) <= R.liste1.total * 0.2, `${R.liste1.sansValeur || 0} sans valeur sur ${R.liste1.total ?? '?'} (colonne « ${R.liste1.colonne || '?'} »)`);
+  // Données réelles 2025 : la seule colonne qui distingue les PASS n'est remplie que pour une partie d'entre eux.
+  // La liste doit le dire (« N sans valeur »), pas l'exiger remplie.
+  if (R.liste1) ctl('la liste signale les formations sans valeur dans la colonne listée', (R.liste1.sansValeur || 0) === (R.liste1.total || 0) - somme(R.liste1), `${R.liste1.sansValeur || 0} sans valeur sur ${R.liste1.total ?? '?'} (colonne « ${R.liste1.colonne || '?'} »)`);
   if (R.liste1) ctl('la liste détaille plusieurs options', (R.liste1.lignes || []).length >= 2, `${(R.liste1.lignes || []).length} intitulé(s) dans « ${R.liste1.colonne || '?'} »`);
   if (R.liste1 && R.liste2) ctl('les deux formulations de la liste donnent le même résultat', R.liste2.kind === 'group_by' && valeurs(R.liste1) === valeurs(R.liste2), R.liste2.reponse);
   if (R.droit && R.liste1) {

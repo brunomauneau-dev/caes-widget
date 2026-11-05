@@ -27,14 +27,15 @@ const FIELDS = [
   ['fili', 'Filière de formation très agrégée', 'text'], ['form_lib_voe_acc', 'Filière de formation', 'text'],
   ['fil_lib_voe_acc', 'Filière de formation détaillée bis', 'text'], ['detail_forma', 'Filière de formation très détaillée', 'text'],
   ['capa_fin', 'Capacité de l’établissement par formation', 'int'], ['voe_tot', 'Effectif total des candidats pour une formation', 'int'],
+  ['lib_for_voe_ins', 'Filière de formation', 'text'], // même libellé que form_lib_voe_acc, comme dans l'API réelle
 ];
 const lignes = [];
 const add = (n, v) => { for (let i = 0; i < n; i++) lignes.push(v.join(';')); };
-add(30, [2025, 'Public', 'Université de Bordeaux', 'Bordeaux', 'Bordeaux', 'PASS', 'PASS', "Parcours d'Accès Spécifique Santé (PASS)", 'PASS option Droit', 50, 900]);
-add(10, [2025, 'Privé sous contrat', 'Institut catholique', 'Toulouse', 'Toulouse', 'PASS', 'PASS', "Parcours d'Accès Spécifique Santé (PASS)", 'PASS option Droit', 40, 300]);
-add(60, [2025, 'Public', 'Université de Bordeaux', 'Bordeaux', 'Bordeaux', 'PASS', 'PASS', "Parcours d'Accès Spécifique Santé (PASS)", 'PASS option Biologie', 60, 1200]);
-add(300, [2025, 'Public', 'Lycée Gustave Eiffel', 'Bordeaux', 'Bordeaux', 'BTS', 'BTS - Services', 'BTS - Management Commercial Opérationnel', 'Management Commercial Opérationnel', 30, 400]);
-add(200, [2025, 'Public', 'Faculté de Droit et Science politique', 'Pau', 'Bordeaux', 'Licence', 'Licence - Droit, économie, gestion', 'Licence - Droit', 'Droit', 200, 2500]);
+add(30, [2025, 'Public', 'Université de Bordeaux', 'Bordeaux', 'Bordeaux', 'PASS', 'PASS', "Parcours d'Accès Spécifique Santé (PASS)", 'PASS option Droit', 50, 900, 'PASS Bordeaux']);
+add(10, [2025, 'Privé sous contrat', 'Institut catholique', 'Toulouse', 'Toulouse', 'PASS', 'PASS', "Parcours d'Accès Spécifique Santé (PASS)", 'PASS option Droit', 40, 300, 'PASS Toulouse']);
+add(60, [2025, 'Public', 'Université de Bordeaux', 'Bordeaux', 'Bordeaux', 'PASS', 'PASS', "Parcours d'Accès Spécifique Santé (PASS)", 'PASS option Biologie', 60, 1200, 'PASS Bordeaux']);
+add(300, [2025, 'Public', 'Lycée Gustave Eiffel', 'Bordeaux', 'Bordeaux', 'BTS', 'BTS - Services', 'BTS - Management Commercial Opérationnel', 'Management Commercial Opérationnel', 30, 400, 'BTS MCO Eiffel']);
+add(200, [2025, 'Public', 'Faculté de Droit et Science politique', 'Pau', 'Bordeaux', 'Licence', 'Licence - Droit, économie, gestion', 'Licence - Droit', 'Droit', 200, 2500, 'Licence Droit Pau']);
 const CSV = FIELDS.map(f => f[0]).join(';') + '\n' + lignes.join('\n');
 
 let appels = [];
@@ -56,6 +57,12 @@ await describe('Chargement par le vrai code du widget', async () => {
   assert(res.table.objects.length === 600, `600 formations chargées (obtenu : ${res.table.objects.length})`);
   assert(res.table.headers.includes('Filière de formation très détaillée'), 'en-têtes lisibles (libellés officiels)');
   assert(appels.some(u => u.includes('/exports/csv')) && appels.some(u => u.includes('refine=session')), 'export CSV demandé pour la session détectée');
+});
+
+await describe('Chargement : deux champs au même libellé gardent chacun leur colonne', async () => {
+  const cols = res.table.headers.filter(h => /^Filière de formation( \(|$)/.test(h));
+  assert(cols.length === 2 && cols.includes('Filière de formation (lib_for_voe_ins)'), `deux colonnes distinctes (obtenu : ${cols.join(' | ')})`);
+  assert(res.table.objects[0]['Filière de formation (lib_for_voe_ins)'] === 'PASS Bordeaux' && res.table.objects[0]['Filière de formation'] === 'PASS', 'chaque colonne garde ses propres valeurs');
 });
 
 await describe('Réponses aux questions types', async () => {
