@@ -893,7 +893,11 @@ function applyFormationTerms(plan) {
   // Sinon (« CPGE » + « MPSI » dans deux colonnes différentes), on cherche sur toutes les colonnes ensemble.
   if (found.terms.length > 1) {
     let meilleure = null;
-    info.cols.forEach(c => {
+    const objets = plan.table.objects || [];
+    // seulement les colonnes remplies (≥ 80 % des lignes) : une colonne presque vide (« très détaillée »)
+    // ne contient les deux mots que pour quelques lignes et donnerait un compte trop petit
+    const remplie = c => objets.filter(r => String(r?.[c] ?? '').trim() !== '').length >= objets.length * 0.8;
+    info.cols.filter(remplie).forEach(c => {
       const n = applyLocalActionFilters(plan.table.objects || [], [{ ...filtre, cols: [c] }]).length;
       if (n > 0 && (!meilleure || n < meilleure.n)) meilleure = { c, n };
     });
