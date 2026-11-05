@@ -57,6 +57,7 @@ parcoursup-opendata-reference-v1.json
 | SRC | Sélecteur de source toujours visible : open data n-1 au lancement, table Grist sur choix, import Excel/CSV (bouton ou glisser-déposer, onglets, en-têtes sous titres). Réintroduit l'import de fichier retiré le 01/07 | ✅ |
 | PN  | Données nationales Parcoursup n-1 → Grist : GitHub Actions (`load-parcoursup.yml`) + script Python (`scripts/load_parcoursup_to_grist.py`) + table `Parcoursup_National` (631 lignes, académie Bordeaux, session 2025) + intégration `knowledge.js` (`loadParcoursupNational`, `buildNationalDataContext`) | ✅ |
 | FT  | Intitulés de formation cités dans la question : « PASS », « option Droit »… deviennent un filtre même sans le mot « filière » ; « liste / toutes les filières / options » affiche les intitulés distincts au lieu d'un export ; terme introuvable → « Formation non trouvée » avec les intitulés proches, au lieu de compter tout le fichier ; open data compté en formations, pas en candidats (`test_formation_terms.js`) | ✅ |
+| ROB | Robustesse fichiers Excel et open data : filtres conservés pour les colonnes abrégées (BOURS…) ; statut public/privé, sélectivité, région, « à <ville> » ; académie d'origine vs d'accueil ; ligne « Total » et onglet « Notice » ignorés ; états Oui/Non, 1/0, VRAI/FAUX ; une colonne chiffrée n'est jamais un filtre d'état ; moyennes sur la bonne colonne (jamais un numéro ni la session) ; sommes sur l'open data (places, candidats, admis) ; garde-fou « Critère non reconnu » au lieu du total du fichier (`test_robustesse_fichiers.js`, faux fichiers `js/fixtures/`) | ✅ |
 
 ---
 
@@ -64,6 +65,5 @@ parcoursup-opendata-reference-v1.json
 
 - Mise à jour KB vers v3 (`build_parcoursup_kb_v3.py` prêt dans `scripts/`)
 - Export PDF multi-blocs
-- Calculs « exacts » du moteur local sur l'open data : sommer les effectifs au lieu de compter les lignes (formations)
 - Bouton « National 2025 » : utiliser la session détectée au lieu de 2025 en dur
 - Nettoyer le code mort de `documents.js` (`PARCOURSUP_ONTOLOGY_RULES`, `classifyParcoursupColumn`, jamais appelés)

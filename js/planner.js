@@ -104,7 +104,8 @@
     form: 'formation', frm: 'formation', spe: 'specialite', spec: 'specialite', fil: 'filiere',
     nbr: 'nb', vx: 'voeux', voe: 'voeux', prop: 'proposition', adm: 'admission',
     app: 'apprenti', appr: 'apprenti', sex: 'sexe', bours: 'boursier', bour: 'boursier',
-    ser: 'serie', bac: 'serie bac', ann: 'annee', lib: 'libelle', cp: 'code postal', cod: 'code'
+    ser: 'serie', bac: 'serie bac', ann: 'annee', lib: 'libelle', cp: 'code postal', cod: 'code',
+    grp: 'groupe', gpe: 'groupe', conf: 'confirmes', cand: 'candidat', num: 'numero'
   };
 
   function expandAbbreviations(col) {
@@ -358,24 +359,31 @@
       if (/cpge|classe preparatoire/.test(v)) add('cpge','prépa','prepa','classe préparatoire','classe preparatoire');
     }
 
+    // v27.8 — états oui / non reconnus sur la valeur entière : « 12.5 » ou « 10 » (colonne chiffrée) n'est pas « 1 » (oui)
+    const ETAT_OUI = /^(oui|o|yes|true|1|vrai)$/, ETAT_NON = /^(non|n|no|false|0|faux)$/;
     if (entry.kind === 'admission') {
-      if (/oui|true|1|vrai/.test(v)) add('admis','admise','admission','accepté','accepte','acceptée','acceptee','réponse favorable','reponse favorable','proposition acceptée','proposition acceptee');
-      if (/non|false|0|faux/.test(v)) add('non admis','pas admis','sans proposition acceptée','sans reponse favorable');
+      if (ETAT_OUI.test(v) || /^(admis|admise|accepte|acceptee)$/.test(v)) add('admis','admise','admission','accepté','accepte','acceptée','acceptee','réponse favorable','reponse favorable','proposition acceptée','proposition acceptee');
+      if (ETAT_NON.test(v) || /^non admis/.test(v)) add('non admis','pas admis','sans proposition acceptée','sans reponse favorable');
     }
 
     if (entry.kind === 'boursier') {
-      if (/oui|true|1|vrai/.test(v)) add('boursier','boursiers','bourse','avec bourse');
-      if (/non|false|0|faux/.test(v)) add('non boursier','non boursiers','sans bourse','pas boursier','excluant les boursiers');
+      if (ETAT_OUI.test(v) || (/boursier|bourse/.test(v) && !/\b(non|pas|sans|aucune?)\b/.test(v))) add('boursier','boursiers','bourse','avec bourse');
+      if (ETAT_NON.test(v) || /\b(non|pas|sans|aucune?)\b.*bours/.test(v)) add('non boursier','non boursiers','sans bourse','pas boursier','excluant les boursiers');
     }
 
     if (entry.kind === 'zone_basque') {
-      if (/oui|true|1|vrai/.test(v)) add('pays basque','basque','zone basque','zone du pays basque','candidats basques');
-      if (/non|false|0|faux/.test(v)) add('hors pays basque','non basque','hors zone basque');
+      if (ETAT_OUI.test(v)) add('pays basque','basque','zone basque','zone du pays basque','candidats basques');
+      if (ETAT_NON.test(v)) add('hors pays basque','non basque','hors zone basque');
+    }
+
+    if (entry.kind === 'apprentissage') {
+      if (/^(oui|true|1|vrai)$/.test(v) || /^apprenti/.test(v)) add('apprenti','apprentis','apprentie','apprenties','en apprentissage','en alternance');
+      if (/^(non|false|0|faux)$/.test(v) || /non apprenti|hors apprentissage/.test(v)) add('non apprenti','non apprentis','hors apprentissage','pas en apprentissage');
     }
 
     if (entry.kind === 'sexe') {
-      if (/feminin|femme|fille/.test(v)) add('féminin','feminin','femme','femmes','fille','filles');
-      if (/masculin|homme|garcon/.test(v)) add('masculin','homme','hommes','garçon','garcon','garcons');
+      if (/feminin|femme|fille/.test(v) || v === 'f') add('féminin','feminin','femme','femmes','fille','filles');
+      if (/masculin|homme|garcon/.test(v) || v === 'm' || v === 'h') add('masculin','homme','hommes','garçon','garcon','garcons');
     }
 
     return [...a].filter(x => x && x.length >= 2);
@@ -403,7 +411,7 @@
     if (k === 'academie' && /(academie|académie|academique|hors bordeaux|bordeaux|toulouse|poitiers|limoges)/.test(q)) s += 80;
     if (k === 'admission' && /(admis|admission|accept|favorable|proposition acceptee|réponse favorable|reponse favorable)/.test(q)) s += 80;
     if (k === 'apprentissage' && /(apprenti|apprentissage)/.test(q)) s += 80;
-    if (k === 'sexe' && /(sexe|homme|femme|masculin|feminin|féminin)/.test(q)) s += 60;
+    if (k === 'sexe' && /(sexe|homme|femme|masculin|feminin|féminin|\bfilles?\b|gar[cç]ons?)/.test(q)) s += 60;
     if (k === 'departement' && /(departement|département|gironde|landes|pyrenees|pyrénées)/.test(q)) s += 60;
     if (k === 'commune' && /(commune|ville)/.test(q)) s += 55;
     return s;
@@ -761,6 +769,10 @@
   // Exposée pour PR4.2 (suggestions de questions guidées générées dynamiquement
   // depuis le schéma de colonnes réel, sans dupliquer cette logique de classification).
   window.plannerColumnKind = columnKindSmart;
+  // v27.8 — noms abrégés développés (BOURS → boursier, GRP_FORM_ACC → groupe formation accueil)
+  window.plannerExpandAbbreviations = expandAbbreviations;
+  // v27.8 — noms d'académies et de départements (garde-fou : lieu cité mais non filtré)
+  window.plannerGeoNames = [...new Set([...ACADEMIES, ...DEPARTEMENTS])];
   window.plannerColumnKindFromValues = kindFromValues;
   // Rôle accueil / origine, y compris pour les noms abrégés (ACC, SCO, ORIG…)
   window.plannerColumnRole = (col) => columnRole(`${col} ${expandAbbreviations(col)}`);
@@ -785,7 +797,9 @@
     // 2. Résolution générique par valeurs + score de contexte.
     const candidates = bestValueCandidates(schema, q);
     candidates.forEach(c => {
-      if (c.score < 95) return;
+      // v27.8 — valeur citée en entier (« lycée Montaigne ») : retenue même si le nom de colonne ne dit rien
+      const valeurEntiere = c.alias === nrm(c.item.value) && c.alias.length >= 8 && c.alias.includes(' ');
+      if (c.score < 95 && !valeurEntiere) return;
       // Ne pas ajouter un filtre si une règle sûre de même famille existe déjà.
       if (filters.some(f => f.semanticKey === semanticKey(c.entry))) return;
       // Pour académie/commune/département, exiger un contexte suffisant.

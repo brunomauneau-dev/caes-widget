@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-23 fichiers, 561 tests. Depuis la racine du repo :
+24 fichiers, 750 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -92,6 +92,18 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 
 ---
 
+
+### Robustesse : faux fichiers Excel et gros volumes
+
+`js/test_robustesse_fichiers.js` vérifie que le widget ne « se perd » pas. Les faux fichiers sont fabriqués par `js/fixtures/donnees_simulees.mjs`, toujours identiques, et la bonne réponse de chaque question est calculée directement sur les lignes :
+
+- extraction de 3 000 candidats avec en-têtes **complets**, **abrégés** (`BOURS`, `GRP_FORM_ACC`, `LIB_ACA_ACC`…) ou **vagues** (« Colonne A »…) ;
+- export **désordonné** : lignes de titre, ligne vide, colonne vide, ligne « Total », valeurs BO (« Boursier des lycées », F / M) ;
+- colonnes d'**état** écrites Oui/Non, **1/0** ou **VRAI/FAUX** : filtrées, jamais additionnées ni moyennées ;
+- classeur dont le 1er onglet est une **notice** ;
+- **open data** de 14 000 formations : statut public/privé, académie, département, ville, région, sélectivité, sommes (places, candidats, admis), moyennes (capacité, taux d'accès), en moins de 3 secondes par question.
+
+Règle centrale : une réponse chiffrée est **exacte**, ou le widget affiche « Critère non reconnu ». Il ne donne jamais en silence un chiffre faux, par exemple le total du fichier parce qu'un filtre a été perdu.
 
 ## Essai sur données réelles
 

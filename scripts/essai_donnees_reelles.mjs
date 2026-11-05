@@ -34,6 +34,15 @@ export const QUESTIONS = [
   { id: 'plus_demandees', q: 'quelles sont les formations les plus demandées' },
   { id: 'definition', q: "qu'est-ce que le PASS ?" },
   { id: 'suite', conversation: ['combien de PASS', 'et pour les publics ?'] },
+  // v27.8 — robustesse : statut, lieux, sommes, moyennes, état vs chiffre
+  { id: 'publiques', q: 'combien de formations publiques' },
+  { id: 'privees', q: 'combien de formations privées' },
+  { id: 'aca_bdx', q: "combien de formations dans l'académie de Bordeaux" },
+  { id: 'ville_bdx', q: 'combien de formations à Bordeaux' },
+  { id: 'gironde', q: 'combien de formations en Gironde' },
+  { id: 'places_bts', q: 'combien de places en BTS' },
+  { id: 'capa_bts', q: 'capacité moyenne des BTS' },
+  { id: 'cand_bours', q: 'combien de candidats boursiers en BTS' },
 ];
 
 // ─── Moteur du widget dans un contexte isolé ─────────────────────────────────
@@ -86,9 +95,15 @@ function resumer(ctx, question) {
     r.total = exec.result.total; r.colonne = exec.plan?.targetCol; r.distinct = exec.result.distinct;
     r.lignes = (exec.result.rows || []).map(x => ({ value: x.value, count: x.count }));
     r.reponse = `${r.distinct ?? r.lignes.length} valeur(s) de « ${r.colonne} » pour ${r.total.toLocaleString('fr-FR')} formations`;
+  } else if (exec.kind === 'sum') {
+    r.sum = exec.result.sum; r.count = exec.result.count; r.colonne = exec.result.col;
+    r.reponse = `${r.sum.toLocaleString('fr-FR')} ${exec.result.unite} (somme de « ${r.colonne} ») sur ${r.count.toLocaleString('fr-FR')} formations`;
+  } else if (exec.kind === 'stats') {
+    r.moyenne = exec.result.avg; r.colonne = exec.plan?.targetCol;
+    r.reponse = `moyenne ${Number(r.moyenne).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} (colonne « ${r.colonne} »)`;
   } else if (exec.kind === 'unresolved') {
     r.suggestions = (exec.result?.suggestions || []).map(x => `${x.value} (${x.count})`);
-    r.reponse = `Formation non trouvée (${(exec.result?.missing || []).join(', ') || 'termes jamais réunis'})`;
+    r.reponse = `Non reconnu, pas de chiffre (${(exec.result?.missing || []).join(', ') || 'termes jamais réunis'})`;
   } else if (exec.kind === 'export') {
     r.count = ctx.__exports[ctx.__exports.length - 1] ?? 0;
     r.reponse = `Export de ${r.count} lignes`;
@@ -141,6 +156,16 @@ export function controler(resultats) {
     ctl('suite « et pour les publics ? » : garde le PASS, au plus autant de formations', b.kind === 'count' && b.count > 0 && b.count <= a.count && b.filtres.some(f => /pass/i.test(f)), `${a.reponse} → ${b.reponse} · ${b.filtres.join(' ; ')}`);
     ctl('suite « et pour les publics ? » : le statut public est appliqué', b.filtres.some(f => /statut|public/i.test(f) && !/pass/i.test(f)), b.filtres.join(' ; ') || 'aucun filtre');
   }
+  // v27.8 — robustesse
+  const partie = r => r && r.kind === 'count' && r.count > 0 && r.count < r.total;
+  if (R.publiques) ctl('« formations publiques » : une partie du fichier, filtre de statut', partie(R.publiques) && R.publiques.filtres.some(f => /statut/i.test(f)), `${R.publiques.reponse} · ${R.publiques.filtres.join(' ; ')}`);
+  if (R.publiques && R.privees) ctl('publiques + privées = toutes les formations', R.privees.kind === 'count' && R.publiques.count + R.privees.count <= R.publiques.total && R.publiques.count + R.privees.count >= R.publiques.total * 0.98, `${R.publiques.count ?? '?'} + ${R.privees.count ?? '?'} pour ${R.publiques.total ?? '?'}`);
+  if (R.aca_bdx && R.ville_bdx) ctl('« à Bordeaux » (ville) ≤ « académie de Bordeaux »', partie(R.aca_bdx) && partie(R.ville_bdx) && R.ville_bdx.count < R.aca_bdx.count && R.ville_bdx.filtres.some(f => /commune|ville/i.test(f)), `ville : ${R.ville_bdx.reponse} · académie : ${R.aca_bdx.reponse}`);
+  if (R.gironde && R.aca_bdx) ctl('« en Gironde » ≤ « académie de Bordeaux »', partie(R.gironde) && R.gironde.count <= R.aca_bdx.count, `${R.gironde.reponse}`);
+  if (R.places_bts && R.bts) ctl('« places en BTS » : une somme de capacités, plus grande que le nombre de BTS', R.places_bts.kind === 'sum' && /capacit/i.test(R.places_bts.colonne || '') && R.places_bts.sum > (R.bts.count || 0), R.places_bts.reponse);
+  if (R.capa_bts) ctl('« capacité moyenne des BTS » : colonne Capacité, valeur plausible (1 à 500)', R.capa_bts.kind === 'stats' && /capacit/i.test(R.capa_bts.colonne || '') && R.capa_bts.moyenne > 1 && R.capa_bts.moyenne < 500, R.capa_bts.reponse);
+  if (R.cand_bours) ctl('« candidats boursiers » : aucune colonne chiffrée utilisée comme filtre d\'état', !R.cand_bours.filtres.some(f => /bours/i.test(f) && /=\s*\d/.test(f)), `${R.cand_bours.reponse} · ${R.cand_bours.filtres.join(' ; ') || 'aucun filtre'}`);
+
   // Contrôle général : une question qui cite une formation ne doit jamais compter tout le fichier
   resultats.filter(r => r.kind === 'count' && r.id !== 'toutes').forEach(r => {
     if (r.count === r.total) ctl(`« ${r.question} » ne compte pas tout le fichier`, false, r.reponse);

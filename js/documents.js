@@ -297,6 +297,13 @@ function rowsToTable(rows) {
     headers.forEach((hd, i) => { o[hd] = r[i] ?? ''; });
     return o;
   });
+  // v27.8 — lignes de total d'un export (« Total », « Sous-total », « Ensemble ») : ce ne sont pas des données
+  const estTotal = o => {
+    const vals = headers.map(hd => o[hd]).filter(v => v !== '' && v !== null && v !== undefined);
+    return vals.length && vals.length <= Math.max(2, Math.ceil(headers.length * 0.3))
+      && /^(total|totaux|sous[- ]?total|ensemble|somme)\b/i.test(String(vals[0]).trim());
+  };
+  for (let i = objects.length - 1; i >= 0; i--) if (estTotal(objects[i])) objects.splice(i, 1);
   // Colonnes entièrement vides et sans en-tête : retirées
   const keep = headers.filter((hd, i) => String(raw[i] ?? '').trim() !== '' || objects.some(o => o[hd] !== ''));
   if (keep.length !== headers.length) objects.forEach(o => headers.forEach(hd => { if (!keep.includes(hd)) delete o[hd]; }));
@@ -370,12 +377,16 @@ async function importSpreadsheetFile(file) {
     if (typeof XLSX === 'undefined') throw new Error('La bibliothèque de lecture Excel n\'est pas chargée. Rechargez le widget.');
     const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
     const sheets = workbook.SheetNames || [];
-    // Premier onglet qui contient des données
-    let sheet = sheets[0], table = null;
+    // Premier onglet qui contient un vrai tableau (au moins 2 colonnes et 2 lignes) ; un onglet « Notice »
+    // fait d'une seule colonne de texte est sauté. À défaut, premier onglet non vide.
+    let sheet = sheets[0], table = null, repli = null;
     for (const sh of sheets) {
-      table = buildImportedTable(file.name, sheets.length > 1 ? sh : '', sheetRows(workbook, sh));
-      if (table) { sheet = sh; break; }
+      const t = buildImportedTable(file.name, sheets.length > 1 ? sh : '', sheetRows(workbook, sh));
+      if (!t) continue;
+      if (!repli) repli = { sh, t };
+      if (t.headers.length >= 2 && t.objects.length >= 2) { sheet = sh; table = t; break; }
     }
+    if (!table && repli) { sheet = repli.sh; table = repli.t; }
     info = { name: file.name, sheets, sheet, workbook, table };
   }
   if (!info.table) throw new Error('Aucune donnée tabulaire trouvée dans ce fichier.');
@@ -739,7 +750,8 @@ function rowContainsAllTerms(row, filter) {
     words = new Set(normalizeText((filter.cols || []).map(c => row[c] ?? '').join(' ')).split(' '));
     byCols.set(key, words);
   }
-  return (filter.terms || []).every(t => words.has(t));
+  // chaque terme : une forme ou plusieurs (singulier / pluriel)
+  return (filter.terms || []).every(t => (Array.isArray(t) ? t : [t]).some(w => words.has(w)));
 }
 
 function rowMatchesFilter(row, filter) {
