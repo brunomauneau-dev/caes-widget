@@ -1,0 +1,36 @@
+name: Essai sur données réelles
+
+# Lancement manuel : onglet Actions → « Essai sur données réelles » → Run workflow.
+# Pose des questions types au moteur du widget sur l'open data Parcoursup réel
+# et vérifie la cohérence des réponses. Lecture seule : rien n'est écrit dans Grist.
+
+on:
+  workflow_dispatch:
+    inputs:
+      questions:
+        description: 'Questions en plus, séparées par « ; » (facultatif)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  essai:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Poser les questions sur l'open data Parcoursup
+        run: node scripts/essai_donnees_reelles.mjs
+        env:
+          QUESTIONS_EN_PLUS: ${{ inputs.questions }}
+      - name: Garder le rapport
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: essai-resultats
+          path: essai_resultats.md
+          if-no-files-found: ignore
