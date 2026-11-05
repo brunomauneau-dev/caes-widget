@@ -487,7 +487,9 @@ function extractBlockTitle(exec, question) {
   if (tool === 'count_rows') {
     const count = exec.result?.count ?? '';
     const n = Number(count).toLocaleString('fr-FR');
-    return `${n} candidat${count > 1 ? 's' : ''}${fPart}`;
+    // v27.7 — open data : une ligne = une formation (pas un candidat)
+    const unite = exec.plan?.table?.rowUnit === 'formation' ? 'formation' : 'candidat';
+    return `${n} ${unite}${count > 1 ? 's' : ''}${fPart}`;
   }
   if (tool === 'compare') {
     const groups = (exec.plan?.compareGroups || []).map(g => g.label || '').filter(Boolean).join(' vs ');

@@ -958,14 +958,16 @@ async function sendMessage() {
 
   if (dataExecution && shouldAnswerLocallyWithoutAlbert(dataExecution) && !isInfographicRequest(question)) {
     removeLoadingMessage(loadingId);
-    addMessage('assistant', dataExecution.html, { dataExecution, question });
+    // v27.7 — « Formation non trouvée » : rien à exporter ni à mettre en infographie
+    const _introuvable = dataExecution.kind === 'unresolved';
+    addMessage('assistant', dataExecution.html, { dataExecution, question, noActions: _introuvable });
     chatHistory.push({ role: 'user', content: question });
     const deCtx = dataEngineResultToContext(dataExecution);
     chatHistory.push({ role: 'assistant', content: deCtx });
     // Enregistre le bloc pour le compositeur d'infographie
     const _skipTools = ['chart_current', 'export_excel', 'export_csv'];
     const sDE = getCurrentSession();
-    if (sDE && deCtx && deCtx.length > 20 && !_skipTools.includes(dataExecution.plan?.tool)) {
+    if (sDE && deCtx && deCtx.length > 20 && !_introuvable && !_skipTools.includes(dataExecution.plan?.tool)) {
       try {
         sDE.dataBlocks = sDE.dataBlocks || [];
         const blkTitle = (typeof extractBlockTitle === 'function')

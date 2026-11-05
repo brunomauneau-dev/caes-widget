@@ -56,6 +56,7 @@ parcoursup-opendata-reference-v1.json
 | OD  | Sans table : open data Parcoursup France entière, session la plus récente détectée automatiquement, en-têtes lisibles, Albert prévenu qu'une ligne = une formation. Clé API Grist retirée du script de chargement | ✅ |
 | SRC | Sélecteur de source toujours visible : open data n-1 au lancement, table Grist sur choix, import Excel/CSV (bouton ou glisser-déposer, onglets, en-têtes sous titres). Réintroduit l'import de fichier retiré le 01/07 | ✅ |
 | PN  | Données nationales Parcoursup n-1 → Grist : GitHub Actions (`load-parcoursup.yml`) + script Python (`scripts/load_parcoursup_to_grist.py`) + table `Parcoursup_National` (631 lignes, académie Bordeaux, session 2025) + intégration `knowledge.js` (`loadParcoursupNational`, `buildNationalDataContext`) | ✅ |
+| FT  | Intitulés de formation cités dans la question : « PASS », « option Droit »… deviennent un filtre même sans le mot « filière » ; « liste / toutes les filières / options » affiche les intitulés distincts au lieu d'un export ; terme introuvable → « Formation non trouvée » avec les intitulés proches, au lieu de compter tout le fichier ; open data compté en formations, pas en candidats (`test_formation_terms.js`) | ✅ |
 
 ---
 

@@ -61,7 +61,8 @@ describe('Badge "calcul exact" présent sur toutes les branches de renderDataEng
     const rawH4Count = (body.match(/<h4>\$\{escapeHtml/g) || []).length;
     assert(rawH4Count === 0, `aucun <h4> brut restant sans passer par deTitleHtml (obtenu : ${rawH4Count} occurrence(s))`);
     const deTitleCount = (body.match(/deTitleHtml\(/g) || []).length;
-    assert(deTitleCount === 5, `les 5 branches (count_rows, group_by/top, pivot, stats, fallback) utilisent deTitleHtml (obtenu : ${deTitleCount})`);
+    // v27.7 : 6e branche « liste » (group_by en mode liste, test_formation_terms.js) — elle passe aussi par deTitleHtml
+    assert(deTitleCount === 6, `les 6 branches (count_rows, liste, group_by/top, pivot, stats, fallback) utilisent deTitleHtml (obtenu : ${deTitleCount})`);
   }
 });
 

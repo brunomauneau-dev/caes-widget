@@ -727,7 +727,23 @@ function addFilter(filters, col, value, reason, op = 'eq') {
   filters.push({ col, value: String(value).trim(), reason, op });
 }
 
+// v27.7 — filtre « intitulé de formation contenant » : tous les mots présents dans les colonnes de formation de la ligne
+const _rowTermsCache = new WeakMap();
+function rowContainsAllTerms(row, filter) {
+  if (!row || typeof row !== 'object') return false;
+  const key = (filter.cols || []).join('\u0001');
+  let byCols = _rowTermsCache.get(row);
+  if (!byCols) { byCols = new Map(); _rowTermsCache.set(row, byCols); }
+  let words = byCols.get(key);
+  if (!words) {
+    words = new Set(normalizeText((filter.cols || []).map(c => row[c] ?? '').join(' ')).split(' '));
+    byCols.set(key, words);
+  }
+  return (filter.terms || []).every(t => words.has(t));
+}
+
 function rowMatchesFilter(row, filter) {
+  if (filter && filter.op === 'contains_all') return rowContainsAllTerms(row, filter);
   const rowValue = normalizeText(row[filter.col]);
   const filterValue = normalizeText(filter.value);
   if (filter.op === 'neq') return rowValue !== '' && rowValue !== filterValue;
