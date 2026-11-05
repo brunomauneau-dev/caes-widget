@@ -50,10 +50,12 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 | Fichier | Rôle |
 |---|---|
-| `server.js` | Proxy Express : relaie `/v1/*` vers Albert API en ajoutant la clé et les en-têtes CORS. `/health` → `{"status":"ok"}` |
+| `proxy/cloudflare-worker.js` | Même proxy, version Cloudflare Workers (gratuite) — voir `proxy/README.md` |
+| `server.js` | Proxy Express (Clever Cloud) : relaie `/v1/*` vers Albert API en ajoutant la clé et les en-têtes CORS. `/health` → `{"status":"ok"}` |
 | `package.json` | `start: node server.js` + dépendance `express` — **indispensables** au déploiement |
 
-- Hébergé sur **Clever Cloud** (application `caes-widget`), **redéployé automatiquement à chaque fusion sur `main`**.
+- **Option gratuite recommandée : Cloudflare Workers** — code `proxy/cloudflare-worker.js`, guide pas à pas `proxy/README.md`.
+- Option historique : **Clever Cloud** (application `caes-widget`, payante), redéployée automatiquement à chaque fusion sur `main`. Arrêtée le 05/11/2026 (facture impayée).
 - Variables d'environnement à définir dans Clever Cloud : `ALBERT_API_KEY` (obligatoire), `ALBERT_BASE_URL` (défaut : `https://albert.api.etalab.gouv.fr`), `ALLOWED_ORIGIN` (défaut : `*`).
 - Adresse utilisée par le widget : réglage ⚙️ « endpoint » (`js/config.js`).
 - Si `server.js` ou `package.json` sont supprimés/vidés, le déploiement échoue et le widget affiche « Erreur de connexion à Albert API ».
@@ -73,7 +75,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-20 fichiers, 462 tests. Depuis la racine du repo :
+21 fichiers, 475 tests. Depuis la racine du repo :
 
 ```bash
 npm test
