@@ -379,15 +379,20 @@ function updateSourceHub() {
   const filtersDetail = document.getElementById('grist-filters-detail');
   if (!gristCard) return;
 
-  const gristActive = gristRecords && gristRecords.length > 0;
-
-  if (gristActive) {
-    // Résoudre les vrais noms de colonnes via buildGristQueryTable
-    const table = (typeof buildGristQueryTable === 'function') ? buildGristQueryTable() : null;
-    const headers = table ? table.headers : Object.keys(gristRecords[0] || {}).filter(f => f !== 'id' && f !== 'manualSort');
+  // Carte « Source active » : décrit la source choisie dans le sélecteur
+  const activeTable = (typeof getActiveQueryTables === 'function') ? (getActiveQueryTables() || [])[0] : null;
+  const kind = (typeof getActiveSourceKind === 'function') ? getActiveSourceKind() : 'opendata';
+  const titleEl = gristCard.querySelector('.sc-title');
+  if (titleEl) titleEl.textContent = 'Source active';
+  const badge = gristCard.querySelector('.sc-badge');
+  if (activeTable) {
+    const headers = activeTable.headers || [];
     gristCard.className = 'source-card active';
-    gristCard.querySelector('.sc-badge').textContent = 'prioritaire';
-    gristDetail.innerHTML = `<strong>${gristRecords.length.toLocaleString('fr-FR')}</strong> lignes · <strong>${headers.length}</strong> colonnes. Le moteur utilise cette table en priorité pour les calculs et infographies.`;
+    if (badge) badge.textContent = { grist: 'table Grist', file: 'fichier importé', opendata: 'open data' }[kind] || 'active';
+    const unit = activeTable.rowUnit === 'formation' ? ' · 1 ligne = 1 formation' : '';
+    const gristNote = (kind !== 'grist' && gristRecords && gristRecords.length)
+      ? `<br><span style="color:var(--gris3)">Table Grist liée disponible (${gristRecords.length.toLocaleString('fr-FR')} lignes) : choisissez-la dans le sélecteur sous la conversation.</span>` : '';
+    gristDetail.innerHTML = `<strong>${escapeHtml(activeSourceLabel())}</strong><br><strong>${activeTable.objects.length.toLocaleString('fr-FR')}</strong> lignes · <strong>${headers.length}</strong> colonnes${unit}. Changez de source avec le sélecteur sous la conversation.${gristNote}`;
     if (gristActions) gristActions.style.display = 'flex';
 
     // Colonnes reconnues par le moteur (dimensions analysables)
@@ -401,10 +406,8 @@ function updateSourceHub() {
       };
       const recognized = [];
       headers.forEach(col => {
-        const kind = window.plannerColumnKind(col);
-        if (kindLabels[kind] && !recognized.find(r => r.kind === kind)) {
-          recognized.push({ kind, label: kindLabels[kind], col });
-        }
+        const k = window.plannerColumnKind(col);
+        if (kindLabels[k] && !recognized.find(r => r.kind === k)) recognized.push({ kind: k, label: kindLabels[k], col });
       });
       if (recognized.length) {
         columnsCard.style.display = '';
@@ -417,13 +420,10 @@ function updateSourceHub() {
     }
   } else {
     gristCard.className = 'source-card';
-    gristCard.querySelector('.sc-badge').textContent = 'inactive';
-    const def = defaultOpenDataLabel();
-    gristDetail.textContent = def
-      ? `Aucune table connectée — analyse par défaut : ${def}. Une ligne = une formation.`
-      : (typeof defaultOpenDataState !== 'undefined' && defaultOpenDataState === 'error'
-          ? 'Aucune table connectée. Open data Parcoursup indisponible pour le moment.'
-          : 'Aucune table connectée.');
+    if (badge) badge.textContent = 'en attente';
+    gristDetail.textContent = (typeof defaultOpenDataState !== 'undefined' && defaultOpenDataState === 'error')
+      ? 'Open data Parcoursup indisponible pour le moment. Importez un fichier Excel/CSV ou choisissez la table Grist dans le sélecteur sous la conversation.'
+      : 'Chargement de l\'open data Parcoursup…';
     if (gristActions) gristActions.style.display = 'none';
     if (columnsCard) columnsCard.style.display = 'none';
   }
@@ -457,6 +457,7 @@ grist.onRecords(function(records) {
   document.getElementById('grist-info').className = '';
   updateSourceHub();
   updateChatSub();
+  renderContextPills(); // le sélecteur propose maintenant la table Grist
   renderSuggestions(); // PR4.2 : régénère les suggestions dynamiques maintenant que le schéma réel est connu
   renderMiniSuggestions();
 });
@@ -483,14 +484,14 @@ function renderDocs() {
       statusHtml = `<div class="doc-status ok">✓ ${sizeKb} Ko extraits${rowInfo}</div>`;
     }
     if (doc.status === 'error') statusHtml = `<div class="doc-status error" title="${(doc.error||'').replace(/"/g,'&quot;')}" style="cursor:help">✕ Erreur — survolez pour le détail</div>`;
-    const adviceHtml = (doc.largeDataWarning && !gristRecords.length)
+    const adviceHtml = (doc.largeDataWarning && !(typeof isGristSourceActive === 'function' && isGristSourceActive()))
       ? `<div class="doc-advice">Fichier volumineux : l'analyse directe reste possible, mais Grist sera plus robuste pour les requêtes répétées et les infographies.</div>`
       : '';
 
     item.innerHTML = `
       <button class="doc-remove" onclick="removeDoc('${doc.id}', event)">✕</button>
       <div class="doc-name doc-name-clickable" onclick="openViewer('${doc.id}', event)">${doc.name}</div>
-      <div class="doc-meta"><span class="doc-badge ${doc.type}">${doc.type}</span>${gristRecords.length ? '<span class="mode-pill">source secondaire</span>' : ''}</div>
+      <div class="doc-meta"><span class="doc-badge ${doc.type}">${doc.type}</span>${(typeof isGristSourceActive === 'function' && isGristSourceActive()) ? '<span class="mode-pill">source secondaire</span>' : ''}</div>
       ${statusHtml}
       ${adviceHtml}
     `;
@@ -528,35 +529,155 @@ function defaultOpenDataLabel() {
   return '';
 }
 
+/* ═══════════════════════ SÉLECTEUR DE SOURCE ═══════════════════════
+   Toujours visible au-dessus de la zone de question : on voit sur quoi
+   on travaille et on change de source en un clic (open data, table Grist,
+   fichier Excel/CSV). Voir getActiveSourceKind / setActiveSource (documents.js). */
+function _srcKind() { return (typeof getActiveSourceKind === 'function') ? getActiveSourceKind() : 'opendata'; }
+function _gristCount() { return (typeof gristRecords !== 'undefined' && gristRecords) ? gristRecords.length : 0; }
+
+// Libellé de la source active (sous-titre, sélecteur, panneau Sources)
+function activeSourceLabel() {
+  const kind = _srcKind();
+  if (kind === 'grist') {
+    const name = (typeof gristTableName !== 'undefined' && gristTableName) ? `« ${gristTableName} »` : 'liée';
+    const n = _gristCount();
+    return `Table Grist ${name} · ${n.toLocaleString('fr-FR')} ligne${n > 1 ? 's' : ''}`;
+  }
+  if (kind === 'file' && typeof importedFile !== 'undefined' && importedFile && importedFile.table) {
+    const n = importedFile.table.objects.length;
+    return `${importedFile.table.name} · ${n.toLocaleString('fr-FR')} ligne${n > 1 ? 's' : ''}`;
+  }
+  if (typeof defaultOpenDataState !== 'undefined' && defaultOpenDataState === 'error') return 'Open data Parcoursup indisponible';
+  return defaultOpenDataLabel() || 'Chargement de l\'open data Parcoursup…';
+}
+
+function activeSourceIcon() {
+  return { grist: '🗂', file: '📎', opendata: '📊' }[_srcKind()] || '📊';
+}
+
 function renderContextPills() {
   const wrap = document.getElementById('context-pills');
   if (!wrap) return;
-  if (gristRecords && gristRecords.length) {
-    const uploaded = documents.filter(d => d.status === 'ok').length;
-    wrap.innerHTML = `<span class="context-pill">Source prioritaire : Grist (${gristRecords.length.toLocaleString('fr-FR')} lignes)</span>` + (uploaded ? `<span class="context-pill none">${uploaded} fichier${uploaded>1?'s':''} en complément</span>` : '');
-    return;
-  }
-  const selected = documents.filter(d => selectedDocIds.has(d.id) && d.status === 'ok');
-  if (!selected.length) {
-    const allOk = documents.filter(d => d.status === 'ok');
-    if (allOk.length) {
-      wrap.innerHTML = `<span class="context-pill">Contexte : tous les documents (${allOk.length})</span>`;
-    } else {
-      wrap.innerHTML = `<span class="context-pill${defaultOpenDataLabel() ? '' : ' none'}">${escapeHtml(defaultOpenDataLabel() || 'Aucun document chargé')}</span>`;
-    }
-    return;
-  }
-  wrap.innerHTML = selected.map(d => `<span class="context-pill">${d.name}</span>`).join('');
+  const kind = _srcKind();
+  const hasFile = typeof importedFile !== 'undefined' && importedFile && importedFile.table;
+  const gristN = _gristCount();
+  const od = defaultOpenDataLabel();
+  const opt = (k, icon, label, sub, enabled = true) =>
+    `<button type="button" class="src-opt${kind === k ? ' active' : ''}" ${enabled ? `onclick="chooseSource('${k}')"` : 'disabled'}>` +
+    `<span class="src-ico">${icon}</span><span class="src-txt"><strong>${escapeHtml(label)}</strong>${sub ? `<small>${escapeHtml(sub)}</small>` : ''}</span>${kind === k ? '<span class="src-check">✓</span>' : ''}</button>`;
+  const sheets = (hasFile && importedFile.sheets && importedFile.sheets.length > 1)
+    ? `<label class="src-sheet">Onglet : <select onchange="chooseSheet(this.value)">${importedFile.sheets.map(n => `<option${n === importedFile.sheet ? ' selected' : ''}>${escapeHtml(n)}</option>`).join('')}</select></label>`
+    : '';
+  wrap.innerHTML = `
+    <div class="src-selector">
+      <button type="button" class="src-current" onclick="toggleSourceMenu(event)" title="Changer de source de données">
+        <span>${activeSourceIcon()}</span><span class="src-current-label">${escapeHtml(activeSourceLabel())}</span><span class="src-caret">▾</span>
+      </button>
+      ${kind === 'file' ? '<button type="button" class="src-clear" onclick="removeImportedFile()" title="Retirer le fichier et revenir à l\'open data">✕</button>' : ''}
+      <div class="src-menu" id="src-menu" hidden>
+        ${opt('opendata', '📊', 'Open data Parcoursup' + (typeof defaultOpenDataTable !== 'undefined' && defaultOpenDataTable ? ' ' + defaultOpenDataTable.session : ''),
+              od ? 'France entière · 1 ligne = 1 formation' : (typeof defaultOpenDataState !== 'undefined' && defaultOpenDataState === 'error' ? 'Indisponible pour le moment' : 'Chargement…'))}
+        ${opt('grist', '🗂', 'Table Grist liée au widget', gristN ? `${gristN.toLocaleString('fr-FR')} lignes` : 'Aucune table liée (réglage du widget dans Grist)', gristN > 0)}
+        ${hasFile ? opt('file', '📎', importedFile.name, `${importedFile.table.objects.length.toLocaleString('fr-FR')} lignes`) : ''}
+        ${sheets}
+        <button type="button" class="src-opt src-import" onclick="openFileImport()"><span class="src-ico">⬆️</span><span class="src-txt"><strong>Importer un fichier Excel / CSV…</strong><small>ou glissez-le sur le widget · reste dans votre navigateur</small></span></button>
+      </div>
+      <input type="file" id="src-file-input" accept=".xlsx,.xlsm,.xls,.ods,.csv,.txt" hidden onchange="handleImportInput(this)">
+    </div>`;
 }
+
+function toggleSourceMenu(evt) {
+  if (evt) evt.stopPropagation();
+  const menu = document.getElementById('src-menu');
+  if (!menu) return;
+  menu.hidden = !menu.hidden;
+}
+function closeSourceMenu() {
+  const menu = document.getElementById('src-menu');
+  if (menu) menu.hidden = true;
+}
+document.addEventListener('click', e => { if (!e.target.closest || !e.target.closest('.src-selector')) closeSourceMenu(); });
+
+// Message court dans la conversation (sans barre d'actions Graphique/Excel/PDF)
+function sourceNotice(html, record = true) {
+  if (typeof addMessage !== 'function') return null;
+  return addMessage('assistant', html, { noActions: true, record });
+}
+
+function announceSourceChange() {
+  sourceNotice(`<div class="src-notice">${activeSourceIcon()} Source active : <strong>${escapeHtml(activeSourceLabel())}</strong>. Les prochaines réponses portent sur cette source (contexte d'analyse remis à zéro).</div>`);
+}
+
+function chooseSource(kind) {
+  closeSourceMenu();
+  if (kind === _srcKind()) return;
+  if (typeof setActiveSource === 'function') setActiveSource(kind);
+  announceSourceChange();
+}
+
+function chooseSheet(name) {
+  try {
+    if (typeof selectImportedSheet === 'function') selectImportedSheet(name);
+    announceSourceChange();
+  } catch (e) {
+    sourceNotice(`<div class="src-notice error">${escapeHtml(e.message)}</div>`, false);
+  }
+}
+
+function openFileImport() {
+  closeSourceMenu();
+  const input = document.getElementById('src-file-input');
+  if (input) input.click();
+}
+
+async function importFileFromUser(file) {
+  if (!file) return;
+  const loading = sourceNotice(`<div class="src-notice">⏳ Lecture de « ${escapeHtml(file.name)} »…</div>`, false);
+  try {
+    await importSpreadsheetFile(file);
+    if (loading) loading.remove();
+    announceSourceChange();
+  } catch (e) {
+    if (loading) loading.remove();
+    sourceNotice(`<div class="src-notice error">Import impossible : ${escapeHtml(e.message)}</div>`, false);
+  }
+}
+
+function handleImportInput(input) {
+  const file = input && input.files && input.files[0];
+  if (input) input.value = '';
+  importFileFromUser(file);
+}
+
+function removeImportedFile() {
+  if (typeof clearImportedFile === 'function') clearImportedFile();
+  announceSourceChange();
+}
+
+// Glisser-déposer un fichier n'importe où sur le widget
+(function setupFileDrop() {
+  let depth = 0;
+  const overlay = () => document.getElementById('drop-overlay');
+  const hasFiles = e => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+  document.addEventListener('dragenter', e => { if (!hasFiles(e)) return; e.preventDefault(); depth++; const o = overlay(); if (o) o.hidden = false; });
+  document.addEventListener('dragover', e => { if (hasFiles(e)) e.preventDefault(); });
+  document.addEventListener('dragleave', e => { if (!hasFiles(e)) return; depth = Math.max(0, depth - 1); if (!depth) { const o = overlay(); if (o) o.hidden = true; } });
+  document.addEventListener('drop', e => {
+    if (!hasFiles(e)) return;
+    e.preventDefault(); depth = 0;
+    const o = overlay(); if (o) o.hidden = true;
+    importFileFromUser(e.dataTransfer.files[0]);
+  });
+})();
 
 function updateChatSub() {
   const ok = documents.filter(d => d.status === 'ok').length;
   const total = documents.length;
   let txt = '';
-  if (gristRecords.length) {
-    txt = `${gristRecords.length.toLocaleString('fr-FR')} lignes Grist · source prioritaire`;
-    if (ok) txt += ` · ${ok} fichier${ok>1?'s':''} complémentaire${ok>1?'s':''}`;
-  } else if (total === 0) txt = (typeof defaultOpenDataLabel === 'function' && defaultOpenDataLabel()) || 'Aucun document chargé';
+  if (typeof activeSourceLabel === 'function' && typeof getActiveSourceKind === 'function') txt = activeSourceLabel();
+  else if (gristRecords.length) txt = `${gristRecords.length.toLocaleString('fr-FR')} lignes Grist`;
+  else if (total === 0) txt = (typeof defaultOpenDataLabel === 'function' && defaultOpenDataLabel()) || 'Aucun document chargé';
   else if (ok < total) txt = `${ok}/${total} documents prêts`;
   else txt = `${ok} document${ok>1?'s':''} prêt${ok>1?'s':''}`;
   const chatSub = document.getElementById('chat-sub');
@@ -598,7 +719,7 @@ const SUGGESTION_KIND_PRIORITY = ['boursier', 'zone_basque', 'apprentissage', 'a
 // on demande explicitement chaque axe d'analyse reconnu par le moteur,
 // avec le vrai nom des colonnes pour ancrer Albert sur la structure réelle.
 function buildSyntheseGlobaleQuestion() {
-  const table = (typeof buildGristQueryTable === 'function') ? buildGristQueryTable() : null;
+  const table = (typeof getActiveQueryTables === 'function') ? (getActiveQueryTables() || [])[0] : ((typeof buildGristQueryTable === 'function') ? buildGristQueryTable() : null);
   if (!table || !table.headers || !table.headers.length) {
     return 'Fais une synthèse complète de ce jeu de données : effectifs globaux, profil des candidats, répartition des formations et géographie.';
   }
@@ -659,7 +780,9 @@ function buildDynamicSuggestions(max = 6) {
   // sait déjà reconstruire les bons en-têtes dans ce cas (voir documents.js) —
   // le Data Engine s'en sert pour ses propres réponses, les suggestions doivent
   // faire de même pour rester cohérentes avec ce que l'utilisateur voit ensuite.
-  let table = buildGristQueryTable();
+  // Table Grist si c'est la source choisie, sinon la source active (open data, fichier)
+  const useGrist = (typeof getActiveSourceKind !== 'function') || getActiveSourceKind() === 'grist';
+  let table = useGrist ? buildGristQueryTable() : null;
   if ((!table || !table.headers || !table.headers.length) && typeof getActiveQueryTables === 'function') table = (getActiveQueryTables() || [])[0] || null;
   if (!table || !table.headers || !table.headers.length) return null;
   const fields = table.headers.filter(f => f !== 'id' && f !== 'manualSort');
@@ -726,10 +849,9 @@ function handleKeydown(e) {
 }
 
 function buildContext(localAnalysis = null) {
-  const selected = documents.filter(d => selectedDocIds.has(d.id) && d.status === 'ok');
-  // Si Grist est actif, il est prioritaire : les fichiers déposés ne sont inclus
-  // dans le contexte que s'ils ont été explicitement sélectionnés à gauche.
-  const docsToUse = gristRecords.length ? selected : (selected.length ? selected : documents.filter(d => d.status === 'ok'));
+  // Documents texte hérités (anciens imports) : inclus seulement s'ils ont été
+  // sélectionnés. Les données analysées viennent de la source active.
+  const docsToUse = documents.filter(d => selectedDocIds.has(d.id) && d.status === 'ok');
 
   let context = '';
   docsToUse.forEach(doc => {
@@ -749,17 +871,13 @@ ${localAnalysis.text}
 `;
   }
 
-  if (gristRecords.length) {
-    const gristTable = buildGristQueryTable();
-    const fullSynthesis = buildFullTableSynthesis(gristTable, localAnalysis?.question || '');
-    context += `\n\n${fullSynthesis}`;
-
-    const fields = Object.keys(gristRecords[0]);
-    const preview = gristRecords.slice(0, 12).map(r => fields.map(f => r[f]).join(' | ')).join('\n');
-    context += `\n\n=== APERÇU GRIST (12 premières lignes, seulement illustratif) ===\nColonnes brutes: ${fields.join(' | ')}\n${preview}`;
-  } else if (!docsToUse.length && typeof getDefaultOpenDataTable === 'function' && getDefaultOpenDataTable()) {
-    // Aucune table ni fichier : open data Parcoursup par défaut
-    context += `\n\n${buildFullTableSynthesis(getDefaultOpenDataTable(), localAnalysis?.question || '')}`;
+  const activeTable = (typeof getActiveQueryTables === 'function') ? (getActiveQueryTables() || [])[0] : null;
+  if (activeTable) {
+    context += `\n\nSOURCE ACTIVE (choisie par l'utilisateur) : ${typeof activeSourceLabel === 'function' ? activeSourceLabel() : activeTable.name}. Réponds uniquement à partir de cette source et rappelle-la en une ligne dans ta réponse.`;
+    context += `\n\n${buildFullTableSynthesis(activeTable, localAnalysis?.question || '')}`;
+    const fields = activeTable.headers || [];
+    const preview = (activeTable.objects || []).slice(0, 12).map(r => fields.map(f => r[f]).join(' | ')).join('\n');
+    context += `\n\n=== APERÇU (12 premières lignes, seulement illustratif) ===\nColonnes : ${fields.join(' | ')}\n${preview}`;
   }
 
   return context.trim();
@@ -973,7 +1091,7 @@ function addMessage(role, content, opts = {}) {
     if (typeof enhanceEditableDataTitles === 'function') enhanceEditableDataTitles(bubble);
   }
   msg.appendChild(bubble);
-  if (role === 'assistant') msg.appendChild(buildCopilotActionBar(bubble, opts.dataExecution || null, opts.question || ''));
+  if (role === 'assistant' && !opts.noActions) msg.appendChild(buildCopilotActionBar(bubble, opts.dataExecution || null, opts.question || ''));
   wrap.appendChild(msg);
   wrap.scrollTop = wrap.scrollHeight;
   if (opts.record !== false) {
@@ -981,6 +1099,7 @@ function addMessage(role, content, opts = {}) {
       ? { type: 'text', role, text: content }
       : { type: 'html', role, html: content });
   }
+  return msg;
 }
 
 function _deFindTitleEl(btn) {
@@ -1100,7 +1219,7 @@ function buildLoadingLabel(question) {
     return 'Préparation de l\'export…';
   }
   if (typeof isDataEngineQuestion === 'function' && isDataEngineQuestion(question)) {
-    const gristActive = gristRecords && gristRecords.length > 0;
+    const gristActive = (typeof getActiveSourceKind === 'function') ? getActiveSourceKind() === 'grist' : (gristRecords && gristRecords.length > 0);
     return gristActive ? 'Calcul sur les données Grist…' : 'Analyse des données…';
   }
   return 'Albert analyse les documents…';

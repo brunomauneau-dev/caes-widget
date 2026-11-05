@@ -30,11 +30,15 @@ Fichiers de données (chargés dynamiquement depuis la racine) :
 | `parcoursup-kb-index-v2.json` | Index hybride de la KB (recherche par terme) |
 | `parcoursup-opendata-reference-v1.json` | Référentiel national open data Parcoursup |
 
-Source par défaut (sans table Grist ni fichier) :
+Sources de données — **sélecteur toujours visible sous la conversation** (`js/documents.js` : `getActiveSourceKind`, `setActiveSource`, `importSpreadsheetFile`) :
 
-| Source | Rôle |
-|---|---|
-| API open data `fr-esr-parcoursup` | Au démarrage, si aucune table Grist ni aucun fichier n'est fourni, le widget charge l'open data Parcoursup **France entière** de la **session la plus récente publiée** (détectée automatiquement, repli sur 2025). Une ligne = une formation. Priorité : table Grist > fichiers déposés > open data. Code : `loadDefaultOpenDataTable()` dans `js/knowledge.js`. |
+| Source | Quand | Détail |
+|---|---|---|
+| 📊 Open data Parcoursup | **Au lancement** (par défaut) | France entière, **session la plus récente publiée** (détectée automatiquement, repli 2025). Une ligne = une formation. `loadDefaultOpenDataTable()` dans `js/knowledge.js`. |
+| 🗂 Table Grist liée | Sur choix dans le sélecteur | La table branchée au widget dans Grist. |
+| 📎 Fichier Excel / CSV | Bouton « Importer… » ou glisser-déposer | `.xlsx`, `.xls`, `.ods`, `.csv` (≤ 50 Mo). Lu dans le navigateur, jamais envoyé ailleurs ; perdu au rechargement. Ligne d'en-têtes détectée sous les titres d'export, choix de l'onglet, CSV `;`/`,` et Windows-1252. ✕ = retour à l'open data. |
+
+Changer de source remet le contexte d'analyse à zéro (filtres, historique) et Albert reçoit la source active.
 
 Table Grist additionnelle (chargée via GitHub Actions) :
 
@@ -75,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-21 fichiers, 475 tests. Depuis la racine du repo :
+23 fichiers, 498 tests. Depuis la racine du repo :
 
 ```bash
 npm test

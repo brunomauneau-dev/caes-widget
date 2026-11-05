@@ -529,7 +529,8 @@ loadParcoursupNational();
    publiée — en pratique la session n-1. La session est détectée
    automatiquement : rien à modifier quand une nouvelle année est publiée.
    Une ligne = une formation (données agrégées, pas de données individuelles).
-   Priorité inchangée : table Grist > fichiers déposés > open data. */
+   C'est la source active au lancement ; table Grist et fichier Excel/CSV
+   se choisissent ensuite dans le sélecteur de source (documents.js). */
 
 // Champs souhaités (noms techniques de l'API). Seuls ceux qui existent
 // réellement dans le jeu de données sont demandés : si le ministère renomme
@@ -630,14 +631,13 @@ async function loadDefaultOpenDataTable() {
   return getDefaultOpenDataTable();
 }
 
-// Démarrage : on laisse quelques secondes à Grist pour envoyer sa table.
-// Si aucune table ni aucun fichier n'est présent, on charge l'open data.
+// Démarrage : l'open data est la source par défaut, toujours chargée au
+// lancement (la table Grist et les fichiers se choisissent ensuite dans le
+// sélecteur de source).
 function maybeLoadDefaultOpenData() {
-  const hasGrist = (typeof gristRecords !== 'undefined') && gristRecords && gristRecords.length > 0;
-  const hasDocs = (typeof documents !== 'undefined') && documents.some(d => d.status === 'ok');
-  if (!hasGrist && !hasDocs) loadDefaultOpenDataTable();
+  loadDefaultOpenDataTable();
 }
 if (typeof setTimeout === 'function' && typeof fetch === 'function') {
-  const _t = setTimeout(maybeLoadDefaultOpenData, 2500);
+  const _t = setTimeout(maybeLoadDefaultOpenData, 300);
   if (_t && typeof _t.unref === 'function') _t.unref();
 }
