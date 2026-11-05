@@ -261,6 +261,22 @@ await describe('Titre des blocs : un état codé est nommé, pas affiché « 1 �
   assert(/apprentis/.test(titre) && !/— 1$/.test(titre), `titre lisible (obtenu : ${titre})`);
 });
 
+await describe('Liste : colonne presque vide (cas réel des PASS : 70 lignes remplies sur 287)', async () => {
+  // Comme dans l'open data réel : « très détaillée » rarement remplie, et mélangeant options et lieux
+  const lignes = D.openData(4000).map((o, i) => o.fili === 'PASS' ? { ...o, detail: i % 4 === 0 ? (i % 8 === 0 ? 'Antenne à LENS (62)' : 'option Sciences Infirmières') : '' } : o);
+  const ctx = ctxOpenData(lignes);
+  const nPass = lignes.filter(o => o.fili === 'PASS').length;
+  const { exec } = ask(ctx, 'donne moi la liste complète des filières de PASS');
+  assert(exec?.kind === 'group_by' && !/très détaillée/.test(exec.plan.targetCol), `colonne listée bien remplie, pas « très détaillée » (obtenu : ${exec?.plan?.targetCol})`);
+  const somme = exec.result.rows.reduce((t, r) => t + r.count, 0);
+  assert(somme + (exec.result.total - exec.result.filled) === nPass, `les lignes + « sans valeur » = tous les PASS (${nPass})`);
+  const vide = lignes.map(o => ({ ...o, nom: o.fili === 'PASS' ? '' : o.nom, fil_det: o.fili === 'PASS' ? '' : o.fil_det, form: o.form }));
+  const ctx2 = ctxOpenData(vide);
+  const r2 = ask(ctx2, 'donne moi la liste complète des filières de PASS');
+  if (r2.exec?.result && r2.exec.result.filled < r2.exec.result.total) assert(/sans valeur dans cette colonne/.test(r2.exec.html), 'le nombre de formations sans valeur est affiché');
+  else assert(true, 'colonne entièrement remplie : pas de mention « sans valeur »');
+});
+
 // ─── Faux positifs : le garde-fou ne bloque pas les questions normales ───────
 await describe('Faux positifs du garde-fou', async () => {
   const { ctx } = await ctxCSV(D.versTableau(C, D.enTetes.complets));

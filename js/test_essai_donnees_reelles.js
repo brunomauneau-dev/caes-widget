@@ -101,6 +101,24 @@ await describe('Contrôles de cohérence : détectent les incohérences (faux po
   assert(c.some(x => !x.ok && /deux formulations/.test(x.libelle)), 'deux formulations divergentes → contrôle en échec');
 });
 
+await describe('Contrôles adaptés au réel : une option absente des données n\'est pas une erreur', async () => {
+  const r = JSON.parse(JSON.stringify(res.resultats));
+  Object.assign(r.find(x => x.id === 'droit'), { kind: 'unresolved', count: undefined, reponse: 'Non reconnu' });
+  r.find(x => x.id === 'liste1').lignes = r.find(x => x.id === 'liste1').lignes.filter(l => !/droit/i.test(l.value));
+  r.find(x => x.id === 'liste1').sansValeur = r.find(x => x.id === 'pass').count - r.find(x => x.id === 'liste1').lignes.reduce((t, l) => t + l.count, 0);
+  const c = controler(r);
+  assert(c.find(x => /PASS option Droit » : un nombre plausible/.test(x.libelle))?.ok, '« option Droit » absente et signalée non trouvée → contrôle réussi');
+  assert(c.find(x => /cohérent avec la liste/.test(x.libelle))?.ok, 'non trouvée ET aucune ligne Droit dans la liste → cohérent');
+  assert(c.find(x => /lignes \+ sans valeur/.test(x.libelle))?.ok, 'somme des lignes + sans valeur = nombre de PASS');
+  r.find(x => x.id === 'liste1').lignes.push({ value: 'PASS option Droit', count: 3 });
+  assert(!controler(r).find(x => /cohérent avec la liste/.test(x.libelle))?.ok, 'non trouvée MAIS une ligne Droit dans la liste → incohérence détectée');
+});
+
+await describe('Diagnostic des colonnes de formation', async () => {
+  assert(res.diag && res.diag.n === 100 && res.diag.colonnes.length >= 3, `diagnostic des 100 PASS sur les colonnes de formation (obtenu : ${res.diag?.n}, ${res.diag?.colonnes?.length} colonnes)`);
+  assert(/## Diagnostic : colonnes de formation des PASS/.test(res.texte) && /\| 100 \/ 100 \|/.test(res.texte), 'tableau du diagnostic dans le rapport (remplissage)');
+});
+
 await describe('Rapport', async () => {
   assert(/^# Essai sur données réelles/.test(res.texte), 'titre');
   assert(/^## Cohérence : \d+ \/ \d+ contrôles réussis (✅|❌)$/m.test(res.texte), 'bilan des contrôles en tête');

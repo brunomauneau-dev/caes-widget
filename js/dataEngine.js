@@ -913,9 +913,16 @@ function pickListColumn(table, filters) {
   const info = formationTermsInfo(table);
   if (!info.cols.length) return null;
   const rows = applyLocalActionFilters(table.objects || [], filters || []);
-  const stats = info.cols.map(c => ({ c, d: new Set(rows.map(r => String(r?.[c] ?? '').trim()).filter(Boolean)).size }));
+  const stats = info.cols.map(c => {
+    const vals = rows.map(r => String(r?.[c] ?? '').trim()).filter(Boolean);
+    return { c, d: new Set(vals).size, rempli: rows.length ? vals.length / rows.length : 0 };
+  });
   const lisible = stats.filter(s => s.d >= 2 && s.d <= Math.max(30, rows.length * 0.6));
-  if (lisible.length) return lisible.sort((a, b) => b.d - a.d)[0].c;
+  // v27.8 — open data réel : la colonne la plus fine peut être presque vide (PASS : 70 lignes remplies sur 287).
+  // On préfère une colonne remplie pour au moins 80 % des lignes ; à défaut, la plus remplie.
+  const remplie = lisible.filter(s => s.rempli >= 0.8);
+  if (remplie.length) return remplie.sort((a, b) => b.d - a.d)[0].c;
+  if (lisible.length) return lisible.sort((a, b) => b.rempli - a.rempli || b.d - a.d)[0].c;
   const plusieurs = stats.filter(s => s.d >= 2).sort((a, b) => a.d - b.d);
   return (plusieurs[0] || stats.sort((a, b) => b.d - a.d)[0]).c;
 }
@@ -2113,7 +2120,9 @@ function renderDataEngineResultHtml(tool, plan, result) {
     // v27.7 — liste complète des intitulés distincts
     const rows = result.rows || [];
     const clearTitle = `Liste — ${_shortColName(plan.targetCol)}`;
-    const reste = (result.distinct || rows.length) > rows.length ? `<p style="font-size:12px;color:var(--gris3)">… et ${(result.distinct - rows.length).toLocaleString('fr-FR')} autres intitulés.</p>` : '';
+    const reste = ((result.distinct || rows.length) > rows.length ? `<p style="font-size:12px;color:var(--gris3)">… et ${(result.distinct - rows.length).toLocaleString('fr-FR')} autres intitulés.</p>` : '')
+      // v27.8 — lignes sans valeur dans la colonne listée : affichées, pour que le total soit juste
+      + (result.filled !== undefined && result.filled < result.total ? `<p style="font-size:12px;color:var(--gris3)">${(result.total - result.filled).toLocaleString('fr-FR')} ${unit(result.total - result.filled)} sans valeur dans cette colonne.</p>` : '');
     return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p><strong>${(result.distinct ?? rows.length).toLocaleString('fr-FR')}</strong> intitulé${(result.distinct ?? rows.length) > 1 ? 's' : ''} différent${(result.distinct ?? rows.length) > 1 ? 's' : ''} dans <strong>${escapeHtml(plan.targetCol)}</strong>, pour <strong>${result.total.toLocaleString('fr-FR')}</strong> ${unit(result.total)}.</p><ul>${rows.map(r => `<li>${escapeHtml(r.value)} : <strong>${r.count.toLocaleString('fr-FR')}</strong></li>`).join('')}</ul>${reste}<p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
   }
   if (tool === 'group_by' || tool === 'top') {
