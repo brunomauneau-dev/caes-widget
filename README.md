@@ -44,6 +44,22 @@ Table Grist additionnelle (chargée via GitHub Actions) :
 
 ---
 
+## Proxy Albert (Clever Cloud) — NE PAS SUPPRIMER
+
+Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe par un petit proxy :
+
+| Fichier | Rôle |
+|---|---|
+| `server.js` | Proxy Express : relaie `/v1/*` vers Albert API en ajoutant la clé et les en-têtes CORS. `/health` → `{"status":"ok"}` |
+| `package.json` | `start: node server.js` + dépendance `express` — **indispensables** au déploiement |
+
+- Hébergé sur **Clever Cloud** (application `caes-widget`), **redéployé automatiquement à chaque fusion sur `main`**.
+- Variables d'environnement à définir dans Clever Cloud : `ALBERT_API_KEY` (obligatoire), `ALBERT_BASE_URL` (défaut : `https://albert.api.etalab.gouv.fr`), `ALLOWED_ORIGIN` (défaut : `*`).
+- Adresse utilisée par le widget : réglage ⚙️ « endpoint » (`js/config.js`).
+- Si `server.js` ou `package.json` sont supprimés/vidés, le déploiement échoue et le widget affiche « Erreur de connexion à Albert API ».
+
+---
+
 ## Règles de développement
 
 1. **Cache-busting automatique** : à chaque modification d'un `js/*.js`, bumper le `?v=` correspondant dans `index.html`. Format : `js/albert.js?v=27.6.12` → `js/albert.js?v=27.6.13`.
@@ -94,6 +110,6 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 
 - Pas de build/bundler (Webpack, Vite…)
 - Pas de framework JS (React, Vue…)
-- Pas de backend — tout est côté client
+- Pas de backend applicatif — tout est côté client, hormis le proxy Albert (`server.js`) qui ne fait que relayer les appels
 - Pas d'accès API SAP BusinessObjects (bloqué réseau académique)
 - Pas de généralisation à d'autres tables que Parcoursup
