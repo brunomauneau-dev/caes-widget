@@ -334,7 +334,11 @@ function inheritConversationContext(plan, question) {
     const newFilters = (filterFollowUp || dimensionFollowUp || bareAction)
       ? newStrictFilters
       : (plan.filters || []);
-    plan.filters = mergeFiltersUnique(previousFilters, newFilters);
+    // v27.7 — une formation citée dans la nouvelle question remplace la formation précédente (pas de cumul BTS + PASS)
+    const newTerms = (plan.filters || []).filter(f => f && f.source === 'termes_formation');
+    const formCols = new Set(formationTermsInfo(plan.table || prev.table).cols);
+    const prevKept = newTerms.length ? previousFilters.filter(f => !(f && (f.source === 'termes_formation' || (formCols.has(f.col) && f.op !== 'neq')))) : previousFilters;
+    plan.filters = mergeFiltersUnique(prevKept, [...newFilters, ...newTerms]);
 
     if (dimensionFollowUp) {
       plan.tool = 'group_by';
@@ -682,18 +686,214 @@ function renderCompareCharts(plan, result) {
   return `${renderComparePopulationChart(rows, baseTotal)}${legend}${renderCompareDeltaChart('formations', formationRows, rows, 5)}${renderCompareDeltaChart('académies', academieRows, rows, 5)}${renderCompareDeltaChart('séries de bac', serieRows, rows, 5)}`;
 }
 
+/* ═══════════════ v27.7 — Intitulés de formation cités dans la question ═══════════════
+   « combien de PASS option Droit » : PASS et Droit sont des mots des intitulés de formation.
+   Avant, aucun filtre n'était créé sans le mot « filière » / « formation » (PASS inconnu),
+   et le moteur comptait tout le fichier. Désormais :
+   - tout mot de la question présent dans les intitulés de formation de la table active
+     devient un filtre « l'intitulé contient » (sur toutes les colonnes de formation à la fois) ;
+   - « liste / toutes les filières / options » affiche les valeurs distinctes, pas un export ;
+   - un mot après « option / mention / spécialité » introuvable arrête le calcul (pas de chiffre faux). */
+
+const FORMATION_TERMS_COL = 'Intitulé de formation contenant';
+const FORMATION_TERM_STOP = new Set(`
+  combien nombre nombres total totaux effectif effectifs liste lister listez listes enumere enumerer donne donner donnez moi nous vous
+  tout tous toute toutes les des une uns aux avec sans pour par dans sur entre selon chez vers apres avant parmi hors sauf
+  quelles quels quelle quel sont est etait ete ont avait sera elle elles ils qui que quoi dont ainsi aussi alors mais car comme
+  plus moins tres bien peu beaucoup autre autres meme ceci cela celle celles ceux leur leurs notre votre son ses mon mes ton tes
+  formation formations filiere filieres option options mention mentions specialite specialites parcours intitule intitules
+  diplome diplomes cursus offre offres type types categorie categories detail details detaille detaillee detailles detaillees
+  complete complet completes complets ensemble differentes differents differente different repartition ventilation
+  pourcentage proportion part parts taux acces place places capacite capacites candidat candidats candidature candidatures
+  admis admise admises admission admissions voeu voeux proposition propositions boursier boursiers bourse bourses
+  neo bachelier bacheliers bac general generale technologique professionnel pro serie series filles garcons femmes hommes
+  public publics publique publiques prive prives privee privees statut etablissement etablissements session sessions
+  annee annees france entiere national nationale nationaux academie academies region regions departement departements
+  ville villes commune communes graphique tableau camembert histogramme top classement principales principaux
+  moyenne mediane minimum maximum existe existent propose proposes proposee proposees disponible disponibles
+  ouvert ouverte ouvertes ouverts parcoursup open data donnees base jeu fichier table colonne colonnes ligne lignes
+  svp merci peux pouvez voudrais aimerais veux montre montrer affiche afficher selective selectives selectif selectifs
+  demande demandes demandee demandees exporte exporter export excel csv superieur superieure inferieur inferieure egal
+`.trim().split(/\s+/));
+const FORMATION_COL_RE = /fili[eè]re|formation|sp[eé]cialit[eé]|mention|parcours|dipl[oô]me|intitul[eé]/i;
+const NOT_FORMATION_COL_RE = /statut|[eé]tablissement|contrat|session|acad[eé]mi|d[eé]partement|r[eé]gion|commune|ville|s[eé]lectiv|capacit|effectif|nombre|\bnb\b|pourcentage|%|taux|rang|\bdont\b|uai|code|lyc[eé]e|candidat|v[oœ]eux?|boursier|sexe/i;
+const GEO_COL_RE = /acad[eé]mi|d[eé]partement|r[eé]gion|commune|ville/i;
+const _formationTermsCache = new WeakMap();
+
+// Colonnes de formation (texte) et mots qu'elles contiennent ; mots des colonnes géographiques à part
+function formationTermsInfo(table) {
+  if (!table || !Array.isArray(table.objects)) return { cols: [], words: new Set(), geo: new Set() };
+  const cached = _formationTermsCache.get(table);
+  if (cached && cached.n === table.objects.length) return cached;
+  const headers = (table.headers || Object.keys(table.objects[0] || {})).filter(h => h && !/^(id|manualSort)$/i.test(String(h)));
+  const sample = table.objects.slice(0, 300);
+  const textual = h => {
+    const vals = sample.map(r => r?.[h]).filter(v => v !== undefined && v !== null && String(v).trim() !== '');
+    return vals.length > 0 && vals.filter(v => /[a-zA-ZÀ-ÿ]/.test(String(v))).length >= vals.length * 0.8;
+  };
+  const cols = headers.filter(h => FORMATION_COL_RE.test(h) && !NOT_FORMATION_COL_RE.test(h) && textual(h));
+  const geoCols = headers.filter(h => GEO_COL_RE.test(h) && !cols.includes(h));
+  const words = new Set(), geo = new Set();
+  const seen = new Set();
+  table.objects.forEach(r => {
+    cols.forEach(c => {
+      const v = r?.[c];
+      if (v === undefined || v === null || v === '') return;
+      const k = c + '\u0001' + v;
+      if (seen.has(k)) return;
+      seen.add(k);
+      normalizeText(v).split(' ').forEach(w => { if (w) words.add(w); });
+    });
+    geoCols.forEach(c => {
+      const v = r?.[c];
+      if (v === undefined || v === null || v === '') return;
+      const k = c + '\u0001' + v;
+      if (seen.has(k)) return;
+      seen.add(k);
+      normalizeText(v).split(' ').forEach(w => { if (w) geo.add(w); });
+    });
+  });
+  const info = { n: table.objects.length, cols, words, geo };
+  _formationTermsCache.set(table, info);
+  return info;
+}
+
+// Forme du mot présente dans les intitulés (« licences » → « licence »), ou null
+function formationWordForm(token, info) {
+  if (info.words.has(token)) return token;
+  const sing = token.replace(/(s|x)$/, '');
+  if (sing !== token && sing.length >= 3 && info.words.has(sing)) return sing;
+  return null;
+}
+
+// Mots de la question à chercher dans les intitulés, et mots d'option introuvables
+function formationTermsFromQuestion(table, question, otherFilters = []) {
+  const info = formationTermsInfo(table);
+  const out = { terms: [], labels: [], missing: [] };
+  if (!info.cols.length) return out;
+  const q = normalizeText(question || '');
+  const covered = new Set();
+  (otherFilters || []).forEach(f => normalizeText(f.value).split(' ').forEach(w => covered.add(w)));
+  // Mots qui suivent « option / mention / spécialité / parcours » : toujours cherchés, signalés s'ils sont introuvables
+  const forced = new Set();
+  const reOpt = /\b(?:option|options|mention|mentions|specialite|specialites|parcours)\s+(?:(?:de|d|en|du|des|la|le|l)\s+)?([a-z0-9]{3,})/g;
+  let m;
+  while ((m = reOpt.exec(q))) if (!FORMATION_TERM_STOP.has(m[1])) forced.add(m[1]);
+  const originals = String(question || '').split(/[^A-Za-zÀ-ÿ0-9œŒæÆ]+/).filter(Boolean);
+  const labelFor = tok => originals.find(w => normalizeText(w) === tok) || tok;
+  q.split(' ').forEach(tok => {
+    if (tok.length < 3 || /^\d+$/.test(tok) || FORMATION_TERM_STOP.has(tok) || covered.has(tok)) return;
+    const form = formationWordForm(tok, info);
+    if (!form) { if (forced.has(tok)) out.missing.push(labelFor(tok)); return; }
+    if (info.geo.has(form) && !forced.has(tok)) return; // Bordeaux, Gironde… : des lieux, pas des formations
+    if (out.terms.includes(form)) return;
+    out.terms.push(form);
+    out.labels.push(labelFor(tok));
+  });
+  return out;
+}
+
+function makeFormationTermsFilter(table, terms, labels) {
+  const info = formationTermsInfo(table);
+  const label = labels.join(' + ');
+  return { col: FORMATION_TERMS_COL, op: 'contains_all', cols: info.cols.slice(), terms: terms.slice(), value: label, label, source: 'termes_formation' };
+}
+
+// Ajoute au plan le filtre « intitulé contient » quand la question cite des mots d'intitulés
+// que les filtres déjà trouvés ne couvrent pas.
+function applyFormationTerms(plan) {
+  if (!plan || !plan.table || ['compare', 'chart_current', 'export_current_excel', 'export_current_csv'].includes(plan.tool)) return plan;
+  const info = formationTermsInfo(plan.table);
+  if (!info.cols.length) return plan;
+  const formCols = new Set(info.cols);
+  const isFormationFilter = f => f && (f.source === 'termes_formation' || (formCols.has(f.col) && f.op !== 'neq'));
+  const others = (plan.filters || []).filter(f => !isFormationFilter(f));
+  const found = formationTermsFromQuestion(plan.table, plan.question, others);
+  if (found.missing.length) plan.unresolvedTerms = found.missing;
+  if (!found.terms.length) return plan;
+  const formFilters = (plan.filters || []).filter(f => isFormationFilter(f) && f.source !== 'termes_formation');
+  const coveredByPlanner = formFilters.length && found.terms.every(t => formFilters.some(f => normalizeText(f.value).split(' ').includes(t)));
+  if (coveredByPlanner) return plan;
+  plan.filters = [...others, makeFormationTermsFilter(plan.table, found.terms, found.labels)];
+  plan.mentionedCols = Array.from(new Set([...(plan.mentionedCols || []), ...info.cols]));
+  return plan;
+}
+
+// « liste / toutes les filières / quelles sont les options… » : valeurs distinctes, pas un export de lignes
+function hasExportWords(q) { return /\bexport|\bexcel\b|\bxlsx\b|\bcsv\b|telecharg/.test(q); }
+function hasListCue(q) {
+  if (/\bplus\b|\bmoins\b|\btop\b|classement|principa/.test(q)) return false;
+  return /\b(liste|lister|listez|enumere|enumerer)\b/.test(q)
+    || /\b(quelles|quels) sont les\b/.test(q)
+    || /\b(toutes|tous) les\b/.test(q)
+    || /\bles different(e)?s\b/.test(q)
+    || /\bavec (toutes )?(les |ses )?options\b/.test(q);
+}
+function hasFormationNoun(q) { return /\b(filieres?|formations?|options?|mentions?|specialites?|parcours|diplomes?|intitules?|cursus)\b/.test(q); }
+function isListValuesRequest(question) {
+  const q = normalizeText(question || '');
+  return !hasExportWords(q) && hasListCue(q) && hasFormationNoun(q);
+}
+
+// Colonne à lister : la colonne de formation la plus fine parmi les lignes retenues
+function pickListColumn(table, filters) {
+  const info = formationTermsInfo(table);
+  if (!info.cols.length) return null;
+  const rows = applyLocalActionFilters(table.objects || [], filters || []);
+  const stats = info.cols.map(c => ({ c, d: new Set(rows.map(r => String(r?.[c] ?? '').trim()).filter(Boolean)).size }));
+  const lisible = stats.filter(s => s.d >= 2 && s.d <= Math.max(30, rows.length * 0.6));
+  if (lisible.length) return lisible.sort((a, b) => b.d - a.d)[0].c;
+  const plusieurs = stats.filter(s => s.d >= 2).sort((a, b) => a.d - b.d);
+  return (plusieurs[0] || stats.sort((a, b) => b.d - a.d)[0]).c;
+}
+function applyListMode(plan) {
+  if (!plan || !plan.table || plan.tool === 'compare') return plan;
+  const q = normalizeText(plan.question || '');
+  if (hasExportWords(q) || !hasListCue(q)) return plan;
+  const hasTerms = (plan.filters || []).some(f => f.source === 'termes_formation');
+  if (!hasFormationNoun(q) && !hasTerms) return plan;
+  const col = pickListColumn(plan.table, plan.filters);
+  if (!col) return plan;
+  plan.tool = 'group_by';
+  plan.listMode = true;
+  plan.targetCol = col;
+  plan.limit = 300;
+  return plan;
+}
+
+// Calcul arrêté : un terme de la question ne correspond à aucune formation
+function unresolvedFormationExecution(plan, missing, termFilter) {
+  const info = formationTermsInfo(plan.table);
+  let base = plan.table.objects || [];
+  const labels = termFilter ? termFilter.label.split(' + ') : [];
+  // Pistes : les intitulés qui contiennent au moins le premier terme reconnu
+  if (termFilter) base = applyLocalActionFilters(base, [{ ...termFilter, terms: [termFilter.terms[0]] }]);
+  const col = pickListColumn({ ...plan.table, objects: base }, []) || info.cols[0];
+  const sugg = col ? topCountsForRows(base, col, 15).top : [];
+  const quoi = missing.length
+    ? `aucune formation dont l'intitulé contient « ${missing.join(' », « ')} »${termFilter ? ` (avec « ${termFilter.label} »)` : ''}`
+    : `aucune formation dont l'intitulé contient à la fois « ${labels.join(' » et « ')} »`;
+  const html = `<h4>Formation non trouvée</h4><p>Je n'ai trouvé ${escapeHtml(quoi)} dans <strong>${escapeHtml(plan.table.name || 'la table active')}</strong>. `
+    + `Je ne donne donc pas de chiffre, plutôt qu'un total faux.</p>`
+    + (sugg.length ? `<p><strong>Intitulés disponibles${labels.length ? ` pour « ${escapeHtml(labels[0])} »` : ''}</strong> (${escapeHtml(col)}) :</p><ul>${sugg.map(s => `<li>${escapeHtml(s.value)} : <strong>${s.count.toLocaleString('fr-FR')}</strong></li>`).join('')}</ul>` : '')
+    + `<p style="font-size:12px;color:var(--gris3)">Reformulez avec l'un de ces intitulés.</p>`;
+  return { kind: 'unresolved', plan, result: { missing, suggestions: sugg }, text: `NON TROUVÉ : ${quoi}`, html };
+}
+
 function isDataEngineQuestion(question) {
   const q = normalizeText(question || '');
   if (!q) return false;
   // Exclusion : demandes de synthèse/résumé général → répondre via Albert narratif, pas Data Engine
   if (/^(fais |donne|produis |r[eé]dige )?(une? )?(synth[eè]se|r[eé]sum[eé]|bilan|vue d'ensemble|portrait|analyse globale)/.test(q)) return false;
-  return /compare|comparaison|comparer|versus| vs |combien|nombre|effectif|compte|compter|repartition|r[eé]partition|ventilation|par |groupe|group[eé]|top|classement|principa|plus frequen|plus fréquent|croise|crois[eé]|tableau crois[eé]|pivot|moyen|moyenne|median|m[eé]diane|minimum|maximum|min|max|export|excel|csv|liste|filtre|graphique|graphe|diagramme|histogramme|camembert|barres?|boursier|basque|hors|sauf|seulement|uniquement|visualis|repr[eé]sent|montre-?moi|dessine|trace|issus?\s+d[ue]|originaires?|venant\s+d[ue]|provenant|scolaris|scolarit/.test(q) || isFollowUpQuestion(question);
+  return /compare|comparaison|comparer|versus| vs |combien|nombre|effectif|compte|compter|repartition|r[eé]partition|ventilation|par |groupe|group[eé]|top|classement|principa|plus frequen|plus fréquent|croise|crois[eé]|tableau crois[eé]|pivot|moyen|moyenne|median|m[eé]diane|minimum|maximum|min|max|export|excel|csv|liste|filtre|graphique|graphe|diagramme|histogramme|camembert|barres?|boursier|basque|hors|sauf|seulement|uniquement|visualis|repr[eé]sent|montre-?moi|dessine|trace|issus?\s+d[ue]|originaires?|venant\s+d[ue]|provenant|scolaris|scolarit/.test(q) || isListValuesRequest(question) || isFollowUpQuestion(question);
 }
 
 function inferMeasureIntent(question) {
   const q = normalizeText(question || '');
   if (/compare|comparaison|comparer|versus| vs /.test(q)) return 'compare';
   if (/graphique|graphe|diagramme|histogramme|camembert|barres?|chart|visualis|repr[eé]sent|montre-?moi|dessine|trace/.test(q)) return 'group_by';
+  // v27.7 — « liste des filières / options » = valeurs distinctes ; l'export reste pour « exporte / Excel / CSV »
+  if (isListValuesRequest(question)) return 'group_by';
   if (/export|excel|xlsx|csv|telecharg|t[eé]l[eé]charg|sors moi|sort moi|extraire|extrait|liste/.test(q)) {
     return /\bcsv\b/.test(q) ? 'export_csv' : 'export_excel';
   }
@@ -827,7 +1027,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
     // à partir de filtres structurés validés, jamais depuis les résultats calculés
     // (moyenne, médiane, valeur de tableau, etc.).
     const plannerPlan = buildPlannerPlan(question, question, table, tool);
-    if (plannerPlan) return inheritConversationContext(plannerPlan, question);
+    if (plannerPlan) return inheritConversationContext(applyListMode(applyFormationTerms(plannerPlan)), question);
   }
 
   // Fallback V16 si planner indisponible.
@@ -837,7 +1037,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
   // V25.1 — idem : le fallback ne doit pas analyser le contexte textuel
   // précédent comme s'il s'agissait de la question utilisateur.
   const filters = detectFilters(table, normalizeText(question || ''), targetCol);
-  return inheritConversationContext({
+  return inheritConversationContext(applyListMode(applyFormationTerms({
     tool,
     table,
     filters,
@@ -845,7 +1045,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
     mentionedCols,
     question,
     createdAt: new Date().toISOString()
-  }, question);
+  })), question);
 }
 
 
@@ -982,6 +1182,12 @@ function finalSanitizeAnalysisPlan(plan) {
   const bareAction = isBareChartRequest(plan.question || '') || isBareExportRequest(plan.question || '');
 
   const onlyBoursier = /^(combien|nombre|effectif|total)\s+(de\s+)?(candidats\s+)?(non\s+)?boursiers?\s*\??$/.test(q);
+  // v27.7 — filtre « intitulé de formation contenant » : vient de la question elle-même, toujours conservé
+  const termFilters = (plan.filters || []).filter(f => f && f.source === 'termes_formation');
+  const keepTermFilters = () => {
+    if (!termFilters.length) return;
+    plan.filters = [...(plan.filters || []).filter(f => f.source !== 'termes_formation'), ...termFilters];
+  };
 
   if (onlyBoursier) {
     plan.filters = strict.filter(f => /boursier/i.test(f.col));
@@ -998,6 +1204,7 @@ function finalSanitizeAnalysisPlan(plan) {
     const strictCols = new Set(strict.map(f => f.col));
     const kept = (plan.filters || []).filter(f => {
       if (!f || !f.col) return false;
+      if (f.source === 'termes_formation') return true; // v27.7 — mots cités dans la question
       if (strictCols.has(f.col)) return false; // remplacés par strict ci-dessous
       const cn = normalizeText(f.col);
       const val = normalizeText(f.value);
@@ -1076,6 +1283,7 @@ function finalSanitizeAnalysisPlan(plan) {
         plan.filters = mergeFiltersUnique(plan.filters, _newPlannerFilters);
       }
     }
+    keepTermFilters();
     return plan;
   }
 
@@ -1433,6 +1641,12 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     const toAdd = _pf.filter(f => !existingCols.has(f.col));
     if (toAdd.length) plan.filters = [...(plan.filters || []), ...toAdd];
   }
+  // v27.7 — terme de formation introuvable, ou termes jamais réunis : on s'arrête (pas de total faux)
+  if (plan.tool !== 'compare' && plan.tool !== 'chart_current' && plan.tool !== 'export_current_excel' && plan.tool !== 'export_current_csv') {
+    const termFilter = (plan.filters || []).find(f => f && f.op === 'contains_all');
+    if (plan.unresolvedTerms && plan.unresolvedTerms.length) return unresolvedFormationExecution(plan, plan.unresolvedTerms, termFilter);
+    if (termFilter && !applyLocalActionFilters(plan.table.objects || [], [termFilter]).length) return unresolvedFormationExecution(plan, [], termFilter);
+  }
   if (plan.tool === 'compare') {
     const groups = plan.compareGroups || detectCompareGroups(plan.table, plan.question);
     if (!groups || groups.length < 2) return null;
@@ -1491,7 +1705,7 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
   if (plan.tool === 'group_by' || plan.tool === 'top') {
     const col = plan.targetCol || plan.mentionedCols?.[0];
     if (!col) return null;
-    const limit = plan.limit || detectLimit(plan.question) || (plan.tool === 'top' ? 10 : 30);
+    const limit = plan.listMode ? 300 : (plan.limit || detectLimit(plan.question) || (plan.tool === 'top' ? 10 : 30));
     const counts = topCountsForRows(rows, col, Math.max(limit, 30));
     const topRows = counts.top.slice(0, limit);
     const exec = {
@@ -1601,6 +1815,7 @@ function dataEngineResultToContext(exec) {
   let out = `=== DATA ENGINE V22 — RÉSULTAT CALCULÉ SUR LIGNES BRUTES ===\n`;
   out += `Outil : ${p.tool}\nSource : ${p.table?.source || 'Données'} · ${p.table?.name || 'table'}\nFiltres : ${filters}\n`;
   if (exec.kind === 'count') out += `Résultat : ${exec.result.count} ligne(s) sur ${exec.result.total}.\n`;
+  if (exec.kind === 'unresolved') out += `Résultat : aucun calcul. ${exec.text}\nIntitulés proches : ${(exec.result?.suggestions || []).map(s => s.value).join(' ; ')}\n`;
   if (exec.kind === 'group_by' || exec.kind === 'top') {
     out += `Colonne de répartition : ${p.targetCol}\nLignes retenues : ${exec.result.total}\nValeurs renseignées : ${exec.result.filled}\n`;
     out += `Répartition :\n${exec.result.rows.map(r => `- ${r.value}: ${r.count} (${r.pct.toFixed(1).replace('.', ',')} %)`).join('\n')}\n`;
@@ -1668,14 +1883,25 @@ function deTitleHtml(title, blockId = null, originalTitle = null) {
 
 function renderDataEngineResultHtml(tool, plan, result) {
   const filtersHtml = (plan.filters || []).length
-    ? `<ul>${plan.filters.map(f => `<li>${escapeHtml(f.col)} ${f.op === 'neq' ? '≠' : '='} <strong>${escapeHtml(f.label || f.value)}</strong></li>`).join('')}</ul>`
+    ? `<ul>${plan.filters.map(f => f.op === 'contains_all'
+        ? `<li>${escapeHtml(f.col)} : <strong>${escapeHtml((f.label || f.value).split(' + ').map(t => `« ${t} »`).join(' et '))}</strong></li>`
+        : `<li>${escapeHtml(f.col)} ${f.op === 'neq' ? '≠' : '='} <strong>${escapeHtml(f.label || f.value)}</strong></li>`).join('')}</ul>`
     : '<p>Aucun filtre appliqué.</p>';
+  // Une ligne de l'open data = une formation
+  const unit = (n, mot = 'ligne') => `${plan.table?.rowUnit === 'formation' ? 'formation' : mot}${n > 1 ? 's' : ''}`;
   const plannerDebug = typeof plannerPlanToDebugHtml === 'function' ? plannerPlanToDebugHtml(plan) : '';
   const debug = `<details class="msg-sources"><summary title="Détail technique du calcul (pour vérification ou support) — sans impact sur le résultat affiché ci-dessus">Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : ${escapeHtml(tool)}<br><strong>Source</strong> : ${escapeHtml(plan.table?.source || 'Données')} · ${escapeHtml(plan.table?.name || 'table')}<br><strong>Colonnes détectées</strong> : ${escapeHtml((plan.mentionedCols || []).join(' | ') || '—')}</div>${plannerDebug}</details>`;
   if (tool === 'count_rows') {
     const pct = result.total ? pctFr(result.count, result.total) : '—';
     const clearTitle = (typeof extractBlockTitle === 'function') ? extractBlockTitle({ plan, result }, '') : 'Comptage';
-    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p>Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ligne${result.count>1?'s':''} correspondant à la demande (${pct} du jeu de données).</p><p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
+    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p>Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ${unit(result.count)} correspondant à la demande (${pct} du jeu de données).</p><p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
+  }
+  if (tool === 'group_by' && plan.listMode) {
+    // v27.7 — liste complète des intitulés distincts
+    const rows = result.rows || [];
+    const clearTitle = `Liste — ${_shortColName(plan.targetCol)}`;
+    const reste = (result.distinct || rows.length) > rows.length ? `<p style="font-size:12px;color:var(--gris3)">… et ${(result.distinct - rows.length).toLocaleString('fr-FR')} autres intitulés.</p>` : '';
+    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p><strong>${(result.distinct ?? rows.length).toLocaleString('fr-FR')}</strong> intitulé${(result.distinct ?? rows.length) > 1 ? 's' : ''} différent${(result.distinct ?? rows.length) > 1 ? 's' : ''} dans <strong>${escapeHtml(plan.targetCol)}</strong>, pour <strong>${result.total.toLocaleString('fr-FR')}</strong> ${unit(result.total)}.</p><ul>${rows.map(r => `<li>${escapeHtml(r.value)} : <strong>${r.count.toLocaleString('fr-FR')}</strong></li>`).join('')}</ul>${reste}<p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
   }
   if (tool === 'group_by' || tool === 'top') {
     const rows = result.rows || [];
@@ -1714,5 +1940,6 @@ function shouldAnswerLocallyWithoutAlbert(exec) {
   if (!exec) return false;
   // Les requêtes de comptage/répartition simples doivent être résolues par le moteur,
   // sinon Albert risque de répondre à partir d'un résumé incomplet.
-  return ['count','group_by','top','pivot','stats','export','compare'].includes(exec.kind);
+  // v27.7 — « unresolved » : terme introuvable, on le dit plutôt que de laisser Albert inventer
+  return ['count','group_by','top','pivot','stats','export','compare','unresolved'].includes(exec.kind);
 }
