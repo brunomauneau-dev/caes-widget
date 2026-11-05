@@ -13,7 +13,7 @@ Utilisation :
     python load_parcoursup_to_grist.py
 
 Configuration (modifier les 4 variables ci-dessous) :
-    GRIST_API_KEY   → votre clé API Grist
+    GRIST_API_KEY   → votre clé API Grist (variable d'environnement, jamais dans le code)
     GRIST_DOC_ID    → ID du document (dans l'URL après /o/docs/)
     GRIST_TABLE_ID  → nom de la table à créer/écraser dans Grist
     ACADEMIE_FILTRE → "Bordeaux" pour filtrer, None pour tout télécharger (14 000 lignes)
@@ -31,7 +31,11 @@ import time
 #  Les variables d'environnement ont priorité
 #  (utilisées automatiquement par GitHub Actions)
 # ─────────────────────────────────────────
-GRIST_API_KEY   = os.environ.get("GRIST_API_KEY", "6bad78bac2d60a8f8c417b5da6441b775040a968")
+# Jamais de clé dans le code (repo public) : la clé vient du secret GitHub
+# GRIST_API_KEY (Settings → Secrets → Actions) ou d'une variable d'environnement.
+GRIST_API_KEY   = os.environ.get("GRIST_API_KEY", "")
+if not GRIST_API_KEY:
+    sys.exit("ERREUR : variable d'environnement GRIST_API_KEY manquante.")
 GRIST_DOC_ID    = "msHoMY5qJm8o"
 GRIST_BASE_URL  = "https://grist.numerique.gouv.fr"
 GRIST_TABLE_ID  = "Parcoursup_National"

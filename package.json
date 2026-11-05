@@ -1,10 +1,18 @@
 {
-  "name": "parcoursup-data-copilot",
+  "name": "caes-widget",
   "version": "27.6.0",
   "private": true,
-  "description": "Widget Grist d'analyse Parcoursup (SAIO Bordeaux) — aucun build, ce fichier sert uniquement à exécuter les tests en ESM",
+  "description": "Widget Grist Parcoursup Data Copilot (GitHub Pages) + proxy CORS Albert API (server.js, déployé sur Clever Cloud depuis ce repo)",
+  "main": "server.js",
   "type": "module",
   "scripts": {
+    "start": "node server.js",
     "test": "for f in js/*.test.js js/test_*.js; do node \"$f\" || exit 1; done"
+  },
+  "engines": {
+    "node": "20.x"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
   }
 }

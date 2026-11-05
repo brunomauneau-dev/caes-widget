@@ -521,3 +521,123 @@ function buildNationalDataContext(question) {
 }
 
 loadParcoursupNational();
+
+
+/* ═══════════════════════ TABLE PAR DÉFAUT : OPEN DATA PARCOURSUP ═══════════════════════
+   Quand le widget s'ouvre sans table Grist ni fichier, il analyse par défaut
+   l'open data Parcoursup (France entière) de la session la plus récente
+   publiée — en pratique la session n-1. La session est détectée
+   automatiquement : rien à modifier quand une nouvelle année est publiée.
+   Une ligne = une formation (données agrégées, pas de données individuelles).
+   Priorité inchangée : table Grist > fichiers déposés > open data. */
+
+// Champs souhaités (noms techniques de l'API). Seuls ceux qui existent
+// réellement dans le jeu de données sont demandés : si le ministère renomme
+// ou retire un champ une année, le chargement ne casse pas.
+const OPENDATA_DEFAULT_FIELDS = [
+  'session', 'contrat_etab', 'g_ea_lib_vx', 'dep_lib', 'region_etab_aff', 'acad_mies', 'ville_etab',
+  'select_form', 'fili', 'form_lib_voe_acc', 'fil_lib_voe_acc', 'detail_forma', 'lib_for_voe_ins',
+  'capa_fin', 'voe_tot', 'voe_tot_f', 'nb_voe_pp', 'nb_voe_pc', 'nb_cla_pp',
+  'prop_tot', 'acc_tot', 'acc_tot_f', 'acc_neobac', 'acc_bg', 'acc_bt', 'acc_bp', 'acc_brs', 'acc_aca_orig',
+  'pct_neobac', 'pct_bours', 'pct_f', 'pct_aca_orig', 'taux_acces_ens', 'ran_grp1', 'rang_der_app_b', 'taux_adm', 'nb_bours_t'
+];
+const OPENDATA_FALLBACK_SESSION = 2025;
+
+let defaultOpenDataTable = null;
+let defaultOpenDataState = 'idle'; // idle | loading | ready | error
+let defaultOpenDataError = '';
+
+function getDefaultOpenDataTable() {
+  return defaultOpenDataState === 'ready' ? defaultOpenDataTable : null;
+}
+
+// Session la plus récente publiée (facette « session » de l'API)
+async function detectLatestOpenDataSession() {
+  const r = await fetch(`${PARCOURSUP_GOVAPI}/facets?facet=session`, { cache: 'no-store' });
+  if (!r.ok) throw new Error(`sessions : HTTP ${r.status}`);
+  const json = await r.json();
+  const facet = (json.facets || []).find(f => f.name === 'session') || (json.facets || [])[0];
+  const years = ((facet && facet.facets) || [])
+    .map(x => parseInt(String(x.value ?? x.name ?? '').slice(0, 4), 10))
+    .filter(y => y > 2000 && y < 2100);
+  return years.length ? Math.max(...years) : OPENDATA_FALLBACK_SESSION;
+}
+
+// Liste des champs du jeu de données (nom technique, libellé, type)
+async function fetchOpenDataFields() {
+  const r = await fetch(PARCOURSUP_GOVAPI, { cache: 'no-store' });
+  if (!r.ok) throw new Error(`schéma : HTTP ${r.status}`);
+  const json = await r.json();
+  return (json.fields || (json.dataset && json.dataset.fields) || []).filter(f => f && f.name);
+}
+
+function refreshDefaultTableUI() {
+  ['updateSourceHub', 'renderContextPills', 'updateChatSub', 'renderSuggestions', 'renderMiniSuggestions'].forEach(fn => {
+    try { if (typeof window !== 'undefined' && typeof window[fn] === 'function') window[fn](); } catch (e) { /* UI absente */ }
+  });
+}
+
+async function loadDefaultOpenDataTable() {
+  if (defaultOpenDataState === 'loading' || defaultOpenDataState === 'ready') return getDefaultOpenDataTable();
+  defaultOpenDataState = 'loading';
+  defaultOpenDataError = '';
+  refreshDefaultTableUI();
+  try {
+    let session = OPENDATA_FALLBACK_SESSION;
+    try { session = await detectLatestOpenDataSession(); } catch (e) { console.warn('[Open data] session non détectée, repli sur', session, ':', e.message); }
+    const fields = await fetchOpenDataFields();
+    const byName = new Map(fields.map(f => [f.name, f]));
+    const select = OPENDATA_DEFAULT_FIELDS.filter(n => byName.has(n));
+    if (select.length < 5) throw new Error('champs attendus introuvables dans le jeu de données');
+
+    const params = new URLSearchParams({ select: select.join(','), limit: '-1', delimiter: ';' });
+    params.append('refine', `session:${session}`);
+    const r = await fetch(`${PARCOURSUP_GOVAPI}/exports/csv?${params}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(`export : HTTP ${r.status}`);
+    const raw = parseCSVSimple(await r.text(), ';');
+    if (!raw.length) throw new Error(`aucune formation pour la session ${session}`);
+
+    // En-têtes lisibles (libellés officiels) → la détection de colonnes et
+    // Albert comprennent directement « Académie de l'établissement », etc.
+    const label = n => String((byName.get(n) || {}).label || n).replace(/’/g, "'").trim();
+    const numeric = n => /^(int|double|float|decimal)/i.test((byName.get(n) || {}).type || '');
+    const headers = select.map(label);
+    const objects = raw.map(row => {
+      const o = {};
+      select.forEach((n, i) => {
+        let v = row[n] ?? '';
+        if (numeric(n) && v !== '') { const x = Number(String(v).replace(',', '.')); if (isFinite(x)) v = x; }
+        o[headers[i]] = v;
+      });
+      return o;
+    });
+
+    defaultOpenDataTable = {
+      source: 'Open data',
+      name: `Parcoursup ${session} — France entière (open data)`,
+      headers, objects,
+      session,
+      rowUnit: 'formation',
+      isDefault: true
+    };
+    defaultOpenDataState = 'ready';
+  } catch (e) {
+    console.warn('[Open data] table par défaut non chargée :', e.message);
+    defaultOpenDataError = e.message;
+    defaultOpenDataState = 'error';
+  }
+  refreshDefaultTableUI();
+  return getDefaultOpenDataTable();
+}
+
+// Démarrage : on laisse quelques secondes à Grist pour envoyer sa table.
+// Si aucune table ni aucun fichier n'est présent, on charge l'open data.
+function maybeLoadDefaultOpenData() {
+  const hasGrist = (typeof gristRecords !== 'undefined') && gristRecords && gristRecords.length > 0;
+  const hasDocs = (typeof documents !== 'undefined') && documents.some(d => d.status === 'ok');
+  if (!hasGrist && !hasDocs) loadDefaultOpenDataTable();
+}
+if (typeof setTimeout === 'function' && typeof fetch === 'function') {
+  const _t = setTimeout(maybeLoadDefaultOpenData, 2500);
+  if (_t && typeof _t.unref === 'function') _t.unref();
+}

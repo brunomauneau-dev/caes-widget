@@ -208,6 +208,11 @@ function getActiveQueryTables() {
       tables.push({ ...table, source: 'Excel', docName: doc.name });
     });
   });
+  // Ni Grist ni fichier : open data Parcoursup (session la plus récente)
+  if (!tables.length && typeof getDefaultOpenDataTable === 'function') {
+    const def = getDefaultOpenDataTable();
+    if (def && def.objects && def.objects.length) return [def];
+  }
   return tables;
 }
 
@@ -433,7 +438,11 @@ function buildFullTableSynthesis(table, question = '') {
   out += `Table analysée : ${table.name || 'table'}\n`;
   out += `Nombre total de lignes analysées : ${total}\n`;
   out += `Nombre de colonnes : ${headers.length}\n`;
-  out += `Important : cette synthèse est calculée sur toutes les lignes, pas seulement sur un aperçu.\n\n`;
+  out += `Important : cette synthèse est calculée sur toutes les lignes, pas seulement sur un aperçu.\n`;
+  if (table.rowUnit === 'formation') {
+    out += `ATTENTION — UNE LIGNE = UNE FORMATION (open data agrégé, session ${table.session || ''}, France entière), PAS un candidat. Les comptages de lignes sont des nombres de formations. Pour des effectifs de candidats (vœux, propositions, admis…), additionne les colonnes chiffrées correspondantes. Précise toujours la session et la source (open data Parcoursup) dans ta réponse, et qu'il ne s'agit pas des données individuelles de l'académie.\n`;
+  }
+  out += `\n`;
 
   // Colonnes principales : colonnes métier + colonnes dont le nom est cité dans la question.
   // Le score par nom est complété par le sens détecté : une colonne mal nommée

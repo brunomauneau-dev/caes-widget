@@ -30,11 +30,33 @@ Fichiers de données (chargés dynamiquement depuis la racine) :
 | `parcoursup-kb-index-v2.json` | Index hybride de la KB (recherche par terme) |
 | `parcoursup-opendata-reference-v1.json` | Référentiel national open data Parcoursup |
 
+Source par défaut (sans table Grist ni fichier) :
+
+| Source | Rôle |
+|---|---|
+| API open data `fr-esr-parcoursup` | Au démarrage, si aucune table Grist ni aucun fichier n'est fourni, le widget charge l'open data Parcoursup **France entière** de la **session la plus récente publiée** (détectée automatiquement, repli sur 2025). Une ligne = une formation. Priorité : table Grist > fichiers déposés > open data. Code : `loadDefaultOpenDataTable()` dans `js/knowledge.js`. |
+
 Table Grist additionnelle (chargée via GitHub Actions) :
 
 | Table | Rôle |
 |---|---|
 | `Parcoursup_National` | Données nationales Parcoursup n-1 (académie Bordeaux, session 2025, 631 lignes). Rechargeable manuellement via l'onglet *Actions* → `.github/workflows/load-parcoursup.yml`. |
+
+---
+
+## Proxy Albert (Clever Cloud) — NE PAS SUPPRIMER
+
+Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe par un petit proxy :
+
+| Fichier | Rôle |
+|---|---|
+| `server.js` | Proxy Express : relaie `/v1/*` vers Albert API en ajoutant la clé et les en-têtes CORS. `/health` → `{"status":"ok"}` |
+| `package.json` | `start: node server.js` + dépendance `express` — **indispensables** au déploiement |
+
+- Hébergé sur **Clever Cloud** (application `caes-widget`), **redéployé automatiquement à chaque fusion sur `main`**.
+- Variables d'environnement à définir dans Clever Cloud : `ALBERT_API_KEY` (obligatoire), `ALBERT_BASE_URL` (défaut : `https://albert.api.etalab.gouv.fr`), `ALLOWED_ORIGIN` (défaut : `*`).
+- Adresse utilisée par le widget : réglage ⚙️ « endpoint » (`js/config.js`).
+- Si `server.js` ou `package.json` sont supprimés/vidés, le déploiement échoue et le widget affiche « Erreur de connexion à Albert API ».
 
 ---
 
@@ -51,7 +73,7 @@ Table Grist additionnelle (chargée via GitHub Actions) :
 
 ## Suite de tests
 
-19 fichiers, 438 tests. Depuis la racine du repo :
+20 fichiers, 462 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -88,6 +110,6 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 
 - Pas de build/bundler (Webpack, Vite…)
 - Pas de framework JS (React, Vue…)
-- Pas de backend — tout est côté client
+- Pas de backend applicatif — tout est côté client, hormis le proxy Albert (`server.js`) qui ne fait que relayer les appels
 - Pas d'accès API SAP BusinessObjects (bloqué réseau académique)
 - Pas de généralisation à d'autres tables que Parcoursup
