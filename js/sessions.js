@@ -535,9 +535,17 @@ function icToggleBlock(idx, checked) { if (_icState.blocks[idx]) { _icState.bloc
 // ── initSessions ──
 async function initSessions() {
   await loadSessionsFromStorage();
-  if (!sessions.length) sessions.push(createEmptySession('Session 1'));
   sessions.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-  currentSessionId = sessions[0].id;
+  // À chaque ouverture : conversation vierge. Les précédentes restent dans
+  // « Sessions ». On réutilise une session déjà vide pour ne pas en empiler.
+  let fresh = sessions.find(s => !(s.messages && s.messages.length));
+  if (fresh) {
+    sessions = [fresh, ...sessions.filter(s => s !== fresh)];
+  } else {
+    fresh = createEmptySession(sessions.length ? undefined : 'Session 1');
+    sessions.unshift(fresh);
+  }
+  currentSessionId = fresh.id;
   renderActiveSession();
 }
 
