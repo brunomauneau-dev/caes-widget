@@ -193,6 +193,7 @@ await describe('v27.10 — Relances, colonne de répartition et périmètre dans
   }
   assert(!!nom(/« par région »/), 'contrôle « par région » évalué (pas de colonne Région dans ces données simulées : son résultat n\'est pas présumé)');
   assert(R.bts.perimetre && R.bts.perimetre.includes('300 formations retenues sur 600') && R.bts.perimetre.includes('open data Parcoursup 2025'), `périmètre enregistré pour chaque réponse (obtenu : ${R.bts.perimetre})`);
+  assert(!R.zoologie.perimetre && !R.par_couleur.perimetre, 'pas de périmètre pour une question non reconnue (aucun chiffre calculé)');
   assert(res.texte.includes('| Question | Réponse | Sur quoi porte le calcul |') && res.texte.includes('300 formations retenues sur 600'), 'rapport : colonne « Sur quoi porte le calcul »');
   // Détection : les anciens bugs doivent faire échouer les contrôles
   const copie = () => JSON.parse(JSON.stringify(res.resultats));

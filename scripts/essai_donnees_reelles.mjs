@@ -97,7 +97,7 @@ function resumer(ctx, question) {
     : `${f.col} ${f.op === 'neq' ? '≠' : '='} ${f.label || f.value}`);
   const r = { question, routee: !!routee, outil: plan?.tool || null, liste: !!plan?.listMode, kind: exec?.kind || null, filtres, termes: (plan?.filters || []).some(f => f.op === 'contains_all') };
   // v27.10 — périmètre en clair, tel que l'agent le voit sous le résultat
-  if (exec && typeof ctx.perimetreResultat === 'function') r.perimetre = ctx.perimetreResultat(exec.kind, exec.plan, exec.result).texte.replace(/^Périmètre : /, '') || undefined;
+  if (exec && exec.kind !== 'unresolved' && exec.kind !== 'export' && typeof ctx.perimetreResultat === 'function') r.perimetre = ctx.perimetreResultat(exec.kind, exec.plan, exec.result).texte.replace(/^Périmètre : /, '') || undefined;
   if (!exec) { r.reponse = routee ? 'Le moteur n\'a rien calculé' : 'Non traitée par le moteur : la question part vers Albert (connaissances)'; return r; }
   if (exec.kind === 'count') {
     r.count = exec.result.count; r.total = exec.result.total;
