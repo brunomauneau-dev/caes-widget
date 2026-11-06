@@ -930,6 +930,7 @@ function applyFormationTerms(plan) {
 // « liste / toutes les filières / quelles sont les options… » : valeurs distinctes, pas un export de lignes
 function hasExportWords(q) { return /\bexport|\bexcel\b|\bxlsx\b|\bcsv\b|telecharg/.test(q); }
 function hasListCue(q) {
+  q = q.replace(/\bliste d ?attente\b|\bliste complementaire\b/g, 'attente'); // v27.13 — un statut, pas une demande de liste
   if (/\bplus\b|\bmoins\b|\btop\b|classement|principa/.test(q)) return false;
   return /\b(liste|lister|listez|enumere|enumerer)\b/.test(q)
     || /\b(quelles|quels) sont les\b/.test(q)
@@ -1011,6 +1012,8 @@ const CONCEPTS_A_FILTRER = [
   { re: /\bboursiers?\b|\bbourse\b/, mot: 'boursiers', ok: t => /bours/.test(t) },
   { re: /\b(filles?|femmes?|feminins?|garcons?|hommes?|masculins?|candidates)\b/, mot: 'filles / garçons', ok: (t, f) => /sexe|genre|candidates/.test(t) || /^(f|m|h|feminin|masculin|femmes?|hommes?|filles?|garcons?)$/.test(normalizeText(f.value)) || (typeof plannerColumnKind === 'function' && plannerColumnKind(f.col) === 'sexe') },
   { re: /\bapprenti(e|s|es)?\b|\bapprentissage\b|\balternance\b/, mot: 'apprentis', ok: t => /appr|altern/.test(t) },
+  // v27.13 — « combien de refusés » sans colonne de statut comptait tout le fichier
+  { re: /\brefus(e|es|ee|ees)?\b|\bliste d ?attente\b|\ben attente\b|\bdesist(e|es|ee|ees|ement)?\b/, mot: 'statut de candidature (refusé, liste d\'attente…)', ok: t => /refus|attente|desist|statut|admi|candidature/.test(t) },
   { re: /\bbasques?\b/, mot: 'Pays Basque', ok: t => /basque/.test(t) },
   { re: /\bpubli(c|cs|que|ques)\b|\bprive(e|s|es)?\b/, mot: 'public / privé', ok: t => /publi|priv|statut|secteur/.test(t) },
   { re: /\bselecti(f|fs|ve|ves)\b/, mot: 'sélective', ok: t => /selecti/.test(t) },
@@ -1109,7 +1112,8 @@ function isDataEngineQuestion(question) {
 }
 
 function inferMeasureIntent(question) {
-  const q = normalizeText(question || '');
+  // v27.13 — « liste d'attente » est un statut de candidature, pas une demande de liste / d'export
+  const q = normalizeText(question || '').replace(/\bliste d ?attente\b|\bliste complementaire\b/g, 'attente');
   if (/compare|comparaison|comparer|versus| vs /.test(q)) return 'compare';
   if (/graphique|graphe|diagramme|histogramme|camembert|barres?|chart|visualis|repr[eé]sent|montre-?moi|dessine|trace/.test(q)) return 'group_by';
   // v27.7 — « liste des filières / options » = valeurs distinctes ; l'export reste pour « exporte / Excel / CSV »

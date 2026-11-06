@@ -154,6 +154,8 @@
     const stripDept = v => v.replace(/^\d{1,3}[ab]? /, '').replace(/^(departement|dept|dpt)( de la| du| des| de| d)? /, '');
 
     if (distinct <= 3 && normed.every(v => /^(f|m|h|feminin|masculin|femme|homme|fille|garcon|femmes|hommes)$/.test(v))) return 'sexe';
+    // statut de candidature en clair (« Admis », « Refusé », « En liste d'attente ») — repris de la branche fiches métiers
+    if (distinct <= 12 && valueShare(vals, v => /^(admis|admise|non admis|refuse|refusee|accepte|acceptee|proposition acceptee|proposition refusee|en attente|en liste d attente|liste d attente|desiste|desistee|demission|demissionnaire)$/.test(v)) >= 0.6) return 'admission';
     if (distinct <= 40 && valueShare(vals, v => /\b(general|generale|technologique|professionnel|professionnelle|stmg|sti2d|st2s|stl|std2a|stav|s2tmd|sthr|tmd|bac pro|non bachelier|dael)\b/.test(v)) >= 0.6) return 'bac_series';
     if (distinct >= 2 && distinct <= 40 && valueShare(vals, v => ACADEMIE_SET.has(stripAcad(v))) >= 0.7) return 'academie';
     if (distinct >= 2 && valueShare(vals, v => DEPARTEMENT_SET.has(stripDept(v))) >= 0.7) return 'departement';
@@ -346,6 +348,13 @@
 
     const add = (...xs) => xs.forEach(x => a.add(nrm(x)));
 
+    // v27.13 — statuts de candidature en clair : pluriels et formes courantes
+    if (entry.kind === 'admission') {
+      if (/^refuse/.test(v)) add('refusé','refuse','refusés','refuses','refusée','refusées','refusees','candidats refusés');
+      if (/attente/.test(v)) add('en attente','liste d attente','en liste d attente','liste d\'attente','en liste d\'attente');
+      if (/^desist/.test(v)) add('désisté','desiste','désistés','desistes','désistement');
+      if (/^non admis/.test(v)) add('non admis','non admise','non admises');
+    }
     if (entry.kind === 'bac_series') {
       if (/general|generale|s[eé]rie generale/.test(v)) add('général','generale','générale','bac général','bac generale','voie générale','voie generale','serie generale','série générale','bac g');
       if (/professionnel|professionnelle|\bpro\b/.test(v)) add('professionnel','professionnelle','bac pro','bac professionnel','voie professionnelle','serie professionnelle');
@@ -413,7 +422,7 @@
     if (k === 'academie' && /(academie|académie|academique|hors bordeaux|bordeaux|toulouse|poitiers|limoges)/.test(q)) s += 80;
     if (k === 'admission' && /(admis|admission|accept|favorable|proposition acceptee|réponse favorable|reponse favorable)/.test(q)) s += 80;
     if (k === 'apprentissage' && /(apprenti|apprentissage)/.test(q)) s += 80;
-    if (k === 'sexe' && /(sexe|homme|femme|masculin|feminin|féminin|\bfilles?\b|gar[cç]ons?|\bcandidates\b)/.test(q)) s += 60;
+    if (k === 'sexe' && /(sexe|genre|homme|femme|masculin|feminin|féminin|\bfilles?\b|gar[cç]ons?|\bcandidates\b)/.test(q)) s += 60;
     if (k === 'departement' && /(departement|département|gironde|landes|pyrenees|pyrénées)/.test(q)) s += 60;
     if (k === 'commune' && /(commune|ville)/.test(q)) s += 55;
     return s;
@@ -442,14 +451,15 @@
     const k = entry.kind;
     if (k === 'zone_basque') return /basque|pays basque|zone basque/.test(q);
     if (k === 'boursier') return /boursier|boursiers|bourse|crous/.test(q);
-    if (k === 'admission') return /(admis|admise|admission|accept[eé]|acceptee|réponse favorable|reponse favorable|proposition accept[eé]e|proposition acceptee|a repondu|a répondu)/.test(q);
+    // v27.13 — statuts en clair : refusés, liste d'attente, désistés
+    if (k === 'admission') return /(admis|admise|admission|accept[eé]|acceptee|réponse favorable|reponse favorable|proposition accept[eé]e|proposition acceptee|a repondu|a répondu|refus|attente|d[eé]sist|d[eé]mission)/.test(q);
     if (k === 'apprentissage') return /apprenti|apprentissage|alternance/.test(q);
     if (k === 'bac_series') return /(bac|serie|série|voie|general|generale|professionnel|technologique|techno|stmg|sti2d|std2a|stl|st2s|stav|s2tmd)/.test(q);
     if (k === 'formation') return /(formation|but|dut|bts|licence|cpge|prepa|pr[eé]pa|iut|filiere|filière|sp[eé]cialit[eé]|mention)/.test(q);
     if (k === 'academie') return /academie|académie|academique|bordeaux|toulouse|poitiers|limoges/.test(q);
     if (k === 'departement') return /departement|département|gironde|landes|pyrenees|pyrénées/.test(q);
     if (k === 'commune') return /commune|ville/.test(q);
-    if (k === 'sexe') return /sexe|homme|femme|masculin|feminin|féminin|fille|garcon|garçon|\bcandidates\b/.test(q);
+    if (k === 'sexe') return /sexe|genre|homme|femme|masculin|feminin|féminin|fille|garcon|garçon|\bcandidates\b/.test(q);
     if (k === 'voeu') return /voeu|voeux|vœu|vœux/.test(q);
     if (k === 'year') return /annee|année|session|campagne|202[0-9]/.test(q);
     return true;
@@ -466,9 +476,9 @@
       // Ne pas utiliser une colonne texte à forte cardinalité par simple valeur mentionnée.
       if (entry.type === 'text' && !['formation','academie','departement','commune','etablissement','year'].includes(entry.kind)) return;
 
-      const values = entry.kind === 'admission'
-        ? (entry.values || []).filter(v => /^(oui|non|yes|no|true|false|0|1|vrai|faux)$/i.test(String(v.value).trim()))
-        : (entry.values || []);
+      // colonne admission Oui/Non : seulement ces valeurs ; colonne de statut en clair (Admis / Refusé / En liste d'attente) : toutes
+      const _booleens = (entry.values || []).filter(v => /^(oui|non|yes|no|true|false|0|1|vrai|faux)$/i.test(String(v.value).trim()));
+      const values = entry.kind === 'admission' && _booleens.length ? _booleens : (entry.values || []);
 
       values.forEach(item => {
         let bestAlias = '';
@@ -660,8 +670,11 @@
       // Ne déclencher que si la question parle d'un statut candidat, pas seulement d'une colonne formation d'accueil acceptée.
       const e = bestColumn(schema, x => x.kind === 'admission', q);
       if (e) {
-        const v = booleanValue(e, true) || findValue(e, ['oui','true','1']);
-        if (v) upsertCandidateFilter(filters, { entry: e, item: v, alias: 'admis / réponse favorable', op: 'eq', score: 235 }, reasons);
+        // Colonne Oui/Non, ou colonne de statut en clair (« Admis », « Proposition acceptée »)
+        const v = booleanValue(e, true) || findValue(e, ['oui','true','1','admis','admise','accepte','acceptee','proposition acceptee']);
+        // v27.13 — « non admis » / « pas admis » : exclusion (avant : comptait les admis)
+        const _nonAdmis = /\b(non|pas)\s+(admis|admise|admises|accepte|acceptes|acceptee|acceptees)\b/.test(q);
+        if (v) upsertCandidateFilter(filters, { entry: e, item: v, alias: _nonAdmis ? 'non admis' : 'admis / réponse favorable', op: _nonAdmis ? 'neq' : 'eq', score: 235 }, reasons);
       }
     }
   }
@@ -694,6 +707,8 @@
         const _base = s;
         const ctoks = tokens(e.column);
         phraseTokens.forEach(t => { if (ctoks.includes(t) || e.norm.includes(t)) s += 28; });
+        // Colonne citée par son nom complet (« répartition par statut de la candidature ») : c'est elle
+        if (e.norm.length >= 4 && ` ${ph} `.includes(` ${e.norm} `)) s += 250;
 
         if (/academie|academique/.test(ph) && e.kind === 'academie') s += e.role.accueil ? 140 : 45;
         if (/serie|bac/.test(ph) && e.kind === 'bac_series') {
@@ -851,7 +866,8 @@
       mentionedCols,
       question,
       // v27.10 — « par X » sans colonne correspondante : le moteur s'arrête et le dit
-      dimensionIntrouvable: (!targetCol && ['group_by', 'top'].includes(tool)) ? ((nrm(question).match(/(?:par|selon)\s+([a-z0-9 ]{3,60})/) || [])[1] || null) : null,
+      // (mot cité tel que l'agent l'a écrit, accents compris : « académie », pas « academie »)
+      dimensionIntrouvable: (!targetCol && ['group_by', 'top'].includes(tool)) ? ((String(question || '').match(/(?:^|\s)(?:par|selon)\s+([^?!.,;:]{3,60})/i) || [])[1] || '').trim().toLowerCase() || null : null,
       planner: {
         version: 'v21-memory-charts-export',
         confidence,
