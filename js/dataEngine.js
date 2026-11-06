@@ -798,6 +798,8 @@ const FORMATION_TERM_STOP = new Set(`
   ville villes commune communes graphique tableau camembert histogramme top classement principales principaux
   moyenne mediane minimum maximum existe existent propose proposes proposee proposees disponible disponibles
   ouvert ouverte ouvertes ouverts parcoursup open data donnees base jeu fichier table colonne colonnes ligne lignes
+  non pas ne ni aucun aucune selective selectives selectif selectifs selection selectivite apprenti apprentis apprentie apprenties
+  apprentissage alternance candidate candidates boursiere boursieres
   svp merci peux pouvez voudrais aimerais veux montre montrer affiche afficher selective selectives selectif selectifs
   demande demandes demandee demandees exporte exporter export excel csv superieur superieure inferieur inferieure egal
 `.trim().split(/\s+/));
@@ -1005,7 +1007,7 @@ function applyMeasureSum(plan) {
 // sélective, lycée X, Gironde…) qui n'a donné aucun filtre → on s'arrête au lieu de répondre sur tout le fichier.
 const CONCEPTS_A_FILTRER = [
   { re: /\bboursiers?\b|\bbourse\b/, mot: 'boursiers', ok: t => /bours/.test(t) },
-  { re: /\b(filles?|femmes?|feminins?|garcons?|hommes?|masculins?)\b/, mot: 'filles / garçons', ok: (t, f) => /sexe|genre/.test(t) || /^(f|m|h|feminin|masculin|femmes?|hommes?|filles?|garcons?)$/.test(normalizeText(f.value)) || (typeof plannerColumnKind === 'function' && plannerColumnKind(f.col) === 'sexe') },
+  { re: /\b(filles?|femmes?|feminins?|garcons?|hommes?|masculins?|candidates)\b/, mot: 'filles / garçons', ok: (t, f) => /sexe|genre|candidates/.test(t) || /^(f|m|h|feminin|masculin|femmes?|hommes?|filles?|garcons?)$/.test(normalizeText(f.value)) || (typeof plannerColumnKind === 'function' && plannerColumnKind(f.col) === 'sexe') },
   { re: /\bapprenti(e|s|es)?\b|\bapprentissage\b|\balternance\b/, mot: 'apprentis', ok: t => /appr|altern/.test(t) },
   { re: /\bbasques?\b/, mot: 'Pays Basque', ok: t => /basque/.test(t) },
   { re: /\bpubli(c|cs|que|ques)\b|\bprive(e|s|es)?\b/, mot: 'public / privé', ok: t => /publi|priv|statut|secteur/.test(t) },
@@ -1069,12 +1071,39 @@ function unresolvedFormationExecution(plan, missing, termFilter) {
   return { kind: 'unresolved', plan, result: { missing, suggestions: sugg }, text: `NON TROUVÉ : ${quoi}`, html };
 }
 
+/* v27.11 — Reformulations courantes ramenées à la forme que le moteur comprend.
+   Ne change pas le sens : abréviations (« nb de »), négations (« qui ne sont pas boursiers »),
+   « dans chaque académie » (= par académie), « bacheliers généraux » (= bac général),
+   « sur la commune de Bordeaux » (= à Bordeaux). */
+const REFORMULATIONS = [
+  [/\b(?:nb|nbre|nbr)\.?\s+(?=de\b|d['’]|des\b|total\b)/gi, 'nombre '],
+  // négations : « qui ne sont pas dans l'académie de X » → « hors … » ; « qui ne sont pas boursiers » → « non boursiers »
+  [/\b(?:qui\s+)?(?:ne\s+|n['’]\s*)(?:sont|est|soient|soit)\s+pas\s+(?:dans|du|de\s+la|de\s+l['’]|des|en|issus?\s+du|originaires?\s+du)\s*/gi, 'hors '],
+  [/\b(?:qui\s+)?(?:ne\s+|n['’]\s*)(?:sont|est|soient|soit)\s+pas\s+/gi, 'non '],
+  [/\ben\s+dehors\s+(?:de\s+la|de\s+l['’]|du|des|de)\s*/gi, 'hors '],
+  [/\bsans\s+s[eé]lection\b/gi, 'non sélectives'],
+  [/\b(?:classes?\s+)?pr[eé]paratoires?\s+aux\s+grandes\s+[eé]coles\b|\bclasses?\s+pr[eé]paratoires?\b|\bclasses?\s+pr[eé]pas?\b|\bpr[eé]pas?\b/gi, 'CPGE'],
+  [/(?<!\b(?:filles|candidates|femmes)\s+)(?<!non\s)\bboursi[eè]res\b/gi, 'filles boursières'],
+  [/\b(?:dans|pour|de|sur)\s+chaque\s+/gi, 'par '],
+  [/\bchaque\s+/gi, 'par '],
+  [/\bbacheli[eè]re?s?\s+g[eé]n[eé]ra(?:ux|le|les|l)\b|\bvoie\s+g[eé]n[eé]rale\b|\bfili[eè]re\s+g[eé]n[eé]rale\b/gi, 'bac général'],
+  [/\bbacheli[eè]re?s?\s+technologiques?\b|\bvoie\s+technologique\b/gi, 'bac technologique'],
+  [/\bbacheli[eè]re?s?\s+professionnel(?:le)?s?\b|\bvoie\s+professionnelle\b|\bvoie\s+pro\b/gi, 'bac professionnel'],
+  [/\b(?:sur|dans)\s+(?:la\s+)?(?:commune|ville)\s+de\s+(?![ld]['’]|la\b|l\s)/gi, 'à '],
+  [/\b(?:la\s+)?(?:commune|ville)\s+de\s+(?=[A-ZÀ-Ý])/g, 'à '],
+];
+function reformulerQuestion(question) {
+  let q = String(question ?? '');
+  REFORMULATIONS.forEach(([re, rep]) => { q = q.replace(re, rep); });
+  return q.replace(/\s{2,}/g, ' ').trim();
+}
+
 function isDataEngineQuestion(question) {
-  const q = normalizeText(question || '');
+  const q = normalizeText(reformulerQuestion(question || ''));
   if (!q) return false;
   // Exclusion : demandes de synthèse/résumé général → répondre via Albert narratif, pas Data Engine
   if (/^(fais |donne|produis |r[eé]dige )?(une? )?(synth[eè]se|r[eé]sum[eé]|bilan|vue d'ensemble|portrait|analyse globale)/.test(q)) return false;
-  return /compare|comparaison|comparer|versus| vs |combien|nombre|effectif|compte|compter|repartition|r[eé]partition|ventilation|par |groupe|group[eé]|top|classement|principa|plus frequen|plus fréquent|croise|crois[eé]|tableau crois[eé]|pivot|moyen|moyenne|median|m[eé]diane|minimum|maximum|min|max|export|excel|csv|liste|filtre|graphique|graphe|diagramme|histogramme|camembert|barres?|boursier|basque|hors|sauf|seulement|uniquement|visualis|repr[eé]sent|montre-?moi|dessine|trace|issus?\s+d[ue]|originaires?|venant\s+d[ue]|provenant|scolaris|scolarit/.test(q) || isListValuesRequest(question) || isFollowUpQuestion(question);
+  return /compare|comparaison|comparer|versus| vs |combien|nombre|\btotale?\b|effectif|compte|compter|repartition|r[eé]partition|ventilation|par |groupe|group[eé]|top|classement|principa|plus frequen|plus fréquent|croise|crois[eé]|tableau crois[eé]|pivot|moyen|moyenne|median|m[eé]diane|minimum|maximum|min|max|export|excel|csv|liste|filtre|graphique|graphe|diagramme|histogramme|camembert|barres?|boursier|basque|hors|sauf|seulement|uniquement|visualis|repr[eé]sent|montre-?moi|dessine|trace|issus?\s+d[ue]|originaires?|venant\s+d[ue]|provenant|scolaris|scolarit/.test(q) || isListValuesRequest(question) || isFollowUpQuestion(question);
 }
 
 function inferMeasureIntent(question) {
@@ -1098,6 +1127,9 @@ function inferMeasureIntent(question) {
     const _isA = s => /acad[eé]mi/.test(s);
     const _isS = s => /s[eé]rie|bac|type\s+bac/.test(s);
     const d1 = _pivotByPar[1], d2 = _pivotByPar[2];
+    // v27.11 — open data : une ligne = une formation ; « répartition des formations par académie » est une répartition simple
+    const _uniteFormation = (() => { try { return getActiveQueryTables()[0]?.rowUnit === 'formation'; } catch (e) { return false; } })();
+    if (_uniteFormation && /^formations?$/.test(d1.trim())) return 'group_by';
     if ((_isF(d1) && _isA(d2)) || (_isA(d1) && _isF(d2)) || (_isF(d1) && _isS(d2)) || (_isS(d1) && _isF(d2))) return 'pivot';
   }
   if (/moyen|moyenne|median|m[eé]diane|minimum|maximum|\bmin\b|\bmax\b/.test(q)) return 'stats';
@@ -1176,6 +1208,7 @@ function buildCurrentResultPlan(question, table) {
 }
 
 function detectDataEnginePlan(question, filterContextText = question) {
+  question = reformulerQuestion(question);
   if (!isDataEngineQuestion(question)) return null;
   const tables = getActiveQueryTables();
   if (!tables.length) return null;
@@ -2148,7 +2181,8 @@ function _filtreEnClair(f) {
     const mots = String(f.label || f.value || '').split(' + ').filter(Boolean).map(t => `« ${t} »`);
     return `intitulé de formation contenant ${mots.join(' et ')}`;
   }
-  const v = String((f.label || f.value) ?? '').trim();
+  // v27.11 — exclusion : la valeur exclue, pas le libellé (« ≠ Hors Pays Basque » était une double négation)
+  const v = String((f.op === 'neq' ? f.value : (f.label || f.value)) ?? '').trim();
   const etat = _VALEURS_ETAT[v.toLowerCase()];
   if (etat) return `« ${f.col} » ${f.op === 'neq' ? (etat === 'oui' ? '= non' : '= oui') : `= ${etat}`}`;
   return `« ${f.col} » ${f.op === 'neq' ? 'différent de' : '='} ${v}`;
@@ -2228,7 +2262,7 @@ function renderDataEngineResultHtml(tool, plan, result) {
   const filtersHtml = (plan.filters || []).length
     ? `<ul>${plan.filters.map(f => f.op === 'contains_all'
         ? `<li>${escapeHtml(f.col)} : <strong>${escapeHtml((f.label || f.value).split(' + ').map(t => `« ${t} »`).join(' et '))}</strong></li>`
-        : `<li>${escapeHtml(f.col)} ${f.op === 'neq' ? '≠' : '='} <strong>${escapeHtml(f.label || f.value)}</strong></li>`).join('')}</ul>`
+        : `<li>${escapeHtml(f.col)} ${f.op === 'neq' ? '≠' : '='} <strong>${escapeHtml(f.op === 'neq' ? f.value : (f.label || f.value))}</strong></li>`).join('')}</ul>`
     : '<p>Aucun filtre appliqué.</p>';
   // Une ligne de l'open data = une formation
   const unit = (n, mot = 'ligne') => `${plan.table?.rowUnit === 'formation' ? 'formation' : mot}${n > 1 ? 's' : ''}`;

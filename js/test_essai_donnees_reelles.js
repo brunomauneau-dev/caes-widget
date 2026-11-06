@@ -77,7 +77,7 @@ await describe('Réponses aux questions types', async () => {
 await describe('Contrôles de cohérence : ceux de la correction PASS réussissent sur des données saines', async () => {
   // Les contrôles « à Bordeaux » et « publics » portent sur des limites du moteur antérieures à la correction PASS :
   // l'essai doit les évaluer et les signaler, sans que ce test présume de leur résultat.
-  const pass = res.controles.filter(c => /PASS|liste|formulations|Zoologie|licences de droit|filière très agrégée|plus demandées|qu'est-ce|BTS|« combien de formations »/.test(c.libelle) && !/ne compte pas tout le fichier|statut public|licences de droit » : entre/.test(c.libelle));
+  const pass = res.controles.filter(c => /PASS|liste|formulations|Zoologie|licences de droit|filière très agrégée|plus demandées|qu'est-ce|BTS|« combien de formations »/.test(c.libelle) && !/ne compte pas tout le fichier|statut public|licences de droit » : entre|^reformulations/.test(c.libelle));
   const echecs = pass.filter(c => !c.ok);
   assert(pass.length >= 12, `au moins 12 contrôles liés à la correction (obtenu : ${pass.length})`);
   assert(echecs.length === 0, `aucun échec (échecs : ${echecs.map(c => c.libelle + ' — ' + c.detail).join(' / ') || 'aucun'})`);
@@ -205,6 +205,25 @@ await describe('v27.10 — Relances, colonne de répartition et périmètre dans
   assert(!controler(r).find(c => /par couleur/.test(c.libelle)).ok, 'répartition au hasard pour « par couleur » → détectée');
   r = copie(); delete r.find(x => x.id === 'bts').perimetre;
   assert(!controler(r).find(c => /dit sur quoi il porte/.test(c.libelle)).ok, 'résultat sans périmètre → détecté');
+});
+
+await describe('v27.11 — Reformulations dans l\'essai : même chiffre pour toutes les tournures', async () => {
+  const reform = res.controles.filter(c => /^reformulations « /.test(c.libelle));
+  assert(reform.length >= 6, `au moins 6 groupes de reformulations contrôlés (obtenu : ${reform.length})`);
+  const bts = reform.find(c => /« nombre de BTS »/.test(c.libelle));
+  assert(bts && bts.ok && /« nb de BTS » → 300/.test(bts.detail), `« nombre de BTS » : toutes les tournures donnent 300 (obtenu : ${bts?.detail})`);
+  const r0 = JSON.parse(JSON.stringify(res.resultats));
+  Object.assign(r0.find(x => x.id === 'selectives'), { kind: 'count', count: 400, total: 600 });
+  Object.assign(r0.find(x => x.groupe === 'formations non sélectives'), { kind: 'count', count: 17, total: 600 });
+  assert(controler(r0).find(c => /sélectives \+ non sélectives/.test(c.libelle))?.ok === false, 'bug « non sélectives » = 17 → détecté (400 + 17 ≠ 600)');
+  Object.assign(r0.find(x => x.groupe === 'formations non sélectives'), { count: 200 });
+  assert(controler(r0).find(c => /sélectives \+ non sélectives/.test(c.libelle))?.ok === true, 'cohérent (400 + 200 = 600) → réussi');
+  const r = JSON.parse(JSON.stringify(res.resultats));
+  Object.assign(r.find(x => x.groupe === 'nombre de BTS' && /nb de/.test(x.question)), { kind: 'count', count: 600 });
+  assert(!controler(r).find(c => /« nombre de BTS »/.test(c.libelle)).ok, 'une tournure qui donne un autre chiffre → détectée');
+  const r2 = JSON.parse(JSON.stringify(res.resultats));
+  r2.filter(x => x.groupe === 'nombre de BTS').forEach(x => Object.assign(x, { kind: null, routee: false, count: undefined }));
+  assert(!controler(r2).find(c => /« nombre de BTS »/.test(c.libelle)).ok, 'toutes les tournures parties vers Albert (aucun chiffre) → détecté, pas « identiques »');
 });
 
 console.log('\n──────────────────────────────────────────────────');

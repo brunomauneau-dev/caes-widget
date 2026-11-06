@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-26 fichiers, 871 tests. Depuis la racine du repo :
+27 fichiers, 1 168 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -102,6 +102,10 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 - colonnes d'**état** écrites Oui/Non, **1/0** ou **VRAI/FAUX** : filtrées, jamais additionnées ni moyennées ;
 - classeur dont le 1er onglet est une **notice** ;
 - **open data** de 14 000 formations : statut public/privé, académie, département, ville, région, sélectivité, sommes (places, candidats, admis), moyennes (capacité, taux d'accès), en moins de 3 secondes par question.
+
+### Reformulations
+
+`js/test_reformulations.js` : 31 questions types (open data et extraction de candidats), chacune posée de 3 à 16 façons : « nb de », « il y a combien de », négations (« qui ne sont pas boursiers »), « dans chaque académie », « prépas », « bacheliers généraux », « sur la commune de Bordeaux »… La bonne réponse est calculée sur les données. Chaque tournure doit donner le bon chiffre ou s'arrêter (« critère non reconnu ») : **jamais un autre chiffre en silence**. Les reformulations courantes sont ramenées à une forme comprise par le moteur (`reformulerQuestion`, dans `dataEngine.js`).
 
 ### Périmètre de chaque résultat
 
