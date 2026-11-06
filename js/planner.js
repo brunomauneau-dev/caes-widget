@@ -384,7 +384,7 @@
     }
 
     if (entry.kind === 'sexe') {
-      if (/feminin|femme|fille/.test(v) || v === 'f') add('féminin','feminin','femme','femmes','fille','filles');
+      if (/feminin|femme|fille/.test(v) || v === 'f') add('féminin','feminin','femme','femmes','fille','filles','candidate','candidates');
       if (/masculin|homme|garcon/.test(v) || v === 'm' || v === 'h') add('masculin','homme','hommes','garçon','garcon','garcons');
     }
 
@@ -413,7 +413,7 @@
     if (k === 'academie' && /(academie|académie|academique|hors bordeaux|bordeaux|toulouse|poitiers|limoges)/.test(q)) s += 80;
     if (k === 'admission' && /(admis|admission|accept|favorable|proposition acceptee|réponse favorable|reponse favorable)/.test(q)) s += 80;
     if (k === 'apprentissage' && /(apprenti|apprentissage)/.test(q)) s += 80;
-    if (k === 'sexe' && /(sexe|homme|femme|masculin|feminin|féminin|\bfilles?\b|gar[cç]ons?)/.test(q)) s += 60;
+    if (k === 'sexe' && /(sexe|homme|femme|masculin|feminin|féminin|\bfilles?\b|gar[cç]ons?|\bcandidates\b)/.test(q)) s += 60;
     if (k === 'departement' && /(departement|département|gironde|landes|pyrenees|pyrénées)/.test(q)) s += 60;
     if (k === 'commune' && /(commune|ville)/.test(q)) s += 55;
     return s;
@@ -449,7 +449,7 @@
     if (k === 'academie') return /academie|académie|academique|bordeaux|toulouse|poitiers|limoges/.test(q);
     if (k === 'departement') return /departement|département|gironde|landes|pyrenees|pyrénées/.test(q);
     if (k === 'commune') return /commune|ville/.test(q);
-    if (k === 'sexe') return /sexe|homme|femme|masculin|feminin|féminin|fille|garcon|garçon/.test(q);
+    if (k === 'sexe') return /sexe|homme|femme|masculin|feminin|féminin|fille|garcon|garçon|\bcandidates\b/.test(q);
     if (k === 'voeu') return /voeu|voeux|vœu|vœux/.test(q);
     if (k === 'year') return /annee|année|session|campagne|202[0-9]/.test(q);
     return true;

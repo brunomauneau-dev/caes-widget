@@ -52,6 +52,16 @@ export const QUESTIONS = [
   { id: 'par_region', q: 'nombre de formations par région' },
   { id: 'par_statut', q: 'répartition par statut' },
   { id: 'par_couleur', q: 'répartition par couleur' },
+  // v27.11 — reformulations : chaque groupe doit donner le même chiffre, quelle que soit la tournure
+  ...[
+    ['nombre de BTS', ['nombre de BTS', 'nb de BTS', 'Combien y a-t-il de BTS ?', 'combien de formations en BTS']],
+    ["BTS de l'académie de Bordeaux", ["combien de BTS sur l'académie de Bordeaux", "dans l'académie de Bordeaux, combien de BTS ?", "nb de BTS académie de Bordeaux"]],
+    ['formations à Bordeaux (ville)', ['nombre de formations à Bordeaux', 'combien de formations sur la commune de Bordeaux', 'combien de formations dans la ville de Bordeaux']],
+    ['places en BTS', ['nombre de places en BTS', 'capacité totale des BTS', 'total des places en BTS']],
+    ['formations non sélectives', ['combien de formations non sélectives', 'combien de formations qui ne sont pas sélectives', 'combien de formations sans sélection']],
+    ['CPGE', ['combien de CPGE', 'combien de prépas', 'nombre de classes préparatoires']],
+    ['BTS par académie', ['répartition des BTS par académie', 'nombre de BTS par académie', 'combien de BTS dans chaque académie']],
+  ].flatMap(([groupe, qs], i) => qs.map((q, j) => ({ id: `reform_${i + 1}_${j + 1}`, q, groupe }))),
 ];
 
 // ─── Moteur du widget dans un contexte isolé ─────────────────────────────────
@@ -143,7 +153,7 @@ export function poserQuestions(table, questions = QUESTIONS) {
   return questions.map(item => {
     const ctx = creerMoteur({ table });
     if (item.conversation) return { id: item.id, conversation: item.conversation.map(q => resumer(ctx, q)) };
-    return { id: item.id, ...resumer(ctx, item.q) };
+    return { id: item.id, ...(item.groupe ? { groupe: item.groupe } : {}), ...resumer(ctx, item.q) };
   });
 }
 
@@ -213,6 +223,14 @@ export function controler(resultats) {
   if (R.par_region) ctl('« par région » : colonne Région', R.par_region.kind === 'group_by' && /^r[ée]gion/i.test(R.par_region.colonne || ''), R.par_region.reponse);
   if (R.par_statut) ctl('« par statut » : colonne Statut', R.par_statut.kind === 'group_by' && /^statut/i.test(R.par_statut.colonne || ''), R.par_statut.reponse);
   if (R.par_couleur) ctl('« par couleur » : arrêt, pas une répartition au hasard', R.par_couleur.kind === 'unresolved', R.par_couleur.reponse);
+  // v27.11 — reformulations : même chiffre pour toutes les tournures d'une même question
+  const groupes = {};
+  resultats.filter(r => r.groupe).forEach(r => (groupes[r.groupe] = groupes[r.groupe] || []).push(r));
+  Object.entries(groupes).forEach(([g, rs]) => {
+    const vals = rs.map(valeurReponse);
+    const ok = vals.every(v => v === vals[0]) && rs.every(r => ['count', 'sum', 'stats', 'group_by', 'top'].includes(r.kind));
+    ctl(`reformulations « ${g} » : même chiffre pour les ${rs.length} tournures`, ok, rs.map(r => `« ${r.question} » → ${valeurReponse(r)}`).join(' · '));
+  });
   // Chaque résultat chiffré porte son périmètre
   const chiffres = resultats.flatMap(r => r.conversation || [r]).filter(r => ['count', 'sum', 'group_by', 'top', 'stats'].includes(r.kind));
   if (chiffres.length) ctl('chaque résultat chiffré dit sur quoi il porte (périmètre)', chiffres.every(r => r.perimetre && /retenues? sur/.test(r.perimetre)), `${chiffres.filter(r => r.perimetre).length} / ${chiffres.length}`);
