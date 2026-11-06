@@ -1018,6 +1018,7 @@ Consignes pour la qualité de l'analyse :
 - Si la question demande un résumé, une synthèse ou une description générale du fichier, utilise en priorité la section "SYNTHÈSE AUTOMATIQUE SUR TABLE COMPLÈTE" : elle est calculée sur toutes les lignes Grist/Excel, contrairement à l'aperçu qui est seulement illustratif.
 - Quand un filtre local indique "≠ Bordeaux", il signifie bien que les lignes de l'académie de Bordeaux ont été exclues ; ne transforme pas cette requête en taux de sortie ni en analyse de mobilité si l'utilisateur demande seulement une répartition.
 - Base-toi UNIQUEMENT sur le contexte fourni ci-dessous — si l'information n'y est pas, dis-le clairement plutôt que d'inventer.
+- CHIFFRES (règle absolue) : n'écris AUCUN nombre (effectif, pourcentage, moyenne, rang, capacité, taux) qui ne figure pas tel quel dans le contexte ci-dessous ou dans la question. Ne fais aucun calcul toi-même (ni somme, ni différence, ni pourcentage, ni estimation, ni ordre de grandeur). Si le chiffre demandé n'est pas dans le contexte, écris que le widget ne l'a pas calculé et propose une question de comptage à poser (par exemple « combien de … »). Chaque chiffre de ta réponse est vérifié automatiquement ; un chiffre absent du contexte est signalé à l'agent comme non fiable.
 - Utilise des balises HTML simples dans ta réponse (h4, p, ul, li, strong) pour structurer le contenu.
 - Si des RÉFÉRENCES MÉTIER PARCOURSUP sont fournies ci-dessous, utilise-les comme règles d'interprétation. Ne cite pas une règle Parcoursup absente des références ; si la règle manque, dis-le.
 
@@ -1049,15 +1050,26 @@ ${context || "(Aucun document chargé)"}`;
     const data = await response.json();
     const answer = data.choices?.[0]?.message?.content || 'Aucune réponse reçue.';
 
+    // v27.9 — chaque nombre de la réponse d'Albert est comparé aux données qui lui ont été fournies
+    // (consignes + contexte, résultats calculés par le widget, questions de l'agent). Les réponses
+    // précédentes d'Albert ne comptent pas comme source : un chiffre inventé ne peut pas se « valider » lui-même.
+    const sourcesChiffres = [systemPrompt, ...chatHistory.slice(-6)
+      .filter(m => m.role === 'user' || String(m.content || '').startsWith('=== DATA ENGINE'))
+      .map(m => m.content)];
+    const verifChiffres = (typeof verifierChiffresAlbert === 'function') ? verifierChiffresAlbert(answer, sourcesChiffres, question) : null;
+    const answerAffiche = (verifChiffres && typeof annoterReponseAlbert === 'function') ? annoterReponseAlbert(answer, verifChiffres) : answer;
+
     removeLoadingMessage(loadingId);
-    addMessage('assistant', answer);
+    addMessage('assistant', answerAffiche);
 
     chatHistory.push({ role: 'user', content: question });
     chatHistory.push({ role: 'assistant', content: answer });
 
     // Enregistre la réponse Albert comme bloc composable
     const sAlbert = getCurrentSession();
-    if (sAlbert && answer && answer.length > 80) {
+    // v27.9 — une réponse avec des chiffres non vérifiés n'alimente pas les infographies
+    const chiffresDouteux = !!(verifChiffres && verifChiffres.inconnus.length);
+    if (sAlbert && answer && answer.length > 80 && !chiffresDouteux) {
       try {
         sAlbert.dataBlocks = sAlbert.dataBlocks || [];
         const plainCtx = answer.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
