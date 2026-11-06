@@ -52,6 +52,7 @@ export const QUESTIONS = [
   { id: 'par_region', q: 'nombre de formations par région' },
   { id: 'par_statut', q: 'répartition par statut' },
   { id: 'par_couleur', q: 'répartition par couleur' },
+  { id: 'selectives', q: 'combien de formations sélectives' },
   // v27.11 — reformulations : chaque groupe doit donner le même chiffre, quelle que soit la tournure
   ...[
     ['nombre de BTS', ['nombre de BTS', 'nb de BTS', 'Combien y a-t-il de BTS ?', 'combien de formations en BTS']],
@@ -223,6 +224,9 @@ export function controler(resultats) {
   if (R.par_region) ctl('« par région » : colonne Région', R.par_region.kind === 'group_by' && /^r[ée]gion/i.test(R.par_region.colonne || ''), R.par_region.reponse);
   if (R.par_statut) ctl('« par statut » : colonne Statut', R.par_statut.kind === 'group_by' && /^statut/i.test(R.par_statut.colonne || ''), R.par_statut.reponse);
   if (R.par_couleur) ctl('« par couleur » : arrêt, pas une répartition au hasard', R.par_couleur.kind === 'unresolved', R.par_couleur.reponse);
+  // v27.11 — « non sélectives » : le mot « non » était pris pour un intitulé (17 au lieu de 3 196)
+  const nonSel = resultats.find(r => r.groupe === 'formations non sélectives');
+  if (R.selectives && nonSel) ctl('sélectives + non sélectives = toutes les formations', partie(R.selectives) && partie(nonSel) && R.selectives.count + nonSel.count === R.selectives.total, `${R.selectives.count ?? '?'} + ${nonSel.count ?? '?'} pour ${R.selectives.total ?? '?'}`);
   // v27.11 — reformulations : même chiffre pour toutes les tournures d'une même question
   const groupes = {};
   resultats.filter(r => r.groupe).forEach(r => (groupes[r.groupe] = groupes[r.groupe] || []).push(r));

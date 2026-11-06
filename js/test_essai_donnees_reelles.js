@@ -212,6 +212,12 @@ await describe('v27.11 — Reformulations dans l\'essai : même chiffre pour tou
   assert(reform.length >= 6, `au moins 6 groupes de reformulations contrôlés (obtenu : ${reform.length})`);
   const bts = reform.find(c => /« nombre de BTS »/.test(c.libelle));
   assert(bts && bts.ok && /« nb de BTS » → 300/.test(bts.detail), `« nombre de BTS » : toutes les tournures donnent 300 (obtenu : ${bts?.detail})`);
+  const r0 = JSON.parse(JSON.stringify(res.resultats));
+  Object.assign(r0.find(x => x.id === 'selectives'), { kind: 'count', count: 400, total: 600 });
+  Object.assign(r0.find(x => x.groupe === 'formations non sélectives'), { kind: 'count', count: 17, total: 600 });
+  assert(controler(r0).find(c => /sélectives \+ non sélectives/.test(c.libelle))?.ok === false, 'bug « non sélectives » = 17 → détecté (400 + 17 ≠ 600)');
+  Object.assign(r0.find(x => x.groupe === 'formations non sélectives'), { count: 200 });
+  assert(controler(r0).find(c => /sélectives \+ non sélectives/.test(c.libelle))?.ok === true, 'cohérent (400 + 200 = 600) → réussi');
   const r = JSON.parse(JSON.stringify(res.resultats));
   Object.assign(r.find(x => x.groupe === 'nombre de BTS' && /nb de/.test(x.question)), { kind: 'count', count: 600 });
   assert(!controler(r).find(c => /« nombre de BTS »/.test(c.libelle)).ok, 'une tournure qui donne un autre chiffre → détectée');

@@ -96,7 +96,9 @@ function poser(ctx, groupes, titre) {
 }
 
 // ─── Open data simulé (une ligne = une formation) ───────────────────────────
-const OD = D.openData(4000, 21);
+// Comme dans les vraies données : quelques intitulés contiennent « non » (« … non spécialisé ») — le mot « non »
+// de « formations non sélectives » ne doit pas devenir un critère d'intitulé (bug vu sur l'open data réel : 17 au lieu de 3 196)
+const OD = D.openData(4000, 21).map((o, i) => i % 97 === 0 ? { ...o, detail: `${o.detail} - parcours non spécialisé` } : o);
 const m = pred => D.compter(OD, pred);
 const somme = (pred, f) => OD.filter(pred).reduce((s, o) => s + f(o), 0);
 const moyenne = (pred, f) => Math.round(somme(pred, f) / m(pred) * 100) / 100;

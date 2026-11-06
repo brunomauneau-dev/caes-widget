@@ -798,6 +798,8 @@ const FORMATION_TERM_STOP = new Set(`
   ville villes commune communes graphique tableau camembert histogramme top classement principales principaux
   moyenne mediane minimum maximum existe existent propose proposes proposee proposees disponible disponibles
   ouvert ouverte ouvertes ouverts parcoursup open data donnees base jeu fichier table colonne colonnes ligne lignes
+  non pas ne ni aucun aucune selective selectives selectif selectifs selection selectivite apprenti apprentis apprentie apprenties
+  apprentissage alternance candidate candidates boursiere boursieres
   svp merci peux pouvez voudrais aimerais veux montre montrer affiche afficher selective selectives selectif selectifs
   demande demandes demandee demandees exporte exporter export excel csv superieur superieure inferieur inferieure egal
 `.trim().split(/\s+/));
