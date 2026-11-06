@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-25 fichiers, 805 tests. Depuis la racine du repo :
+26 fichiers, 871 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -102,6 +102,10 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 - colonnes d'**état** écrites Oui/Non, **1/0** ou **VRAI/FAUX** : filtrées, jamais additionnées ni moyennées ;
 - classeur dont le 1er onglet est une **notice** ;
 - **open data** de 14 000 formations : statut public/privé, académie, département, ville, région, sélectivité, sommes (places, candidats, admis), moyennes (capacité, taux d'accès), en moins de 3 secondes par question.
+
+### Périmètre de chaque résultat
+
+`js/test_perimetre.js` : sous le titre de chaque résultat calculé, le bloc **« 📌 Sur quoi porte ce calcul »** dit en clair combien de lignes sont retenues sur combien, la source (open data Parcoursup 2025, table Grist, fichier), les filtres appliqués et ceux **repris de la question précédente**. Ce qui n'entre pas dans le chiffre est écrit dans **« ⚠️ À noter »** : cases vides ignorées, valeurs non affichées. Le même périmètre est transmis à Albert, qui doit le recopier avec le chiffre.
 
 Règle centrale : une réponse chiffrée est **exacte**, ou le widget affiche « Critère non reconnu ». Il ne donne jamais en silence un chiffre faux, par exemple le total du fichier parce qu'un filtre a été perdu.
 

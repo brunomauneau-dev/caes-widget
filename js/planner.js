@@ -60,6 +60,8 @@
   function columnKind(col) {
     const c = nrm(col);
     if (/zone.*pays.*basque|pays.*basque/.test(c)) return 'zone_basque';
+    // v27.10 — « Dont effectif des admis boursiers », « % d'admis boursiers » : des mesures chiffrées, pas l'état boursier
+    if (/boursier|bourse|bours[eé]/.test(c) && /effectif|nombre|\bnb\b|%|pourcentage|\btaux\b|\bpart\b/.test(c)) return 'generic';
     if (/boursier|bourse|bours[eé]/.test(c)) return 'boursier';
     // nb_voeux AVANT voeu : "Nb total de vœux..." doit → nb_voeux et non voeu
     if ((/nb|nombre|total/).test(c) && /v[oœ]ux|v[oœ]eu|voeux|voeu/.test(c)) return 'nb_voeux';
@@ -678,7 +680,7 @@
   }
 
 
-  function targetColumnForPhrase(schema, phrase, wholeQuestion, tool, filters, excludeCols = []) {
+  function targetColumnForPhrase(schema, phrase, wholeQuestion, tool, filters, excludeCols = [], exigeLien = false) {
     const q = nrm(wholeQuestion || phrase);
     const ph = nrm(phrase || wholeQuestion || '');
     const filtered = new Set((filters || []).map(f => f.col));
@@ -689,6 +691,7 @@
       .filter(e => !filtered.has(e.column))
       .map(e => {
         let s = contextScore(e, q) + columnPriority(e, q) / 3;
+        const _base = s;
         const ctoks = tokens(e.column);
         phraseTokens.forEach(t => { if (ctoks.includes(t) || e.norm.includes(t)) s += 28; });
 
@@ -697,7 +700,8 @@
           // Si "cpge/prépa" est dans la question, "série" désigne les mentions CPGE, pas la série de bac
           s += /cpge|prepa|pr[eé]pa/.test(q) ? 30 : 140;
         }
-        if (/formation|filiere|specialite|mention|groupe|but|dut|bts|licence|cpge/.test(ph) && e.kind === 'formation') {
+        // v27.10 — « Statut de l'établissement de la filière de formation (public, privé…) » n'est pas une colonne de formation
+        if (/formation|filiere|specialite|mention|groupe|but|dut|bts|licence|cpge/.test(ph) && e.kind === 'formation' && !/^(statut|secteur)\b/.test(e.norm)) {
           // Boost supplémentaire si "série" est dans la phrase mais dans un contexte CPGE
           s += (/serie/.test(ph) && /cpge|prepa|pr[eé]pa/.test(q)) ? 160 : 125;
         }
@@ -705,15 +709,28 @@
         if (/etablissement/.test(ph) && e.kind === 'academie') s -= 120;
         if (/departement/.test(ph) && e.kind === 'departement') s += 125;
         if (/commune|ville/.test(ph) && e.kind === 'commune') s += 110;
+        // v27.10 — colonne dont le nom commence par le mot demandé (« par région » → « Région de l'établissement »)
+        const _premier = (e.norm.split(' ')[0] || '');
+        const _memeMot = t => t && t.length >= 4 && (_premier === t || _premier === t.replace(/s$/, ''));
+        const _motsPh = ph.split(/\s+/).filter(w => w.length >= 4); // mots bruts (« académie » est un mot vide pour tokens())
+        if (_premier.length >= 4 && _memeMot(_motsPh[0])) s += 300;
+        else if (_premier.length >= 4 && _motsPh.some(_memeMot)) s += 60;
+        // v27.10 — « par statut » / « public ou privé » : la colonne Statut (ou Secteur), pas une colonne d'effectifs boursiers
+        if (/\bstatuts?\b|\bsecteurs?\b|\bpubli|\bprive/.test(ph) && /^(statut|secteur)\b/.test(e.norm) && !/boursier/.test(e.norm)) s += 160;
         if (/voeu|vœu|voeux|vœux/.test(ph) && e.kind === 'voeu') s += 155;
+        // v27.10 — la colonne a-t-elle un lien avec les mots demandés (« par X ») ?
+        const lien = s > _base;
+        // v27.10 — répartition : une colonne chiffrée (effectif, %, taux) n'est retenue que si la question la nomme
+        // (« par série » sur l'open data ne doit pas répartir selon « % d'admis boursiers »)
+        if ((tool === 'group_by' || tool === 'top') && e.type === 'number' && !_motsPh.some(w => e.norm.includes(w.replace(/s$/, '')))) s -= 200;
         if (tool === 'stats') {
           if (e.type === 'number') s += 95;
           if (/voeu|vœu|voeux|vœux/.test(ph) && e.kind === 'voeu') s += 170;
           if (/confirm/.test(ph) && /confirm/.test(e.norm)) s += 90;
         }
-        return { e, s };
+        return { e, s, lien };
       })
-      .filter(x => x.s > 40)
+      .filter(x => x.s > 40 && (!exigeLien || x.lien))
       .sort((a,b) => b.s - a.s);
     return candidates[0]?.e?.column || null;
   }
@@ -749,7 +766,8 @@
     }
     const parMatch = q.match(/(?:par|selon|repartition par|répartition par|top\s+\d*\s*(?:des|de)?|principaux|principales)\s+([a-z0-9 ]{3,100})/);
     const phrase = parMatch ? parMatch[1] : q;
-    return targetColumnForPhrase(schema, phrase, q, tool, filters, []);
+    // v27.10 — « par couleur » : aucune colonne ne correspond → null (le moteur le dit), pas l'académie par défaut
+    return targetColumnForPhrase(schema, phrase, q, tool, filters, [], !!parMatch && /^(?:.*\s)?(?:par|selon)\s/.test(q) && tool !== 'pivot');
   }
 
 
@@ -832,6 +850,8 @@
       targetCol2,
       mentionedCols,
       question,
+      // v27.10 — « par X » sans colonne correspondante : le moteur s'arrête et le dit
+      dimensionIntrouvable: (!targetCol && ['group_by', 'top'].includes(tool)) ? ((nrm(question).match(/(?:par|selon)\s+([a-z0-9 ]{3,60})/) || [])[1] || null) : null,
       planner: {
         version: 'v21-memory-charts-export',
         confidence,
