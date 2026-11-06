@@ -13,6 +13,9 @@ L'utilisateur n'est pas développeur. Il faut lui expliquer simplement ce qui ch
 - **Les tests ne font aucun appel réseau** : les API (open data, Albert, Cloudflare) sont simulées.
 - **Lancer toute la suite avant chaque commit :** `npm test`. Elle s'arrête au premier fichier en échec, donc lancer aussi chaque fichier séparément pour voir tous les échecs. GitHub Actions (`tests.yml`) relance la suite à chaque push.
 - **Interface modifiée :** vérifier aussi dans Chromium (Playwright). Simuler `window.grist` avec `addInitScript`, sinon `albert.js` s'arrête sur `grist.ready`. Simuler aussi les API avec `page.route`.
+- **Ne jamais afficher un chiffre faux comme « calcul exact ».** Un chiffre est exact, ou le moteur s'arrête et le dit (« Critère non reconnu », `exec.kind === 'unresolved'`) : critère absent de la source, colonne introuvable, mesure absente. Jamais le total du fichier parce qu'un filtre a été perdu.
+- **Bancs de non-régression à garder au vert** pour toute évolution du planner, du moteur ou de la détection de colonnes : `test_fiches_metiers.js` (5 fichiers métiers fictifs, `tests/fixtures/`), `test_robustesse_fichiers.js` et `test_reformulations.js` (`js/fixtures/donnees_simulees.mjs`). Quand une réponse fausse est signalée, y ajouter la question et sa valeur attendue, **recalculée directement sur les lignes**. Données toujours fictives.
+- **Données réelles :** après une modification du moteur, lancer l'essai (Actions → « Essai sur données réelles ») sur la branche. Il doit rester à 100 % de contrôles réussis et de chiffres officiels identiques ; toute réponse qui change doit s'expliquer.
 - **Mettre à jour le nombre de tests** dans le README (section « Suite de tests »).
 
 Format d'un fichier de test : module ESM autonome, avec les fonctions `assert(cond, libellé)` et `describe(...)`. Il affiche `Résultat : N ✓  M ✗  (T tests)` et sort avec `process.exit(1)` en cas d'échec. Prendre modèle sur `js/test_source_selector.js`.

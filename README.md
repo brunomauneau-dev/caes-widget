@@ -113,6 +113,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 
 Il couvre aussi les statuts de candidature en clair (Admis / Refusé / En liste d'attente) et les valeurs O/N.
 
+Les 5 fichiers existent aussi en vrais fichiers Excel / CSV, prêts à importer à la main dans le widget pour une démonstration : `tests/fixtures/fichiers/` (régénérés par `node tests/fixtures/generer_fichiers.mjs`).
+
 ### Reformulations
 
 `js/test_reformulations.js` : 31 questions types (open data et extraction de candidats), chacune posée de 3 à 16 façons : « nb de », « il y a combien de », négations (« qui ne sont pas boursiers »), « dans chaque académie », « prépas », « bacheliers généraux », « sur la commune de Bordeaux »… La bonne réponse est calculée sur les données. Chaque tournure doit donner le bon chiffre ou s'arrêter (« critère non reconnu ») : **jamais un autre chiffre en silence**. Les reformulations courantes sont ramenées à une forme comprise par le moteur (`reformulerQuestion`, dans `dataEngine.js`).
