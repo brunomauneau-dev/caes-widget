@@ -304,7 +304,7 @@ function sectionComparaison(cmp) {
   return l;
 }
 
-export function rapport(table, resultats, controles, diag = null, cmp = undefined) {
+export function rapport(table, resultats, controles, diag = null, cmp = undefined, verifs = null) {
   const ok = controles.filter(c => c.ok).length;
   const lignes = [];
   lignes.push(`# Essai sur données réelles — ${table?.name || 'open data'}`);
@@ -317,6 +317,7 @@ export function rapport(table, resultats, controles, diag = null, cmp = undefine
   lignes.push('|---|---|---|');
   controles.forEach(c => lignes.push(`| ${c.ok ? '✅' : '❌'} | ${cell(c.libelle)} | ${cell(c.detail)} |`));
   lignes.push('');
+  lignes.push(...sectionOfficiels(verifs));
   if (cmp !== undefined) lignes.push(...sectionComparaison(cmp));
   lignes.push('## Réponses du moteur');
   lignes.push('');
@@ -344,14 +345,109 @@ export function rapport(table, resultats, controles, diag = null, cmp = undefine
 }
 
 // precedent : instantané du lancement précédent (null s'il n'y en a pas) ; undefined = pas de section de comparaison
-export async function essai({ fetchImpl = globalThis.fetch, questions = QUESTIONS, precedent = undefined, contexte = {} } = {}) {
+// ─── Chiffres officiels : calculés par le serveur du ministère ───────────────
+// L'API de data.enseignementsup-recherche.gouv.fr compte et additionne elle-même dans sa base
+// (count, sum, avg, group_by). Le widget, qui télécharge les lignes et calcule de son côté, doit
+// retrouver ces chiffres À L'UNITÉ PRÈS. Deux chemins indépendants : toute erreur de chargement,
+// de colonne, de filtre ou de calcul du widget apparaît comme un écart.
+const API_PARCOURSUP = 'https://data.enseignementsup-recherche.gouv.fr/api/explore/v2.1/catalog/datasets/fr-esr-parcoursup';
+export const REFERENCES = [
+  { id: 'ref_total', q: 'combien de formations', type: 'count' },
+  { id: 'ref_bts', q: 'combien de BTS', type: 'count', egal: { fili: 'BTS' } },
+  { id: 'ref_pass', q: 'combien de PASS', type: 'count', egal: { fili: 'PASS' } },
+  { id: 'ref_cpge', q: 'combien de CPGE', type: 'count', egal: { fili: 'CPGE' } },
+  { id: 'ref_licences', q: 'combien de licences', type: 'count', egal: { fili: 'Licence' } },
+  { id: 'ref_public', q: 'combien de formations publiques', type: 'count', egal: { contrat_etab: 'Public' } },
+  { id: 'ref_prive', q: 'combien de formations privées', type: 'count', different: { contrat_etab: 'Public' } },
+  { id: 'ref_aca_bdx', q: "combien de formations dans l'académie de Bordeaux", type: 'count', egal: { acad_mies: 'Bordeaux' } },
+  { id: 'ref_bts_bdx', q: "combien de BTS dans l'académie de Bordeaux", type: 'count', egal: { fili: 'BTS', acad_mies: 'Bordeaux' } },
+  { id: 'ref_ville_bdx', q: 'combien de formations à Bordeaux', type: 'count', egal: { ville_etab: 'Bordeaux' } },
+  { id: 'ref_gironde', q: 'combien de formations en Gironde', type: 'count', egal: { dep_lib: 'Gironde' } },
+  { id: 'ref_selectives', q: 'combien de formations sélectives', type: 'count', egal: { select_form: 'formation sélective' } },
+  { id: 'ref_non_selectives', q: 'combien de formations non sélectives', type: 'count', egal: { select_form: 'formation non sélective' } },
+  { id: 'ref_places', q: 'combien de places au total', type: 'sum', champ: 'capa_fin' },
+  { id: 'ref_places_bts', q: 'combien de places en BTS', type: 'sum', champ: 'capa_fin', egal: { fili: 'BTS' } },
+  { id: 'ref_candidats_pass', q: 'combien de candidats en PASS', type: 'sum', champ: 'voe_tot', egal: { fili: 'PASS' } },
+  { id: 'ref_admis_bts', q: "combien d'admis en BTS", type: 'sum', champ: 'acc_tot', egal: { fili: 'BTS' } },
+  { id: 'ref_capa_moy_bts', q: 'capacité moyenne des BTS', type: 'avg', champ: 'capa_fin', egal: { fili: 'BTS' } },
+  { id: 'ref_par_region', q: 'nombre de formations par région', type: 'group', champ: 'region_etab_aff' },
+  { id: 'ref_par_filiere', q: 'répartition des formations par filière de formation très agrégée', type: 'group', champ: 'fili' },
+];
+const _odsql = v => `"${String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+export function requeteOfficielle(ref, session) {
+  const conds = [...Object.entries(ref.egal || {}).map(([k, v]) => `${k}=${_odsql(v)}`),
+    ...Object.entries(ref.different || {}).map(([k, v]) => `(${k} is null or ${k}!=${_odsql(v)})`)];
+  const p = new URLSearchParams();
+  p.set('select', ref.type === 'count' ? 'count(*) as n' : ref.type === 'sum' ? `sum(${ref.champ}) as n` : ref.type === 'avg' ? `avg(${ref.champ}) as n` : `${ref.champ} as cle, count(*) as n`);
+  if (ref.type === 'group') { p.set('group_by', ref.champ); p.set('limit', '100'); } else p.set('limit', '1');
+  if (conds.length) p.set('where', conds.join(' and '));
+  p.append('refine', `session:${session}`);
+  return `${API_PARCOURSUP}/records?${p}`;
+}
+export async function chiffresOfficiels(fetchImpl, session, refs = REFERENCES) {
+  const out = {};
+  for (const ref of refs) {
+    try {
+      const r = await fetchImpl(requeteOfficielle(ref, session), { cache: 'no-store' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const res = (await r.json()).results;
+      if (!Array.isArray(res)) throw new Error('réponse sans résultats');
+      out[ref.id] = ref.type === 'group'
+        ? { valeur: Object.fromEntries(res.map(x => [x.cle === null || x.cle === undefined || x.cle === '' ? '(vide)' : String(x.cle), Number(x.n)])) }
+        : { valeur: Number(res[0]?.n ?? 0) };
+    } catch (e) { out[ref.id] = { erreur: e.message }; }
+  }
+  return out;
+}
+// Compare les réponses du widget aux chiffres officiels
+export function verifierOfficiels(officiels, resultats, refs = REFERENCES) {
+  const R = Object.fromEntries(resultats.map(r => [r.id, r]));
+  return refs.map(ref => {
+    const off = officiels?.[ref.id], w = R[ref.id];
+    const base = { id: ref.id, question: ref.q };
+    if (!off || off.erreur) return { ...base, statut: 'indisponible', detail: `API du ministère indisponible (${off?.erreur || 'non interrogée'})` };
+    if (!w) return { ...base, statut: 'ecart', detail: 'question non posée au widget' };
+    if (ref.type === 'group') {
+      if (!['group_by', 'top'].includes(w.kind)) return { ...base, statut: 'ecart', officiel: '—', widget: w.reponse, detail: 'pas de répartition calculée' };
+      const ecarts = Object.entries(off.valeur).filter(([k]) => k !== '(vide)').map(([k, n]) => {
+        const l = (w.lignes || []).find(x => x.value === k);
+        return l && l.count === n ? null : `${k} : officiel ${n}, widget ${l ? l.count : 'absent'}`;
+      }).filter(Boolean);
+      const vides = off.valeur['(vide)'] || 0;
+      if ((w.sansValeur || 0) !== vides) ecarts.push(`sans valeur : officiel ${vides}, widget ${w.sansValeur || 0}`);
+      const nb = Object.keys(off.valeur).filter(k => k !== '(vide)').length;
+      return { ...base, statut: ecarts.length ? 'ecart' : 'ok', officiel: `${nb} valeurs`, widget: w.reponse, detail: ecarts.length ? ecarts.slice(0, 5).join(' · ') : `${nb} valeurs identiques à l'unité` };
+    }
+    const attendu = ref.type === 'avg' ? Math.round(off.valeur * 100) / 100 : off.valeur;
+    const obtenu = ref.type === 'count' ? (w.kind === 'count' ? w.count : null)
+      : ref.type === 'sum' ? (w.kind === 'sum' ? w.sum : null)
+      : (w.kind === 'stats' ? Math.round(Number(w.moyenne) * 100) / 100 : null);
+    return { ...base, statut: obtenu === attendu ? 'ok' : 'ecart', officiel: attendu, widget: obtenu ?? w.reponse,
+      detail: obtenu === attendu ? 'identique' : `écart : ${obtenu === null ? w.reponse : (Math.round((obtenu - attendu) * 100) / 100).toLocaleString('fr-FR')}` };
+  });
+}
+export function sectionOfficiels(verifs) {
+  if (!verifs || !verifs.length) return [];
+  const ok = verifs.filter(v => v.statut === 'ok').length, ind = verifs.filter(v => v.statut === 'indisponible').length;
+  const l = [`## Chiffres officiels (calculés par le serveur du ministère) : ${ok} / ${verifs.length - ind} identiques à l'unité ${ok === verifs.length - ind && ok ? '✅' : '❌'}`, ''];
+  if (ind) l.push(`⚠️ ${ind} chiffre${ind > 1 ? 's' : ''} non vérifié${ind > 1 ? 's' : ''} : API du ministère indisponible.`, '');
+  l.push('| | Question | Officiel | Widget | Détail |', '|---|---|---|---|---|');
+  verifs.forEach(v => l.push(`| ${v.statut === 'ok' ? '✅' : v.statut === 'ecart' ? '❌' : '⚠️'} | ${cell(v.question)} | ${cell(typeof v.officiel === 'number' ? v.officiel.toLocaleString('fr-FR') : v.officiel ?? '—')} | ${cell(typeof v.widget === 'number' ? v.widget.toLocaleString('fr-FR') : v.widget ?? '—')} | ${cell(v.detail)} |`));
+  l.push('');
+  return l;
+}
+
+export async function essai({ fetchImpl = globalThis.fetch, questions = QUESTIONS, precedent = undefined, contexte = {}, references = REFERENCES } = {}) {
   const table = await chargerOpenData(fetchImpl);
   const resultats = poserQuestions(table, questions);
-  const controles = controler(resultats);
+  const resRefs = poserQuestions(table, references.map(r => ({ id: r.id, q: r.q })));
+  const officiels = references.length ? await chiffresOfficiels(fetchImpl, table.session, references) : {};
+  const verifs = verifierOfficiels(officiels, resRefs, references);
+  const controles = [...controler(resultats), ...verifs.filter(v => v.statut !== 'indisponible').map(v => ({ libelle: `chiffre officiel : « ${v.question} »`, ok: v.statut === 'ok', detail: `officiel ${v.officiel} · widget ${v.widget} · ${v.detail}` }))];
   const diag = diagnosticColonnes(table);
   const snap = instantane(table, resultats, contexte);
   const cmp = precedent === undefined ? undefined : comparer(precedent, snap);
-  return { table, resultats, controles, diag, instantane: snap, comparaison: cmp, texte: rapport(table, resultats, controles, diag, cmp) };
+  return { table, resultats, controles, verifs, diag, instantane: snap, comparaison: cmp, texte: rapport(table, resultats, controles, diag, cmp, verifs) };
 }
 
 // Instantané du lancement précédent, déposé par le workflow dans precedent/ (absent au premier lancement)

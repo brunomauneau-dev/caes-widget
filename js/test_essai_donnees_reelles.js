@@ -38,6 +38,27 @@ add(300, [2025, 'Public', 'Lycée Gustave Eiffel', 'Bordeaux', 'Bordeaux', 'BTS'
 add(200, [2025, 'Public', 'Faculté de Droit et Science politique', 'Pau', 'Bordeaux', 'Licence', 'Licence - Droit, économie, gestion', 'Licence - Droit', 'Droit', 200, 2500, 'Licence Droit Pau']);
 const CSV = FIELDS.map(f => f[0]).join(';') + '\n' + lignes.join('\n');
 
+// API « records » du ministère simulée : elle calcule elle-même count / sum / avg / group_by sur les lignes (chemin indépendant du widget)
+const LIGNES_API = lignes.map(l => Object.fromEntries(FIELDS.map(([n], i) => [n, l.split(';')[i]])));
+let fausserOfficiel = null; // pour vérifier qu'un écart est bien signalé
+function agregatOfficiel(p) {
+  let rows = LIGNES_API;
+  const where = p.get('where') || '';
+  for (const [, k, v] of where.matchAll(/(?:^|and )(\w+)="([^"]*)"/g)) rows = rows.filter(r => r[k] === v);
+  for (const [, k, v] of where.matchAll(/\((\w+) is null or \w+!="([^"]*)"\)/g)) rows = rows.filter(r => r[k] !== v);
+  const sel = p.get('select');
+  const num = (r, c) => Number(r[c]);
+  let n;
+  if (p.get('group_by')) {
+    const c = p.get('group_by'); const m = new Map();
+    rows.forEach(r => m.set(r[c] || null, (m.get(r[c] || null) || 0) + 1));
+    return { results: [...m].map(([cle, n]) => ({ cle, n })) };
+  }
+  if (/^count/.test(sel)) n = rows.length;
+  else { const c = sel.match(/\((\w+)\)/)[1]; const vals = rows.map(r => num(r, c)).filter(Number.isFinite); n = /^sum/.test(sel) ? vals.reduce((a, b) => a + b, 0) : vals.reduce((a, b) => a + b, 0) / vals.length; }
+  if (fausserOfficiel && fausserOfficiel(p)) n += 1;
+  return { results: [{ n }] };
+}
 let appels = [];
 function fakeFetch(url) {
   const u = String(url);
@@ -46,6 +67,12 @@ function fakeFetch(url) {
   if (!u.includes('fr-esr-parcoursup')) return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}), text: () => Promise.resolve('') });
   if (u.includes('/facets')) return json({ facets: [{ name: 'session', facets: [{ name: '2025' }] }] });
   if (u.includes('/exports/csv')) return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(CSV) });
+  if (u.includes('/records?')) {
+    // comme le vrai serveur : un champ inconnu → erreur 400
+    const champ = (new URL(u).searchParams.get('select').match(/\((\w+)\)/) || [])[1];
+    if (champ && champ !== '*' && !FIELDS.some(([n]) => n === champ)) return Promise.resolve({ ok: false, status: 400, json: () => Promise.resolve({}) });
+    return json(agregatOfficiel(new URL(u).searchParams));
+  }
   return json({ fields: FIELDS.map(([name, label, type]) => ({ name, label, type })) });
 }
 
@@ -224,6 +251,39 @@ await describe('v27.11 — Reformulations dans l\'essai : même chiffre pour tou
   const r2 = JSON.parse(JSON.stringify(res.resultats));
   r2.filter(x => x.groupe === 'nombre de BTS').forEach(x => Object.assign(x, { kind: null, routee: false, count: undefined }));
   assert(!controler(r2).find(c => /« nombre de BTS »/.test(c.libelle)).ok, 'toutes les tournures parties vers Albert (aucun chiffre) → détecté, pas « identiques »');
+});
+
+await describe('v27.12 — Chiffres officiels : le widget retrouve à l\'unité les chiffres calculés par le serveur du ministère', async () => {
+  const { REFERENCES, requeteOfficielle, verifierOfficiels, sectionOfficiels } = await import('../scripts/essai_donnees_reelles.mjs');
+  const V = Object.fromEntries(res.verifs.map(v => [v.id, v]));
+  assert(res.verifs.length === REFERENCES.length && REFERENCES.length >= 15, `${REFERENCES.length} chiffres officiels interrogés`);
+  const req = decodeURIComponent(requeteOfficielle(REFERENCES.find(r => r.id === 'ref_bts_bdx'), 2025));
+  assert(/\/records\?select=count\(\*\)\+as\+n/.test(req) && /where=fili="BTS"\+and\+acad_mies="Bordeaux"/.test(req) && /refine=session:2025/.test(req), 'requête au serveur : comptage filtré, session du widget');
+  assert(/where=\(contrat_etab\+is\+null\+or\+contrat_etab!="Public"\)/.test(decodeURIComponent(requeteOfficielle(REFERENCES.find(r => r.id === 'ref_prive'), 2025))), '« privées » = statut différent de Public, cases vides comprises');
+  assert(V.ref_bts.statut === 'ok' && V.ref_bts.officiel === 300 && V.ref_bts.widget === 300, `« combien de BTS » : officiel 300 = widget 300 (obtenu : ${V.ref_bts.officiel} / ${V.ref_bts.widget})`);
+  assert(V.ref_places_bts.statut === 'ok' && V.ref_places_bts.officiel === 9000, 'somme : places en BTS identiques');
+  assert(V.ref_capa_moy_bts.statut === 'ok', 'moyenne : capacité moyenne des BTS identique');
+  assert(V.ref_par_filiere.statut === 'ok', `répartition par filière : chaque valeur identique (${V.ref_par_filiere.detail})`);
+  assert(res.controles.some(c => /^chiffre officiel : « combien de BTS »/.test(c.libelle) && c.ok), 'chaque chiffre officiel est un contrôle du bilan');
+  assert(/## Chiffres officiels \(calculés par le serveur du ministère\) : \d+ \/ \d+ identiques/.test(res.texte), 'section « Chiffres officiels » dans le rapport');
+  // Écart d'une seule unité → détecté
+  fausserOfficiel = p => /fili="BTS"/.test(p.get('where') || '') && /^count/.test(p.get('select'));
+  const res2 = await essai({ fetchImpl: fakeFetch, questions: [] });
+  fausserOfficiel = null;
+  const v2 = res2.verifs.find(v => v.id === 'ref_bts');
+  assert(v2.statut === 'ecart' && v2.officiel === 301 && /écart : -1/.test(v2.detail), `écart d'une unité signalé (obtenu : ${v2.statut} ${v2.detail})`);
+  assert(res2.controles.some(c => /« combien de BTS »/.test(c.libelle) && !c.ok) && /❌/.test(res2.texte.match(/## Chiffres officiels.*$/m)[0]), 'écart → contrôle en échec, section ❌');
+  // API indisponible : signalé, pas compté comme réussi ni comme échec
+  const sansApi = u => String(u).includes('/records?') ? Promise.resolve({ ok: false, status: 503, json: () => Promise.resolve({}) }) : fakeFetch(u);
+  const res3 = await essai({ fetchImpl: sansApi, questions: [] });
+  assert(res3.verifs.every(v => v.statut === 'indisponible') && !res3.controles.some(c => /chiffre officiel/.test(c.libelle)), 'API indisponible : chiffres « non vérifiés », ni réussis ni échoués');
+  assert(/⚠️ \d+ chiffres non vérifiés : API du ministère indisponible/.test(res3.texte), 'API indisponible : avertissement dans le rapport');
+  // Répartition : une valeur manquante ou des cases vides mal comptées → écart
+  const faux = verifierOfficiels({ g: { valeur: { BTS: 300, PASS: 100, '(vide)': 4 } } }, [{ id: 'g', kind: 'group_by', reponse: 'x', sansValeur: 0, lignes: [{ value: 'BTS', count: 300 }] }], [{ id: 'g', q: 'g', type: 'group' }]);
+  assert(faux[0].statut === 'ecart' && /PASS : officiel 100, widget absent/.test(faux[0].detail) && /sans valeur : officiel 4, widget 0/.test(faux[0].detail), 'répartition : valeur absente et cases vides → écarts détaillés');
+  assert(V.ref_admis_bts.statut === 'indisponible' && /HTTP 400/.test(V.ref_admis_bts.detail), 'champ absent des données (admis) : non vérifié, pas un faux « identique »');
+  assert(R.ref_admis_bts === undefined && res.verifs.length, 'questions de référence posées à part (pas mélangées aux questions de l\'essai)');
+  assert(sectionOfficiels([]).length === 0 && sectionOfficiels(null).length === 0, 'aucune référence : pas de section');
 });
 
 console.log('\n──────────────────────────────────────────────────');
