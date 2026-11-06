@@ -8,7 +8,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const { QUESTIONS, essai, controler, rapport, questionsEnPlus } = await import('../scripts/essai_donnees_reelles.mjs');
+const { QUESTIONS, essai, controler, rapport, questionsEnPlus, instantane, comparer, lirePrecedent } = await import('../scripts/essai_donnees_reelles.mjs');
 
 let passed = 0, failed = 0;
 function assert(condition, label) {
@@ -148,12 +148,41 @@ await describe('Erreur réseau : message clair, pas de résultat inventé', asyn
   assert(erreur && /réseau coupé|open data|HTTP|export|schéma/i.test(erreur.message), `erreur remontée (obtenu : ${erreur?.message})`);
 });
 
+await describe('Comparaison avec le lancement précédent', async () => {
+  const snap = res.instantane;
+  assert(snap && snap.formations === 600 && snap.session === 2025 && snap.reponses.length > QUESTIONS.length, `instantané des réponses (obtenu : ${snap?.reponses?.length} réponses)`);
+  assert(snap.reponses.some(r => r.question === 'combien de PASS' && r.valeur === 100), 'valeur numérique enregistrée (combien de PASS = 100)');
+  assert(snap.reponses.some(r => /→ et pour les publics/.test(r.question)), 'les questions de suite sont enregistrées avec leur question de départ');
+  // Premier lancement : pas de précédent
+  const r0 = await essai({ fetchImpl: fakeFetch, precedent: null });
+  assert(/## Évolution depuis le lancement précédent/.test(r0.texte) && /Pas de lancement précédent/.test(r0.texte), 'sans précédent : le rapport le dit');
+  // Même données : aucun changement
+  const r1 = await essai({ fetchImpl: fakeFetch, precedent: JSON.parse(JSON.stringify(snap)) });
+  assert(r1.comparaison.changees === 0 && /Aucune réponse n'a changé/.test(r1.texte) && /Données identiques/.test(r1.texte), 'mêmes données : « aucune réponse n\'a changé »');
+  // Précédent différent : changements et écarts signalés
+  const avant = JSON.parse(JSON.stringify(snap));
+  avant.formations = 580; avant.reponses.find(r => r.question === 'combien de PASS').valeur = 80;
+  avant.reponses = avant.reponses.filter(r => r.question !== 'combien de BTS');
+  const c = comparer(avant, snap);
+  const ligne = c.lignes.find(l => l.question === 'combien de PASS');
+  assert(c.donneesChangees && ligne.change && ligne.ecart === '+20 (+25,0 %)', `écart calculé (obtenu : ${ligne?.ecart})`);
+  assert(c.nouvelles.includes('combien de BTS'), 'question absente avant : signalée comme nouvelle');
+  const txt = rapport(res.table, res.resultats, res.controles, res.diag, c);
+  assert(/Les données ont changé/.test(txt) && /\| combien de PASS \| 80 \| 100 \| \+20/.test(txt), 'tableau avant / maintenant dans le rapport');
+  assert(comparer(null, snap) === null && comparer({ pas: 'de réponses' }, snap) === null, 'précédent absent ou illisible : pas de comparaison, pas d\'erreur');
+  assert(lirePrecedent('/chemin/inexistant.json') === null, 'fichier précédent absent : ignoré');
+  assert(!/## Évolution/.test(res.texte), 'sans demande de comparaison (tests), pas de section');
+});
+
 await describe('Workflow GitHub', async () => {
   const yml = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'essai-donnees-reelles.yml'), 'utf8');
   assert(/workflow_dispatch:/.test(yml) && !/\n\s*push:|\n\s*schedule:/.test(yml), 'lancement manuel uniquement');
   assert(/node scripts\/essai_donnees_reelles\.mjs/.test(yml), 'lance le script');
   assert(/QUESTIONS_EN_PLUS: \$\{\{ inputs\.questions \}\}/.test(yml) && !/run:.*inputs\./.test(yml), 'questions en plus passées par variable, jamais insérées dans la commande');
   assert(/contents: read/.test(yml) && !/secrets\./.test(yml), 'lecture seule, aucun secret');
+  assert(/actions: read/.test(yml) && !/actions: write|contents: write/.test(yml), 'droit de lire les lancements précédents, aucun droit d\'écriture');
+  assert(/continue-on-error: true/.test(yml) && /GITHUB_RUN_ID/.test(yml), 'récupération du précédent : jamais bloquante, exclut le lancement en cours');
+  assert(/essai_resultats\.json/.test(yml), 'les réponses (JSON) sont gardées pour le lancement suivant');
 });
 
 console.log('\n──────────────────────────────────────────────────');
