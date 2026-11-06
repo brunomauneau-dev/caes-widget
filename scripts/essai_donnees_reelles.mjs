@@ -44,6 +44,14 @@ export const QUESTIONS = [
   { id: 'capa_bts', q: 'capacité moyenne des BTS' },
   { id: 'cand_bours', q: 'combien de candidats boursiers en BTS' },
   { id: 'licences', q: 'combien de licences' },
+  // v27.10 — relances et choix de la colonne de répartition
+  { id: 'bts_bdx', q: "combien de BTS dans l'académie de Bordeaux" },
+  { id: 'suite_bdx', conversation: ['combien de BTS', "et pour l'académie de Bordeaux ?"] },
+  { id: 'suite_bts', conversation: ['combien de PASS', 'et pour les BTS ?'] },
+  { id: 'suite_par', conversation: ['combien de BTS', 'et par académie ?'] },
+  { id: 'par_region', q: 'nombre de formations par région' },
+  { id: 'par_statut', q: 'répartition par statut' },
+  { id: 'par_couleur', q: 'répartition par couleur' },
 ];
 
 // ─── Moteur du widget dans un contexte isolé ─────────────────────────────────
@@ -88,6 +96,8 @@ function resumer(ctx, question) {
     ? `${f.col} : ${String(f.label || f.value).split(' + ').map(t => `« ${t} »`).join(' et ')}`
     : `${f.col} ${f.op === 'neq' ? '≠' : '='} ${f.label || f.value}`);
   const r = { question, routee: !!routee, outil: plan?.tool || null, liste: !!plan?.listMode, kind: exec?.kind || null, filtres, termes: (plan?.filters || []).some(f => f.op === 'contains_all') };
+  // v27.10 — périmètre en clair, tel que l'agent le voit sous le résultat
+  if (exec && typeof ctx.perimetreResultat === 'function') r.perimetre = ctx.perimetreResultat(exec.kind, exec.plan, exec.result).texte.replace(/^Périmètre : /, '') || undefined;
   if (!exec) { r.reponse = routee ? 'Le moteur n\'a rien calculé' : 'Non traitée par le moteur : la question part vers Albert (connaissances)'; return r; }
   if (exec.kind === 'count') {
     r.count = exec.result.count; r.total = exec.result.total;
@@ -187,6 +197,26 @@ export function controler(resultats) {
   if (R.licence_droit && R.licences) ctl('« licences de droit » : entre 3 % et 50 % des licences (ni toute la famille, ni une colonne presque vide)', R.licence_droit.count > 0 && R.licences.count > 0 && R.licence_droit.count < R.licences.count * 0.5 && R.licence_droit.count > R.licences.count * 0.03, `${R.licence_droit.reponse} · licences : ${R.licences.reponse} · ${R.licence_droit.filtres.join(' ; ')}`);
   if (R.cand_bours) ctl('« candidats boursiers » : aucune colonne chiffrée utilisée comme filtre d\'état', !R.cand_bours.filtres.some(f => /bours/i.test(f) && /=\s*\d/.test(f)), `${R.cand_bours.reponse} · ${R.cand_bours.filtres.join(' ; ') || 'aucun filtre'}`);
 
+  // v27.10 — relances : le nouveau critère s'ajoute (ou remplace la formation) ; répartition sur la bonne colonne
+  if (R.suite_bdx && R.bts_bdx) {
+    const b = R.suite_bdx.conversation[1];
+    ctl('relance « et pour l\'académie de Bordeaux ? » = « BTS dans l\'académie de Bordeaux »', b.kind === 'count' && partie(R.bts_bdx) && b.count === R.bts_bdx.count, `${b.reponse} · question directe : ${R.bts_bdx.reponse}`);
+  }
+  if (R.suite_bts && R.bts) {
+    const b = R.suite_bts.conversation[1];
+    ctl('relance « et pour les BTS ? » après les PASS : compte les BTS, pas les PASS', b.kind === 'count' && b.count === R.bts.count && !b.filtres.some(f => /pass/i.test(f)), `${b.reponse} · BTS : ${R.bts.reponse}`);
+  }
+  if (R.suite_par && R.bts) {
+    const b = R.suite_par.conversation[1];
+    ctl('relance « et par académie ? » : répartition des BTS par académie', b.kind === 'group_by' && /acad/i.test(b.colonne || '') && b.total === R.bts.count, b.reponse);
+  }
+  if (R.par_region) ctl('« par région » : colonne Région', R.par_region.kind === 'group_by' && /^r[ée]gion/i.test(R.par_region.colonne || ''), R.par_region.reponse);
+  if (R.par_statut) ctl('« par statut » : colonne Statut', R.par_statut.kind === 'group_by' && /^statut/i.test(R.par_statut.colonne || ''), R.par_statut.reponse);
+  if (R.par_couleur) ctl('« par couleur » : arrêt, pas une répartition au hasard', R.par_couleur.kind === 'unresolved', R.par_couleur.reponse);
+  // Chaque résultat chiffré porte son périmètre
+  const chiffres = resultats.flatMap(r => r.conversation || [r]).filter(r => ['count', 'sum', 'group_by', 'top', 'stats'].includes(r.kind));
+  if (chiffres.length) ctl('chaque résultat chiffré dit sur quoi il porte (périmètre)', chiffres.every(r => r.perimetre && /retenues? sur/.test(r.perimetre)), `${chiffres.filter(r => r.perimetre).length} / ${chiffres.length}`);
+
   // Contrôle général : une question qui cite une formation ne doit jamais compter tout le fichier
   resultats.filter(r => r.kind === 'count' && r.id !== 'toutes').forEach(r => {
     if (r.count === r.total) ctl(`« ${r.question} » ne compte pas tout le fichier`, false, r.reponse);
@@ -268,9 +298,9 @@ export function rapport(table, resultats, controles, diag = null, cmp = undefine
   if (cmp !== undefined) lignes.push(...sectionComparaison(cmp));
   lignes.push('## Réponses du moteur');
   lignes.push('');
-  lignes.push('| Question | Réponse | Filtres appliqués |');
+  lignes.push('| Question | Réponse | Sur quoi porte le calcul |');
   lignes.push('|---|---|---|');
-  const ligne = r => lignes.push(`| ${cell(r.question)} | ${cell(r.reponse)} | ${cell(r.filtres?.join(' ; ') || '—')} |`);
+  const ligne = r => lignes.push(`| ${cell(r.question)} | ${cell(r.reponse)} | ${cell(r.perimetre || r.filtres?.join(' ; ') || '—')} |`);
   resultats.forEach(r => r.conversation ? r.conversation.forEach(ligne) : ligne(r));
   resultats.filter(r => r.lignes?.length || r.suggestions?.length).forEach(r => {
     lignes.push('');

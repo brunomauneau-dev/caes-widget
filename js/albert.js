@@ -1019,6 +1019,7 @@ Consignes pour la qualité de l'analyse :
 - Quand un filtre local indique "≠ Bordeaux", il signifie bien que les lignes de l'académie de Bordeaux ont été exclues ; ne transforme pas cette requête en taux de sortie ni en analyse de mobilité si l'utilisateur demande seulement une répartition.
 - Base-toi UNIQUEMENT sur le contexte fourni ci-dessous — si l'information n'y est pas, dis-le clairement plutôt que d'inventer.
 - CHIFFRES (règle absolue) : n'écris AUCUN nombre (effectif, pourcentage, moyenne, rang, capacité, taux) qui ne figure pas tel quel dans le contexte ci-dessous ou dans la question. Ne fais aucun calcul toi-même (ni somme, ni différence, ni pourcentage, ni estimation, ni ordre de grandeur). Si le chiffre demandé n'est pas dans le contexte, écris que le widget ne l'a pas calculé et propose une question de comptage à poser (par exemple « combien de … »). Chaque chiffre de ta réponse est vérifié automatiquement ; un chiffre absent du contexte est signalé à l'agent comme non fiable.
+- PÉRIMÈTRE : quand tu reprends un chiffre calculé par le widget, recopie aussi la ligne « Périmètre : … » qui l'accompagne (données, nombre de lignes retenues, filtres). N'attribue jamais un chiffre à un autre périmètre que le sien.
 - Utilise des balises HTML simples dans ta réponse (h4, p, ul, li, strong) pour structurer le contenu.
 - Si des RÉFÉRENCES MÉTIER PARCOURSUP sont fournies ci-dessous, utilise-les comme règles d'interprétation. Ne cite pas une règle Parcoursup absente des références ; si la règle manque, dis-le.
 

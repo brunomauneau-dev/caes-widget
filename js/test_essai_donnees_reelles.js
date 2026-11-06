@@ -185,6 +185,27 @@ await describe('Workflow GitHub', async () => {
   assert(/essai_resultats\.json/.test(yml), 'les réponses (JSON) sont gardées pour le lancement suivant');
 });
 
+await describe('v27.10 — Relances, colonne de répartition et périmètre dans l\'essai', async () => {
+  const C = Object.fromEntries(res.controles.map(c => [c.libelle, c]));
+  const nom = re => Object.keys(C).find(k => re.test(k));
+  for (const re of [/et pour l'académie de Bordeaux/, /et pour les BTS/, /et par académie/, /« par statut »/, /« par couleur »/, /dit sur quoi il porte/]) {
+    assert(nom(re) && C[nom(re)].ok, `contrôle réussi : ${nom(re) || re}`);
+  }
+  assert(!!nom(/« par région »/), 'contrôle « par région » évalué (pas de colonne Région dans ces données simulées : son résultat n\'est pas présumé)');
+  assert(R.bts.perimetre && R.bts.perimetre.includes('300 formations retenues sur 600') && R.bts.perimetre.includes('open data Parcoursup 2025'), `périmètre enregistré pour chaque réponse (obtenu : ${R.bts.perimetre})`);
+  assert(res.texte.includes('| Question | Réponse | Sur quoi porte le calcul |') && res.texte.includes('300 formations retenues sur 600'), 'rapport : colonne « Sur quoi porte le calcul »');
+  // Détection : les anciens bugs doivent faire échouer les contrôles
+  const copie = () => JSON.parse(JSON.stringify(res.resultats));
+  let r = copie(); Object.assign(r.find(x => x.id === 'suite_bts').conversation[1], { count: 100, filtres: ['Intitulé de formation contenant : « PASS »'] });
+  assert(!controler(r).find(c => /et pour les BTS/.test(c.libelle)).ok, 'ancien bug « et pour les BTS ? » qui recompte les PASS → détecté');
+  r = copie(); Object.assign(r.find(x => x.id === 'suite_bdx').conversation[1], { kind: 'unresolved', count: undefined });
+  assert(!controler(r).find(c => /académie de Bordeaux \? » =/.test(c.libelle)).ok, 'ancien bug « Bordeaux perdu » → détecté');
+  r = copie(); Object.assign(r.find(x => x.id === 'par_couleur'), { kind: 'group_by', colonne: "Académie de l'établissement" });
+  assert(!controler(r).find(c => /par couleur/.test(c.libelle)).ok, 'répartition au hasard pour « par couleur » → détectée');
+  r = copie(); delete r.find(x => x.id === 'bts').perimetre;
+  assert(!controler(r).find(c => /dit sur quoi il porte/.test(c.libelle)).ok, 'résultat sans périmètre → détecté');
+});
+
 console.log('\n──────────────────────────────────────────────────');
 console.log(`Résultat : ${passed} ✓  ${failed} ✗  (${passed + failed} tests)`);
 if (failed) process.exit(1);

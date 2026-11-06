@@ -123,7 +123,8 @@ function isBareExportRequest(question) {
 
 function isDimensionOnlyFollowUp(question) {
   const q = normalizeText(question || '');
-  return /^(par|selon)\s+/.test(q);
+  // v27.10 — « et par académie ? », « puis par filière » : même relance que « par académie »
+  return /^(?:(?:et|puis|maintenant|ensuite)\s+)?(par|selon)\s+/.test(q);
 }
 
 function mergeFiltersUnique(base, extra) {
@@ -304,7 +305,8 @@ function strictFiltersFromQuestion(table, question) {
     }
   }
   const selCol = headersS.find(h => /selectiv/.test(_hx(h)));
-  if (selCol && /\bselecti(f|fs|ve|ves|vite)\b/.test(q)) {
+  // v27.10 — « par sélectivité » est une répartition, pas un filtre : seul l'adjectif (sélectif, sélectives…) filtre
+  if (selCol && /\bselecti(f|fs|ve|ves)\b/.test(q)) {
     const non = /\bnon selecti/.test(q);
     const v = _distinctValues(table, selCol).find(x => { const n = normalizeText(x); return non ? /non selecti/.test(n) : (/selecti/.test(n) && !/\bnon\b/.test(n)); });
     if (v) add(selCol, v, 'eq');
@@ -368,6 +370,7 @@ function replaceConceptFiltersWithStrict(plan, question) {
   return plan;
 }
 
+const _cleFiltre = f => `${f && f.col}::${(f && f.op) || 'eq'}::${f && f.value}`;
 function inheritConversationContext(plan, question) {
   if (!plan) return plan;
   const state = getDataEngineState();
@@ -375,6 +378,8 @@ function inheritConversationContext(plan, question) {
   const q = normalizeText(question || '');
 
   plan = replaceConceptFiltersWithStrict(plan, question);
+  // v27.10 — filtres trouvés par le planner pour CETTE question, gardés avant toute fusion
+  const _filtresPlanner = (plan.filters || []).slice();
 
   if (!prev) {
     if (isChartRequest(question)) {
@@ -406,12 +411,16 @@ function inheritConversationContext(plan, question) {
     // v27.7 — une formation citée dans la nouvelle question remplace la formation précédente (pas de cumul BTS + PASS)
     const newTerms = (plan.filters || []).filter(f => f && f.source === 'termes_formation');
     const formCols = new Set(formationTermsInfo(plan.table || prev.table).cols);
-    const prevKept = newTerms.length ? previousFilters.filter(f => !(f && (f.source === 'termes_formation' || (formCols.has(f.col) && f.op !== 'neq')))) : previousFilters;
+    // v27.10 — idem pour une formation reconnue par le planner (« et pour les BTS ? » après « combien de PASS »)
+    const _estFormation = f => f && (f.source === 'termes_formation' || f.op === 'contains_all' || (formCols.has(f.col) && f.op !== 'neq'));
+    const prevKept = (newTerms.length || _filtresPlanner.some(_estFormation)) ? previousFilters.filter(f => !_estFormation(f)) : previousFilters;
+    // v27.10 — filtres posés par cette question (pour distinguer ceux repris de la question précédente)
+    const _clesQuestion = new Set([...(plan.filters || []), ...newStrictFilters].map(_cleFiltre));
     plan.filters = mergeFiltersUnique(prevKept, [...newFilters, ...newTerms]);
 
     if (dimensionFollowUp) {
       plan.tool = 'group_by';
-      if (!plan.targetCol && prev.targetCol) plan.targetCol = prev.targetCol;
+      if (!plan.targetCol && prev.targetCol && !plan.dimensionIntrouvable) plan.targetCol = prev.targetCol;
     } else if (filterFollowUp) {
       plan.tool = prev.tool || plan.tool;
       if (prev.targetCol)  plan.targetCol  = prev.targetCol;
@@ -433,10 +442,18 @@ function inheritConversationContext(plan, question) {
           plan.filters = mergeFiltersUnique(prev.filters || [], strictFiltersFromQuestion(plan.table, question));
         }
       } else {
-        const _newPlannerFilters = (plan.filters || []).filter(f => !prev.filters?.some(pf => pf.col === f.col));
-        plan.filters = mergeFiltersUnique(mergeFiltersUnique(prev.filters || [], strictFiltersFromQuestion(plan.table, question)), _newPlannerFilters);
+        // v27.10 — « et pour l'académie de Bordeaux ? » : le filtre du planner (académie = Bordeaux) était perdu,
+        // car lu après l'écrasement de plan.filters. Une colonne déjà filtrée change de valeur (« et pour Toulouse ? »)
+        // au lieu de cumuler deux valeurs incompatibles ; une formation citée remplace la précédente (prevKept).
+        const _strict = strictFiltersFromQuestion(plan.table, question);
+        const _colsNouvelles = new Set([..._strict, ..._filtresPlanner].filter(f => f && f.op !== 'contains_all').map(f => f.col));
+        const _prevGardes = prevKept.filter(f => !(f && f.op !== 'contains_all' && _colsNouvelles.has(f.col)));
+        plan.filters = mergeFiltersUnique(mergeFiltersUnique(_prevGardes, _strict), _filtresPlanner);
       }
     }
+
+    const _clesPrecedentes = new Set(previousFilters.map(_cleFiltre));
+    plan.filtresRepris = (plan.filters || []).map(_cleFiltre).filter(k => _clesPrecedentes.has(k) && !_clesQuestion.has(k));
 
     if (isChartRequest(question)) {
       plan.renderChart = true;
@@ -1439,7 +1456,16 @@ function _finalSanitizeAnalysisPlanBase(plan) {
   // des filtres réellement stockés dans le dernier plan + les nouveaux filtres stricts.
   // On ignore totalement les filtres produits par le planner pour la commande courte.
   if (prev && (dimensionFollowUp || filterFollowUp)) {
-    plan.filters = mergeFiltersUnique(prev.filters || [], strict);
+    // v27.10 — filtres reçus d'inheritConversationContext : filtres précédents conservés + filtres posés par
+    // cette question. Avant, ils étaient écrasés par « précédents + stricts » : « et pour l'académie de Bordeaux ? »
+    // perdait Bordeaux, et « et pour les BTS ? » après « combien de PASS » recomptait les PASS.
+    const _entrants = (plan.filters || []).slice();
+    const _clesPrev = new Set((prev.filters || []).map(_cleFiltre));
+    const _nouveaux = _entrants.filter(f => !_clesPrev.has(_cleFiltre(f)));
+    const _colsNouv = new Set([...strict, ..._nouveaux].filter(f => f && f.op !== 'contains_all').map(f => f.col));
+    const _clesEntrants = new Set(_entrants.map(_cleFiltre));
+    const _prevGardes = (prev.filters || []).filter(pf => pf && _clesEntrants.has(_cleFiltre(pf)) && !(pf.op !== 'contains_all' && _colsNouv.has(pf.col)));
+    plan.filters = mergeFiltersUnique(mergeFiltersUnique(_prevGardes, strict), _nouveaux);
     if (dimensionFollowUp) {
       plan.tool = 'group_by';
     }
@@ -1477,12 +1503,6 @@ function _finalSanitizeAnalysisPlanBase(plan) {
         if (prev.targetCol2) plan.targetCol2 = prev.targetCol2;
         if (prev.limit)      plan.limit      = prev.limit;
         if (prev.mentionedCols) plan.mentionedCols = prev.mentionedCols;
-      }
-      // Inclure aussi les filtres détectés par le planner (ex: CPGE)
-      const _newPlannerFilters = (plan.filters || []).filter(f =>
-        !prev.filters?.some(pf => pf.col === f.col));
-      if (_newPlannerFilters.length) {
-        plan.filters = mergeFiltersUnique(plan.filters, _newPlannerFilters);
       }
     }
     keepTermFilters();
@@ -1798,6 +1818,7 @@ function renderCompareStatsTable(col, statsRows) {
 }
 
 function renderCompareHtml(plan, result) {
+  const perim = perimetreResultat('compare', plan, result).html;
   const filtersHtml = (plan.filters || []).length
     ? `<div style="margin:10px 0"><strong>Filtres communs</strong><ul style="margin:6px 0 0;padding-left:18px">${plan.filters.map(f => `<li>${escapeHtml(f.col)} ${f.op === 'neq' ? '≠' : '='} <strong>${escapeHtml(f.label || f.value)}</strong></li>`).join('')}</ul></div>`
     : '<p style="margin:10px 0"><strong>Filtres communs</strong> : aucun.</p>';
@@ -1825,7 +1846,7 @@ function renderCompareHtml(plan, result) {
   const detailsTables = `<details class="de-detail-tables" style="margin:16px 0;border:1px solid var(--gris2,#e5e7eb);border-radius:12px;background:#fff"><summary style="cursor:pointer;font-weight:800;padding:12px 14px">Afficher les tableaux détaillés</summary><div style="padding:0 14px 14px">${formationTable}${academieTable}${serieTable}</div></details>`;
   const debug = `<details class="msg-sources"><summary title="Détail technique du calcul (pour vérification ou support) — sans impact sur le résultat affiché ci-dessus">Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : compare<br><strong>Version</strong> : v27.6.0<br><strong>Source</strong> : ${escapeHtml(plan.table?.source || 'Données')} · ${escapeHtml(plan.table?.name || 'table')}<br><strong>Groupes</strong> : ${escapeHtml(rows.map(r => r.label).join(' / ') || '—')}</div></details>`;
   const clearTitle = (typeof extractBlockTitle === 'function') ? extractBlockTitle({ plan, result }, '') : 'Comparaison';
-  return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p>Base comparée : <strong>${baseTotal.toLocaleString('fr-FR')}</strong> lignes.</p><section class="de-section de-population" style="margin:12px 0;padding:12px;border:1px solid var(--gris2,#e5e7eb);border-radius:10px;background:#fff"><div style="overflow:auto"><table style="border-collapse:separate;border-spacing:0;width:100%;font-size:12px;min-width:360px"><tbody><tr><th style="text-align:left;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Population</th><th style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Nombre</th><th style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Part</th></tr>${tableRows}</tbody></table></div>${missingNote}</section>${filtersHtml}${insights}${charts}${statsTable}${detailsTables}${debug}`;
+  return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}${perim}<p>Base comparée : <strong>${baseTotal.toLocaleString('fr-FR')}</strong> lignes.</p><section class="de-section de-population" style="margin:12px 0;padding:12px;border:1px solid var(--gris2,#e5e7eb);border-radius:10px;background:#fff"><div style="overflow:auto"><table style="border-collapse:separate;border-spacing:0;width:100%;font-size:12px;min-width:360px"><tbody><tr><th style="text-align:left;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Population</th><th style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Nombre</th><th style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Part</th></tr>${tableRows}</tbody></table></div>${missingNote}</section>${filtersHtml}${insights}${charts}${statsTable}${detailsTables}${debug}`;
 }
 
 function runDataEnginePlan(plan, persistentFiltersOverride) {
@@ -1907,13 +1928,16 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     return exec;
   }
   if (plan.tool === 'sum') {
-    const sum = rows.reduce((t, r) => { const x = Number(String(r?.[plan.sumCol] ?? '').replace(',', '.')); return isFinite(x) ? t + x : t; }, 0);
-    const result = { sum, count: rows.length, total: (plan.table.objects || []).length, col: plan.sumCol, unite: plan.sumUnit };
+    const sum = rows.reduce((t, r) => { const x = _nombreCellule(r?.[plan.sumCol]); return x === null ? t : t + x; }, 0);
+    const renseignees = rows.filter(r => _nombreCellule(r?.[plan.sumCol]) !== null).length;
+    const result = { sum, count: rows.length, total: (plan.table.objects || []).length, col: plan.sumCol, unite: plan.sumUnit, renseignees };
     const exec = { kind: 'sum', plan, result, text: `SOMME ${plan.sumCol} = ${sum}`, html: renderDataEngineResultHtml('sum', plan, result) };
     rememberDataEngineExecution(exec);
     return exec;
   }
   if (plan.tool === 'group_by' || plan.tool === 'top') {
+    // v27.10 — « par couleur » : aucune colonne ne correspond, on le dit au lieu de répartir selon une autre colonne
+    if (!plan.targetCol && plan.dimensionIntrouvable) return unresolvedConceptExecution(plan, [], `aucune colonne ne correspond à « ${String(plan.dimensionIntrouvable).trim()} »`);
     const col = plan.targetCol || plan.mentionedCols?.[0];
     if (!col) return null;
     const limit = plan.listMode ? 300 : (plan.limit || detectLimit(plan.question) || (plan.tool === 'top' ? 10 : 30));
@@ -1998,8 +2022,17 @@ function pivotRows(rows, rowCol, colCol, maxRows = 12, maxCols = 8) {
   return { total: rows.length, rowCol, colCol, rowValues, colValues, matrix };
 }
 
+// v27.10 — valeur chiffrée d'une cellule, ou null (vide, texte) ; « 1 234,5 » = 1234.5
+function _nombreCellule(v) {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  const t = String(v ?? '').replace(/[\s\u00a0\u202f]/g, '').replace(',', '.');
+  if (t === '') return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
 function numericStats(rows, col) {
-  const nums = rows.map(r => String(r[col] ?? '').replace(',', '.')).map(Number).filter(Number.isFinite).sort((a,b)=>a-b);
+  // v27.10 — case vide ≠ 0 : Number('') vaut 0 et faussait moyenne, médiane et minimum
+  const nums = rows.map(r => _nombreCellule(r[col])).filter(v => v !== null).sort((a,b)=>a-b);
   const n = nums.length;
   const sum = nums.reduce((a,b)=>a+b,0);
   const avg = n ? sum / n : null;
@@ -2045,6 +2078,9 @@ function dataEngineResultToContext(exec) {
   const filters = (p.filters || []).map(f => `${f.col} ${f.op === 'neq' ? '≠' : '='} "${f.value}"`).join(' ; ') || 'aucun';
   let out = `=== DATA ENGINE V22 — RÉSULTAT CALCULÉ SUR LIGNES BRUTES ===\n`;
   out += `Outil : ${p.tool}\nSource : ${p.table?.source || 'Données'} · ${p.table?.name || 'table'}\nFiltres : ${filters}\n`;
+  // v27.10 — périmètre en clair : Albert doit le reprendre tel quel
+  const _perim = perimetreResultat(exec.kind, p, exec.result).texte;
+  if (_perim) out += `${_perim}\n`;
   if (exec.kind === 'count') out += `Résultat : ${exec.result.count} ligne(s) sur ${exec.result.total}.\n`;
   if (exec.kind === 'sum') out += `Résultat : ${exec.result.sum} ${exec.result.unite} (somme de « ${exec.result.col} ») sur ${exec.result.count} formation(s).\n`;
   if (exec.kind === 'unresolved') out += `Résultat : aucun calcul. ${exec.text}\nIntitulés proches : ${(exec.result?.suggestions || []).map(s => s.value).join(' ; ')}\n`;
@@ -2100,6 +2136,79 @@ function dataEngineResultToContext(exec) {
   return out;
 }
 
+/* ═══════════════ v27.10 — Périmètre de chaque résultat, en clair ═══════════════
+   Sous le titre de chaque résultat calculé : sur quelles données, combien de lignes retenues sur combien,
+   avec quels filtres (et lesquels sont repris de la question précédente), et ce qui a été laissé de côté
+   (cases vides, valeurs non affichées). L'agent sait exactement à quoi correspond le chiffre. */
+const _nf = n => Number(n || 0).toLocaleString('fr-FR');
+const _VALEURS_ETAT = { oui: 'oui', vrai: 'oui', true: 'oui', '1': 'oui', non: 'non', faux: 'non', false: 'non', '0': 'non' };
+function _filtreEnClair(f) {
+  if (!f) return '';
+  if (f.op === 'contains_all') {
+    const mots = String(f.label || f.value || '').split(' + ').filter(Boolean).map(t => `« ${t} »`);
+    return `intitulé de formation contenant ${mots.join(' et ')}`;
+  }
+  const v = String((f.label || f.value) ?? '').trim();
+  const etat = _VALEURS_ETAT[v.toLowerCase()];
+  if (etat) return `« ${f.col} » ${f.op === 'neq' ? (etat === 'oui' ? '= non' : '= oui') : `= ${etat}`}`;
+  return `« ${f.col} » ${f.op === 'neq' ? 'différent de' : '='} ${v}`;
+}
+function _sourceEnClair(table) {
+  if (!table) return 'données chargées';
+  if (table.source === 'Open data') return `open data Parcoursup${table.session ? ` ${table.session}` : ''}, France entière (une ligne = une formation, pas un candidat)`;
+  if (table.source === 'Grist') return 'table Grist connectée';
+  if (table.source === 'Fichier') return `fichier « ${table.name || table.fileName || 'importé'} »`;
+  return `${table.source || 'données'}${table.name ? ` · ${table.name}` : ''}`;
+}
+// Retourne { texte, html } ; texte sert aussi au contexte transmis à Albert
+function perimetreResultat(kind, plan, result) {
+  if (!plan || !result) return { texte: '', html: '' };
+  const table = plan.table || {};
+  const totalTable = (table.objects || []).length;
+  const mot = n => `${table.rowUnit === 'formation' ? 'formation' : 'ligne'}${n > 1 ? 's' : ''}`;
+  const retenues = ['count', 'count_rows', 'sum'].includes(kind) ? result.count
+    : kind === 'compare' ? result.baseTotal : result.total;
+  const parties = [];
+  parties.push(retenues !== undefined && totalTable
+    ? `${_nf(retenues)} ${mot(retenues)} retenue${retenues > 1 ? 's' : ''} sur ${_nf(totalTable)}`
+    : `${_nf(totalTable)} ${mot(totalTable)}`);
+  parties.push(_sourceEnClair(table));
+  const repris = new Set(plan.filtresRepris || []);
+  const filtres = (plan.filters || []).filter(Boolean);
+  const nouveaux = filtres.filter(f => !repris.has(_cleFiltre(f))).map(_filtreEnClair);
+  const anciens = filtres.filter(f => repris.has(_cleFiltre(f))).map(_filtreEnClair);
+  const _s = filtres.length > 1 ? 's' : '';
+  let filtresTxt = !filtres.length ? `aucun filtre (toutes les ${mot(2)})`
+    : `filtre${_s} : ${[...nouveaux, ...(anciens.length ? [`${anciens.join(' ; ')} (repris de la question précédente)`] : [])].join(' ; ')}`;
+  parties.push(filtresTxt);
+  // Ce qui n'entre pas dans le chiffre
+  const notes = [];
+  if ((kind === 'group_by' || kind === 'top') && !plan.listMode) {
+    const vides = (result.total || 0) - (result.filled ?? result.total ?? 0);
+    if (vides > 0) notes.push(`${_nf(vides)} ${mot(vides)} sans valeur dans « ${plan.targetCol} »`);
+    const affichees = Math.min((result.rows || []).length, 20);
+    if ((result.distinct || 0) > affichees) notes.push(`seules les ${_nf(affichees)} valeurs les plus fréquentes sont affichées, sur ${_nf(result.distinct)}`);
+  }
+  if (kind === 'stats' && result.total > result.numericCount) {
+    const ign = result.total - result.numericCount;
+    notes.push(`calcul sur ${_nf(result.numericCount)} valeur${result.numericCount > 1 ? 's' : ''} chiffrée${result.numericCount > 1 ? 's' : ''} ; ${_nf(ign)} ${mot(ign)} sans valeur chiffrée ignorée${ign > 1 ? 's' : ''}`);
+  }
+  if (kind === 'sum' && result.renseignees !== undefined && result.renseignees < result.count) {
+    const ign = result.count - result.renseignees;
+    notes.push(`${_nf(ign)} ${mot(ign)} sans valeur dans « ${result.col} », non comptée${ign > 1 ? 's' : ''}`);
+  }
+  if (kind === 'pivot') {
+    const nonAffiche = (result.total || 0) - (result.matrix || []).reduce((t, r) => t + (r.total || 0), 0);
+    if (nonAffiche > 0) notes.push(`${_nf(nonAffiche)} ${mot(nonAffiche)} dans des valeurs moins fréquentes, non affichées dans le tableau`);
+  }
+  const texte = `Périmètre : ${parties.join(' · ')}${notes.length ? `. À noter : ${notes.join(' ; ')}` : ''}.`;
+  const html = `<p class="de-perimetre" style="font-size:12px;line-height:1.5;color:var(--gris6,#4b5563);background:var(--gris0,#f8fafc);border-left:3px solid var(--bleu,#003189);border-radius:4px;padding:6px 10px;margin:6px 0 10px">`
+    + `📌 <strong>Sur quoi porte ce calcul</strong> : ${escapeHtml(parties.join(' · '))}.`
+    + (notes.length ? `<br>⚠️ <strong>À noter</strong> : ${escapeHtml(notes.join(' ; '))}.` : '')
+    + `</p>`;
+  return { texte, html };
+}
+
 // Badge "calcul exact" affiché sur tout résultat produit par le Data Engine
 // (lignes brutes Grist/Excel), pour le distinguer visuellement d'une réponse
 // Albert générique (interprétation IA, moins garantie sur les chiffres).
@@ -2114,6 +2223,8 @@ function deTitleHtml(title, blockId = null, originalTitle = null) {
 }
 
 function renderDataEngineResultHtml(tool, plan, result) {
+  // v27.10 — périmètre en clair sous le titre
+  const perim = perimetreResultat(tool === 'count_rows' ? 'count' : tool, plan, result).html;
   const filtersHtml = (plan.filters || []).length
     ? `<ul>${plan.filters.map(f => f.op === 'contains_all'
         ? `<li>${escapeHtml(f.col)} : <strong>${escapeHtml((f.label || f.value).split(' + ').map(t => `« ${t} »`).join(' et '))}</strong></li>`
@@ -2126,11 +2237,11 @@ function renderDataEngineResultHtml(tool, plan, result) {
   if (tool === 'count_rows') {
     const pct = result.total ? pctFr(result.count, result.total) : '—';
     const clearTitle = (typeof extractBlockTitle === 'function') ? extractBlockTitle({ plan, result }, '') : 'Comptage';
-    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p>Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ${unit(result.count)} correspondant à la demande (${pct} du jeu de données).</p><p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
+    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}${perim}<p>Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ${unit(result.count)} correspondant à la demande (${pct} du jeu de données).</p><p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
   }
   if (tool === 'sum') {
     const clearTitle = (typeof extractBlockTitle === 'function') ? extractBlockTitle({ plan, result }, '') : `${result.sum} ${result.unite}`;
-    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p>Il y a <strong>${result.sum.toLocaleString('fr-FR')}</strong> ${escapeHtml(result.unite)} au total, sur <strong>${result.count.toLocaleString('fr-FR')}</strong> ${unit(result.count)} retenue${result.count > 1 ? 's' : ''} (somme de la colonne « ${escapeHtml(result.col)} »).</p><p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
+    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}${perim}<p>Il y a <strong>${result.sum.toLocaleString('fr-FR')}</strong> ${escapeHtml(result.unite)} au total, sur <strong>${result.count.toLocaleString('fr-FR')}</strong> ${unit(result.count)} retenue${result.count > 1 ? 's' : ''} (somme de la colonne « ${escapeHtml(result.col)} »).</p><p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
   }
   if (tool === 'group_by' && plan.listMode) {
     // v27.7 — liste complète des intitulés distincts
@@ -2139,12 +2250,12 @@ function renderDataEngineResultHtml(tool, plan, result) {
     const reste = ((result.distinct || rows.length) > rows.length ? `<p style="font-size:12px;color:var(--gris3)">… et ${(result.distinct - rows.length).toLocaleString('fr-FR')} autres intitulés.</p>` : '')
       // v27.8 — lignes sans valeur dans la colonne listée : affichées, pour que le total soit juste
       + (result.filled !== undefined && result.filled < result.total ? `<p style="font-size:12px;color:var(--gris3)">${(result.total - result.filled).toLocaleString('fr-FR')} ${unit(result.total - result.filled)} sans valeur dans cette colonne.</p>` : '');
-    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p><strong>${(result.distinct ?? rows.length).toLocaleString('fr-FR')}</strong> intitulé${(result.distinct ?? rows.length) > 1 ? 's' : ''} différent${(result.distinct ?? rows.length) > 1 ? 's' : ''} dans <strong>${escapeHtml(plan.targetCol)}</strong>, pour <strong>${result.total.toLocaleString('fr-FR')}</strong> ${unit(result.total)}.</p><ul>${rows.map(r => `<li>${escapeHtml(r.value)} : <strong>${r.count.toLocaleString('fr-FR')}</strong></li>`).join('')}</ul>${reste}<p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
+    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}${perim}<p><strong>${(result.distinct ?? rows.length).toLocaleString('fr-FR')}</strong> intitulé${(result.distinct ?? rows.length) > 1 ? 's' : ''} différent${(result.distinct ?? rows.length) > 1 ? 's' : ''} dans <strong>${escapeHtml(plan.targetCol)}</strong>, pour <strong>${result.total.toLocaleString('fr-FR')}</strong> ${unit(result.total)}.</p><ul>${rows.map(r => `<li>${escapeHtml(r.value)} : <strong>${r.count.toLocaleString('fr-FR')}</strong></li>`).join('')}</ul>${reste}<p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
   }
   if (tool === 'group_by' || tool === 'top') {
     const rows = result.rows || [];
     const clearTitle = (typeof extractBlockTitle === 'function') ? extractBlockTitle({ plan, result }, '') : (tool === 'top' ? 'Top' : 'Répartition');
-    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p><strong>${result.total.toLocaleString('fr-FR')}</strong> ligne${result.total>1?'s':''} retenue${result.total>1?'s':''}. Analyse par <strong>${escapeHtml(plan.targetCol)}</strong>.</p><ul>${rows.slice(0,20).map(r => `<li>${escapeHtml(r.value)} : <strong>${r.count.toLocaleString('fr-FR')}</strong> (${r.pct.toFixed(1).replace('.', ',')} %)</li>`).join('')}</ul>${plan.renderChart ? (plan.chartType === 'pie' ? renderMiniPieChart(rows, result.total) : renderMiniBarChart(rows, result.total)) : ''}${filtersHtml}${debug}`;
+    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}${perim}<p><strong>${result.total.toLocaleString('fr-FR')}</strong> ligne${result.total>1?'s':''} retenue${result.total>1?'s':''}. Analyse par <strong>${escapeHtml(plan.targetCol)}</strong>.</p><ul>${rows.slice(0,20).map(r => `<li>${escapeHtml(r.value)} : <strong>${r.count.toLocaleString('fr-FR')}</strong> (${r.pct.toFixed(1).replace('.', ',')} %)</li>`).join('')}</ul>${plan.renderChart ? (plan.chartType === 'pie' ? renderMiniPieChart(rows, result.total) : renderMiniBarChart(rows, result.total)) : ''}${filtersHtml}${debug}`;
   }
   if (tool === 'pivot') {
     const cols = result.colValues || [];
@@ -2164,12 +2275,12 @@ function renderDataEngineResultHtml(tool, plan, result) {
     const foot = `<tr style="background:var(--bleu2,#e8f0fe);border-top:2px solid var(--bleu-doux,#c8d8f0)"><td style="padding:7px 10px;font-weight:800;font-size:12px;color:var(--bleu,#003189)">Total</td>${colTotals.map(t => `<td style="text-align:right;padding:7px 10px;font-weight:800;font-size:12px">${t.toLocaleString('fr-FR')}</td>`).join('')}<td style="text-align:right;padding:7px 10px;font-weight:800;font-size:12px;border-left:1px solid var(--bleu-doux,#c8d8f0)">${total.toLocaleString('fr-FR')}</td><td></td></tr>`;
     const clearTitle = `${_shortColName(plan.targetCol)} × ${_shortColName(plan.targetCol2)}`;
     const colNote = cols.length > 8 ? `<p style="font-size:11px;color:var(--gris3);margin-top:6px">💡 Survolez les en-têtes pour voir les libellés complets.</p>` : '';
-    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p style="font-size:13px;color:var(--gris3)"><strong style="color:var(--texte)">${total.toLocaleString('fr-FR')}</strong> lignes retenues · Croisement <strong style="color:var(--texte)">${escapeHtml(_shortColName(plan.targetCol))}</strong> × <strong style="color:var(--texte)">${escapeHtml(_shortColName(plan.targetCol2))}</strong></p><div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--gris1,#f3f4f6);border-radius:10px;padding-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,.04)"><table style="border-collapse:collapse;font-size:12px;width:auto;min-width:100%;margin-bottom:0"><thead>${header}</thead><tbody>${body}${foot}</tbody></table></div>${colNote}${filtersHtml}${debug}`;
+    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}${perim}<p style="font-size:13px;color:var(--gris3)"><strong style="color:var(--texte)">${total.toLocaleString('fr-FR')}</strong> lignes retenues · Croisement <strong style="color:var(--texte)">${escapeHtml(_shortColName(plan.targetCol))}</strong> × <strong style="color:var(--texte)">${escapeHtml(_shortColName(plan.targetCol2))}</strong></p><div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--gris1,#f3f4f6);border-radius:10px;padding-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,.04)"><table style="border-collapse:collapse;font-size:12px;width:auto;min-width:100%;margin-bottom:0"><thead>${header}</thead><tbody>${body}${foot}</tbody></table></div>${colNote}${filtersHtml}${debug}`;
   }
   if (tool === 'stats') {
     const fmt = v => v === null || v === undefined ? '—' : Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 2 });
     const clearTitle = `Statistiques — ${_shortColName(plan.targetCol)}`;
-    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}<p>Colonne : <strong>${escapeHtml(plan.targetCol)}</strong></p><ul><li>Valeurs numériques : <strong>${result.numericCount.toLocaleString('fr-FR')}</strong> / ${result.total.toLocaleString('fr-FR')}</li><li>Moyenne : <strong>${fmt(result.avg)}</strong></li><li>Médiane : <strong>${fmt(result.median)}</strong></li><li>Min : <strong>${fmt(result.min)}</strong></li><li>Max : <strong>${fmt(result.max)}</strong></li></ul>${filtersHtml}${debug}`;
+    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}${perim}<p>Colonne : <strong>${escapeHtml(plan.targetCol)}</strong></p><ul><li>Valeurs numériques : <strong>${result.numericCount.toLocaleString('fr-FR')}</strong> / ${result.total.toLocaleString('fr-FR')}</li><li>Moyenne : <strong>${fmt(result.avg)}</strong></li><li>Médiane : <strong>${fmt(result.median)}</strong></li><li>Min : <strong>${fmt(result.min)}</strong></li><li>Max : <strong>${fmt(result.max)}</strong></li></ul>${filtersHtml}${debug}`;
   }
   return `${deTitleHtml('Résultat', plan.blockId, plan.originalTitle || 'Résultat')}${debug}`;
 }
