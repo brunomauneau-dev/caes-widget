@@ -14,6 +14,7 @@ on:
 
 permissions:
   contents: read
+  actions: read   # lire le rapport du lancement précédent (comparaison)
 
 jobs:
   essai:
@@ -23,6 +24,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - name: Récupérer les réponses du lancement précédent
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p precedent
+          for id in $(gh run list --repo "$GITHUB_REPOSITORY" --workflow essai-donnees-reelles.yml --status completed --limit 10 --json databaseId --jq '.[].databaseId'); do
+            [ "$id" = "$GITHUB_RUN_ID" ] && continue
+            if gh run download "$id" --repo "$GITHUB_REPOSITORY" -n essai-resultats -D precedent 2>/dev/null && [ -f precedent/essai_resultats.json ]; then
+              echo "Comparaison avec le lancement $id"; break
+            fi
+          done
       - name: Poser les questions sur l'open data Parcoursup
         run: node scripts/essai_donnees_reelles.mjs
         env:
@@ -32,5 +45,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: essai-resultats
-          path: essai_resultats.md
+          path: |
+            essai_resultats.md
+            essai_resultats.json
           if-no-files-found: ignore

@@ -196,7 +196,63 @@ export function controler(resultats) {
 
 // ─── Rapport ─────────────────────────────────────────────────────────────────
 const cell = s => String(s ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
-export function rapport(table, resultats, controles, diag = null) {
+// ─── Comparaison avec le lancement précédent ─────────────────────────────────
+// Chaque lancement enregistre ses réponses (essai_resultats.json, joint au rapport sur GitHub) ;
+// le lancement suivant les récupère et signale ce qui a changé (nouvelles données, effet d'une modification).
+function valeurReponse(r) {
+  if (!r || !r.kind) return r && r.routee === false ? 'Albert (pas de calcul)' : 'aucun calcul';
+  if (r.kind === 'count' || r.kind === 'export') return r.count;
+  if (r.kind === 'sum') return r.sum;
+  if (r.kind === 'stats') return Math.round(Number(r.moyenne) * 100) / 100;
+  if (r.kind === 'group_by' || r.kind === 'top') return `${r.distinct ?? (r.lignes || []).length} valeurs / ${r.total}`;
+  if (r.kind === 'unresolved') return 'non reconnu';
+  return r.kind;
+}
+export function instantane(table, resultats, contexte = {}) {
+  const reponses = [];
+  // questions d'une conversation : nommées d'après la conversation, pour ne pas se confondre avec la même question posée seule
+  resultats.forEach(r => (r.conversation ? r.conversation.map((c, i) => ({ ...c, question: i ? `${r.conversation[0].question} → ${c.question}` : `${c.question} (début de conversation)` })) : [r])
+    .forEach(x => reponses.push({ question: x.question, valeur: valeurReponse(x) })));
+  return { date: contexte.date || new Date().toISOString(), session: table?.session ?? null, formations: table?.objects?.length || 0,
+    branche: contexte.branche || '', commit: contexte.commit || '', reponses };
+}
+export function comparer(precedent, actuel) {
+  if (!precedent || !Array.isArray(precedent.reponses)) return null;
+  const avant = new Map(precedent.reponses.map(r => [r.question, r.valeur]));
+  const lignes = actuel.reponses.filter(r => avant.has(r.question)).map(r => {
+    const a = avant.get(r.question), b = r.valeur;
+    const ecart = typeof a === 'number' && typeof b === 'number' && a !== b
+      ? `${b - a > 0 ? '+' : ''}${(Math.round((b - a) * 100) / 100).toLocaleString('fr-FR')}${a ? ` (${b - a > 0 ? '+' : ''}${((b - a) / a * 100).toFixed(1).replace('.', ',')} %)` : ''}` : '';
+    return { question: r.question, avant: a, apres: b, change: a !== b, ecart };
+  });
+  return {
+    precedent: { date: precedent.date, session: precedent.session, formations: precedent.formations, branche: precedent.branche },
+    donneesChangees: precedent.session !== actuel.session || precedent.formations !== actuel.formations,
+    lignes, changees: lignes.filter(l => l.change).length,
+    nouvelles: actuel.reponses.filter(r => !avant.has(r.question)).map(r => r.question),
+  };
+}
+const nombre = v => typeof v === 'number' ? v.toLocaleString('fr-FR') : String(v ?? '');
+function sectionComparaison(cmp) {
+  const l = ['## Évolution depuis le lancement précédent', ''];
+  if (!cmp) { l.push('Pas de lancement précédent à comparer (premier lancement avec historique).', ''); return l; }
+  const p = cmp.precedent;
+  const quand = p.date ? new Date(p.date).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' }) : '?';
+  l.push(`Lancement précédent : ${quand}${p.branche ? ` (branche ${p.branche})` : ''} · session ${p.session ?? '?'} · ${nombre(p.formations)} formations.`);
+  l.push('');
+  l.push(cmp.donneesChangees ? '⚠️ **Les données ont changé** (nouvelle session ou nouvelle publication du ministère).' : 'Données identiques (même session, même nombre de formations).');
+  l.push('');
+  if (!cmp.changees) l.push('✅ **Aucune réponse n\'a changé.**');
+  else {
+    l.push(`🔄 **${cmp.changees} réponse${cmp.changees > 1 ? 's ont' : ' a'} changé :**`, '', '| Question | Avant | Maintenant | Écart |', '|---|---|---|---|');
+    cmp.lignes.filter(x => x.change).forEach(x => l.push(`| ${cell(x.question)} | ${cell(nombre(x.avant))} | ${cell(nombre(x.apres))} | ${cell(x.ecart)} |`));
+  }
+  if (cmp.nouvelles.length) l.push('', `Nouvelles questions (pas de valeur avant) : ${cmp.nouvelles.map(q => `« ${cell(q)} »`).join(', ')}.`);
+  l.push('');
+  return l;
+}
+
+export function rapport(table, resultats, controles, diag = null, cmp = undefined) {
   const ok = controles.filter(c => c.ok).length;
   const lignes = [];
   lignes.push(`# Essai sur données réelles — ${table?.name || 'open data'}`);
@@ -209,6 +265,7 @@ export function rapport(table, resultats, controles, diag = null) {
   lignes.push('|---|---|---|');
   controles.forEach(c => lignes.push(`| ${c.ok ? '✅' : '❌'} | ${cell(c.libelle)} | ${cell(c.detail)} |`));
   lignes.push('');
+  if (cmp !== undefined) lignes.push(...sectionComparaison(cmp));
   lignes.push('## Réponses du moteur');
   lignes.push('');
   lignes.push('| Question | Réponse | Filtres appliqués |');
@@ -234,12 +291,20 @@ export function rapport(table, resultats, controles, diag = null) {
   return lignes.join('\n') + '\n';
 }
 
-export async function essai({ fetchImpl = globalThis.fetch, questions = QUESTIONS } = {}) {
+// precedent : instantané du lancement précédent (null s'il n'y en a pas) ; undefined = pas de section de comparaison
+export async function essai({ fetchImpl = globalThis.fetch, questions = QUESTIONS, precedent = undefined, contexte = {} } = {}) {
   const table = await chargerOpenData(fetchImpl);
   const resultats = poserQuestions(table, questions);
   const controles = controler(resultats);
   const diag = diagnosticColonnes(table);
-  return { table, resultats, controles, diag, texte: rapport(table, resultats, controles, diag) };
+  const snap = instantane(table, resultats, contexte);
+  const cmp = precedent === undefined ? undefined : comparer(precedent, snap);
+  return { table, resultats, controles, diag, instantane: snap, comparaison: cmp, texte: rapport(table, resultats, controles, diag, cmp) };
+}
+
+// Instantané du lancement précédent, déposé par le workflow dans precedent/ (absent au premier lancement)
+export function lirePrecedent(chemin) {
+  try { return JSON.parse(fs.readFileSync(chemin, 'utf8')); } catch (e) { return null; }
 }
 
 export function questionsEnPlus(texte) {
@@ -249,7 +314,11 @@ export function questionsEnPlus(texte) {
 async function main() {
   let res;
   try {
-    res = await essai({ questions: [...QUESTIONS, ...questionsEnPlus(process.env.QUESTIONS_EN_PLUS)] });
+    res = await essai({
+      questions: [...QUESTIONS, ...questionsEnPlus(process.env.QUESTIONS_EN_PLUS)],
+      precedent: lirePrecedent(process.env.ESSAI_PRECEDENT || 'precedent/essai_resultats.json'),
+      contexte: { branche: process.env.GITHUB_REF_NAME || '', commit: (process.env.GITHUB_SHA || '').slice(0, 7) },
+    });
   } catch (e) {
     const msg = `# Essai sur données réelles\n\n❌ Open data Parcoursup non chargé : ${e.message}\n`;
     console.error(msg);
@@ -259,6 +328,7 @@ async function main() {
   }
   console.log(res.texte);
   fs.writeFileSync('essai_resultats.md', res.texte);
+  fs.writeFileSync('essai_resultats.json', JSON.stringify(res.instantane, null, 1));
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, res.texte);
   if (res.controles.some(c => !c.ok)) process.exit(1);
 }

@@ -2181,3 +2181,60 @@ function shouldAnswerLocallyWithoutAlbert(exec) {
   // v27.7 — « unresolved » : terme introuvable, on le dit plutôt que de laisser Albert inventer
   return ['count','group_by','top','pivot','stats','export','compare','unresolved','sum'].includes(exec.kind);
 }
+/* ═══════════════ v27.9 — Chiffres écrits par Albert : vérifiés contre les données fournies ═══════════════
+   Albert rédige ; il ne doit pas produire de chiffres. Chaque nombre de sa réponse est comparé aux nombres
+   réellement présents dans ce qu'on lui a fourni (données, résultats calculés par le widget, question).
+   Un nombre absent de ces sources est signalé (bandeau + surlignage) : l'agent sait qu'il ne doit pas
+   l'utiliser sans vérification. */
+
+// Nombres d'un texte, sous une forme comparable : « 14 252 » = « 14252 », « 31,59 » = « 31.59 », « 12 % » = « 12 »
+function extraireNombres(texte) {
+  const brut = String(texte ?? '').replace(/<[^>]*>/g, ' ');
+  const out = [];
+  const re = /(^|[^\p{L}\d.,])(\d{1,3}(?:[   ]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?)(?![\p{L}\d])/gu;
+  let m;
+  while ((m = re.exec(brut))) {
+    const affiche = m[2];
+    const n = Number(affiche.replace(/[   ]/g, '').replace(',', '.'));
+    if (isFinite(n)) out.push({ affiche, valeur: n });
+  }
+  return out;
+}
+const _cleNombre = n => String(Math.round(n * 100) / 100);
+// Nombres qui n'appellent pas de vérification : années, petits entiers (« 2 options », « 3 étapes »)
+function _nombreAnodin(n) {
+  if (Number.isInteger(n) && n >= 1990 && n <= 2040) return true;
+  if (Number.isInteger(n) && n >= 0 && n <= 3) return true;
+  return false;
+}
+function verifierChiffresAlbert(reponse, sources, question = '') {
+  const connus = new Set();
+  [...(Array.isArray(sources) ? sources : [sources]), question].forEach(s => extraireNombres(s).forEach(x => {
+    connus.add(_cleNombre(x.valeur));
+    // milliers écrits avec un point (« 14.252 ») : on accepte aussi la lecture « 14252 »
+    if (/^\d{1,3}\.\d{3}$/.test(x.affiche)) connus.add(_cleNombre(Number(x.affiche.replace('.', ''))));
+  }));
+  const inconnus = [];
+  extraireNombres(reponse).forEach(x => {
+    if (_nombreAnodin(x.valeur) || connus.has(_cleNombre(x.valeur))) return;
+    if (!inconnus.some(i => i.affiche === x.affiche)) inconnus.push(x);
+  });
+  return { inconnus, nombres: extraireNombres(reponse).length };
+}
+// Bandeau d'avertissement + surlignage des nombres non vérifiés (dans le texte seulement, jamais dans les balises)
+function annoterReponseAlbert(reponse, verif) {
+  const html = String(reponse ?? '');
+  if (!verif || !verif.inconnus.length) return html;
+  const aSurligner = new Set(verif.inconnus.map(x => x.affiche));
+  const marque = html.split(/(<[^>]*>)/).map(part => part.startsWith('<') ? part
+    : part.replace(/(^|[^\p{L}\d.,])(\d{1,3}(?:[   ]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?)(?![\p{L}\d])/gu,
+      (tout, avant, nb) => aSurligner.has(nb)
+        ? `${avant}<mark class="chiffre-non-verifie" title="Chiffre absent des données fournies au widget : à vérifier" style="background:#fff1cc;color:inherit;border-bottom:2px dotted #b45309;padding:0 2px">${nb}</mark>`
+        : tout)).join('');
+  const liste = verif.inconnus.slice(0, 8).map(x => x.affiche).join(' · ');
+  const bandeau = `<div class="alerte-chiffres-albert" role="alert" style="border:1px solid #f59e0b;background:#fffbeb;color:#78350f;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:13px">`
+    + `<strong>⚠️ Chiffres non calculés par le widget</strong> : ${escapeHtml(liste)}${verif.inconnus.length > 8 ? ' …' : ''}. `
+    + `Albert les a écrits alors qu'ils ne figurent pas dans les données fournies : ne les utilisez pas sans vérification. `
+    + `Pour un chiffre fiable, posez une question de comptage (par exemple « combien de … »).</div>`;
+  return bandeau + marque;
+}
