@@ -43,6 +43,7 @@ export const QUESTIONS = [
   { id: 'places_bts', q: 'combien de places en BTS' },
   { id: 'capa_bts', q: 'capacité moyenne des BTS' },
   { id: 'cand_bours', q: 'combien de candidats boursiers en BTS' },
+  { id: 'licences', q: 'combien de licences' },
 ];
 
 // ─── Moteur du widget dans un contexte isolé ─────────────────────────────────
@@ -93,6 +94,7 @@ function resumer(ctx, question) {
     r.reponse = `${r.count.toLocaleString('fr-FR')} sur ${r.total.toLocaleString('fr-FR')}`;
   } else if (exec.kind === 'group_by' || exec.kind === 'top') {
     r.total = exec.result.total; r.colonne = exec.plan?.targetCol; r.distinct = exec.result.distinct;
+    r.sansValeur = exec.result.filled !== undefined ? exec.result.total - exec.result.filled : 0;
     r.lignes = (exec.result.rows || []).map(x => ({ value: x.value, count: x.count }));
     r.reponse = `${r.distinct ?? r.lignes.length} valeur(s) de « ${r.colonne} » pour ${r.total.toLocaleString('fr-FR')} formations`;
   } else if (exec.kind === 'sum') {
@@ -114,6 +116,19 @@ function resumer(ctx, question) {
 }
 
 // Pose toutes les questions ; chaque question (ou conversation) repart d'un contexte neuf
+// Diagnostic : pour les PASS, ce que contient chaque colonne de formation (remplissage, valeurs différentes, exemples)
+export function diagnosticColonnes(table, filiere = 'PASS') {
+  const ctx = creerMoteur({ table });
+  const cols = vm.runInContext('formationTermsInfo(defaultOpenDataTable).cols', ctx) || [];
+  const colFili = (table.headers || []).find(h => /très agrégée/i.test(h));
+  const lignes = (table.objects || []).filter(o => colFili ? String(o[colFili]).trim() === filiere : false);
+  return { filiere, n: lignes.length, colonnes: cols.map(c => {
+    const vals = lignes.map(o => String(o[c] ?? '').trim()).filter(Boolean);
+    const comptes = new Map(); vals.forEach(v => comptes.set(v, (comptes.get(v) || 0) + 1));
+    return { colonne: c, remplies: vals.length, distinctes: comptes.size, exemples: [...comptes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([v, k]) => `${v} (${k})`) };
+  }) };
+}
+
 export function poserQuestions(table, questions = QUESTIONS) {
   return questions.map(item => {
     const ctx = creerMoteur({ table });
@@ -131,14 +146,19 @@ export function controler(resultats) {
   const valeurs = r => (r?.lignes || []).map(x => `${x.value}:${x.count}`).sort().join('|');
 
   if (R.pass) ctl('« combien de PASS » : un nombre, ni zéro ni tout le fichier', R.pass.kind === 'count' && R.pass.count > 0 && R.pass.count < R.pass.total, R.pass.reponse);
-  if (R.droit && R.pass) ctl('« PASS option Droit » : entre 1 et le nombre de PASS', R.droit.kind === 'count' && R.droit.count > 0 && R.droit.count < R.pass.count, `${R.droit.reponse} · PASS : ${R.pass.count ?? '?'}`);
+  // « PASS option Droit » : soit un nombre entre 1 et le nombre de PASS, soit « non trouvé » (l'option peut ne pas exister)
+  if (R.droit && R.pass) ctl('« PASS option Droit » : un nombre plausible, ou « non trouvé » (jamais tout le fichier)', (R.droit.kind === 'count' && R.droit.count > 0 && R.droit.count < R.pass.count) || R.droit.kind === 'unresolved', `${R.droit.reponse} · PASS : ${R.pass.count ?? '?'}`);
   if (R.liste1) ctl('« liste complète des filières de PASS » : une liste, pas un export', R.liste1.kind === 'group_by' && R.liste1.liste, R.liste1.reponse);
-  if (R.liste1 && R.pass) ctl('la liste des PASS couvre exactement les PASS comptés', R.liste1.total === R.pass.count && somme(R.liste1) === R.pass.count, `liste : ${R.liste1.total ?? '?'} · somme des lignes : ${somme(R.liste1)} · PASS : ${R.pass.count ?? '?'}`);
+  if (R.liste1 && R.pass) ctl('la liste des PASS couvre exactement les PASS comptés (lignes + sans valeur)', R.liste1.total === R.pass.count && somme(R.liste1) + (R.liste1.sansValeur || 0) === R.pass.count, `liste : ${R.liste1.total ?? '?'} · somme des lignes : ${somme(R.liste1)} · sans valeur : ${R.liste1.sansValeur || 0} · PASS : ${R.pass.count ?? '?'}`);
+  // Données réelles 2025 : la seule colonne qui distingue les PASS n'est remplie que pour une partie d'entre eux.
+  // La liste doit le dire (« N sans valeur »), pas l'exiger remplie.
+  if (R.liste1) ctl('la liste signale les formations sans valeur dans la colonne listée', (R.liste1.sansValeur || 0) === (R.liste1.total || 0) - somme(R.liste1), `${R.liste1.sansValeur || 0} sans valeur sur ${R.liste1.total ?? '?'} (colonne « ${R.liste1.colonne || '?'} »)`);
   if (R.liste1) ctl('la liste détaille plusieurs options', (R.liste1.lignes || []).length >= 2, `${(R.liste1.lignes || []).length} intitulé(s) dans « ${R.liste1.colonne || '?'} »`);
   if (R.liste1 && R.liste2) ctl('les deux formulations de la liste donnent le même résultat', R.liste2.kind === 'group_by' && valeurs(R.liste1) === valeurs(R.liste2), R.liste2.reponse);
   if (R.droit && R.liste1) {
     const ligneDroit = (R.liste1.lignes || []).find(x => /droit/i.test(x.value));
-    ctl('« PASS option Droit » = la ligne Droit de la liste des PASS', ligneDroit && ligneDroit.count === R.droit.count, ligneDroit ? `liste : ${ligneDroit.value} = ${ligneDroit.count}` : 'aucune ligne « Droit » dans la liste');
+    const ok = R.droit.kind === 'unresolved' ? !ligneDroit : (ligneDroit && ligneDroit.count === R.droit.count);
+    ctl('« PASS option Droit » cohérent avec la liste des PASS', ok, ligneDroit ? `liste : ${ligneDroit.value} = ${ligneDroit.count} · question : ${R.droit.reponse}` : `aucune ligne « Droit » dans la liste · question : ${R.droit.reponse}`);
   }
   if (R.zoologie) ctl('« PASS option Zoologie » : non trouvée, pas de chiffre', R.zoologie.kind === 'unresolved', R.zoologie.reponse);
   if (R.bts) ctl('« combien de BTS » : un nombre, ni zéro ni tout le fichier', R.bts.kind === 'count' && R.bts.count > 0 && R.bts.count < R.bts.total, R.bts.reponse);
@@ -164,6 +184,7 @@ export function controler(resultats) {
   if (R.gironde && R.aca_bdx) ctl('« en Gironde » ≤ « académie de Bordeaux »', partie(R.gironde) && R.gironde.count <= R.aca_bdx.count, `${R.gironde.reponse}`);
   if (R.places_bts && R.bts) ctl('« places en BTS » : une somme de capacités, plus grande que le nombre de BTS', R.places_bts.kind === 'sum' && /capacit/i.test(R.places_bts.colonne || '') && R.places_bts.sum > (R.bts.count || 0), R.places_bts.reponse);
   if (R.capa_bts) ctl('« capacité moyenne des BTS » : colonne Capacité, valeur plausible (1 à 500)', R.capa_bts.kind === 'stats' && /capacit/i.test(R.capa_bts.colonne || '') && R.capa_bts.moyenne > 1 && R.capa_bts.moyenne < 500, R.capa_bts.reponse);
+  if (R.licence_droit && R.licences) ctl('« licences de droit » : entre 3 % et 50 % des licences (ni toute la famille, ni une colonne presque vide)', R.licence_droit.count > 0 && R.licences.count > 0 && R.licence_droit.count < R.licences.count * 0.5 && R.licence_droit.count > R.licences.count * 0.03, `${R.licence_droit.reponse} · licences : ${R.licences.reponse} · ${R.licence_droit.filtres.join(' ; ')}`);
   if (R.cand_bours) ctl('« candidats boursiers » : aucune colonne chiffrée utilisée comme filtre d\'état', !R.cand_bours.filtres.some(f => /bours/i.test(f) && /=\s*\d/.test(f)), `${R.cand_bours.reponse} · ${R.cand_bours.filtres.join(' ; ') || 'aucun filtre'}`);
 
   // Contrôle général : une question qui cite une formation ne doit jamais compter tout le fichier
@@ -175,7 +196,7 @@ export function controler(resultats) {
 
 // ─── Rapport ─────────────────────────────────────────────────────────────────
 const cell = s => String(s ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
-export function rapport(table, resultats, controles) {
+export function rapport(table, resultats, controles, diag = null) {
   const ok = controles.filter(c => c.ok).length;
   const lignes = [];
   lignes.push(`# Essai sur données réelles — ${table?.name || 'open data'}`);
@@ -202,6 +223,14 @@ export function rapport(table, resultats, controles) {
     if ((r.lignes || []).length > 30) lignes.push(`- … et ${r.lignes.length - 30} autres`);
     (r.suggestions || []).forEach(s => lignes.push(`- proposé : ${s}`));
   });
+  if (diag && diag.n) {
+    lignes.push('');
+    lignes.push(`## Diagnostic : colonnes de formation des ${diag.filiere} (${diag.n} formations)`);
+    lignes.push('');
+    lignes.push('| Colonne | Remplie | Valeurs différentes | Exemples |');
+    lignes.push('|---|---|---|---|');
+    diag.colonnes.forEach(c => lignes.push(`| ${cell(c.colonne)} | ${c.remplies} / ${diag.n} | ${c.distinctes} | ${cell(c.exemples.join(' · '))} |`));
+  }
   return lignes.join('\n') + '\n';
 }
 
@@ -209,7 +238,8 @@ export async function essai({ fetchImpl = globalThis.fetch, questions = QUESTION
   const table = await chargerOpenData(fetchImpl);
   const resultats = poserQuestions(table, questions);
   const controles = controler(resultats);
-  return { table, resultats, controles, texte: rapport(table, resultats, controles) };
+  const diag = diagnosticColonnes(table);
+  return { table, resultats, controles, diag, texte: rapport(table, resultats, controles, diag) };
 }
 
 export function questionsEnPlus(texte) {

@@ -602,7 +602,15 @@ async function loadDefaultOpenDataTable() {
     // Albert comprennent directement « Académie de l'établissement », etc.
     const label = n => String((byName.get(n) || {}).label || n).replace(/’/g, "'").trim();
     const numeric = n => /^(int|double|float|decimal)/i.test((byName.get(n) || {}).type || '');
-    const headers = select.map(label);
+    // v27.8 — deux champs de l'API peuvent porter le même libellé (« Filière de formation ») :
+    // sans distinction, le second écrasait le premier et une colonne était perdue
+    const vus = new Map();
+    const headers = select.map(n => {
+      const l = label(n);
+      const k = (vus.get(l) || 0) + 1;
+      vus.set(l, k);
+      return k > 1 ? `${l} (${k})` : l;
+    });
     const objects = raw.map(row => {
       const o = {};
       select.forEach((n, i) => {

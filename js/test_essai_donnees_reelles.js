@@ -27,14 +27,15 @@ const FIELDS = [
   ['fili', 'Filière de formation très agrégée', 'text'], ['form_lib_voe_acc', 'Filière de formation', 'text'],
   ['fil_lib_voe_acc', 'Filière de formation détaillée bis', 'text'], ['detail_forma', 'Filière de formation très détaillée', 'text'],
   ['capa_fin', 'Capacité de l’établissement par formation', 'int'], ['voe_tot', 'Effectif total des candidats pour une formation', 'int'],
+  ['lib_for_voe_ins', 'Filière de formation', 'text'], // même libellé que form_lib_voe_acc, comme dans l'API réelle
 ];
 const lignes = [];
 const add = (n, v) => { for (let i = 0; i < n; i++) lignes.push(v.join(';')); };
-add(30, [2025, 'Public', 'Université de Bordeaux', 'Bordeaux', 'Bordeaux', 'PASS', 'PASS', "Parcours d'Accès Spécifique Santé (PASS)", 'PASS option Droit', 50, 900]);
-add(10, [2025, 'Privé sous contrat', 'Institut catholique', 'Toulouse', 'Toulouse', 'PASS', 'PASS', "Parcours d'Accès Spécifique Santé (PASS)", 'PASS option Droit', 40, 300]);
-add(60, [2025, 'Public', 'Université de Bordeaux', 'Bordeaux', 'Bordeaux', 'PASS', 'PASS', "Parcours d'Accès Spécifique Santé (PASS)", 'PASS option Biologie', 60, 1200]);
-add(300, [2025, 'Public', 'Lycée Gustave Eiffel', 'Bordeaux', 'Bordeaux', 'BTS', 'BTS - Services', 'BTS - Management Commercial Opérationnel', 'Management Commercial Opérationnel', 30, 400]);
-add(200, [2025, 'Public', 'Faculté de Droit et Science politique', 'Pau', 'Bordeaux', 'Licence', 'Licence - Droit, économie, gestion', 'Licence - Droit', 'Droit', 200, 2500]);
+add(30, [2025, 'Public', 'Université de Bordeaux', 'Bordeaux', 'Bordeaux', 'PASS', 'PASS', "Parcours d'Accès Spécifique Santé (PASS)", 'PASS option Droit', 50, 900, 'PASS Bordeaux']);
+add(10, [2025, 'Privé sous contrat', 'Institut catholique', 'Toulouse', 'Toulouse', 'PASS', 'PASS', "Parcours d'Accès Spécifique Santé (PASS)", 'PASS option Droit', 40, 300, 'PASS Toulouse']);
+add(60, [2025, 'Public', 'Université de Bordeaux', 'Bordeaux', 'Bordeaux', 'PASS', 'PASS', "Parcours d'Accès Spécifique Santé (PASS)", 'PASS option Biologie', 60, 1200, 'PASS Bordeaux']);
+add(300, [2025, 'Public', 'Lycée Gustave Eiffel', 'Bordeaux', 'Bordeaux', 'BTS', 'BTS - Services', 'BTS - Management Commercial Opérationnel', 'Management Commercial Opérationnel', 30, 400, 'BTS MCO Eiffel']);
+add(200, [2025, 'Public', 'Faculté de Droit et Science politique', 'Pau', 'Bordeaux', 'Licence', 'Licence - Droit, économie, gestion', 'Licence - Droit', 'Droit', 200, 2500, 'Licence Droit Pau']);
 const CSV = FIELDS.map(f => f[0]).join(';') + '\n' + lignes.join('\n');
 
 let appels = [];
@@ -58,6 +59,12 @@ await describe('Chargement par le vrai code du widget', async () => {
   assert(appels.some(u => u.includes('/exports/csv')) && appels.some(u => u.includes('refine=session')), 'export CSV demandé pour la session détectée');
 });
 
+await describe('Chargement : deux champs au même libellé gardent chacun leur colonne', async () => {
+  const cols = res.table.headers.filter(h => /^Filière de formation( \(|$)/.test(h));
+  assert(cols.length === 2 && cols.includes('Filière de formation (2)'), `deux colonnes distinctes (obtenu : ${cols.join(' | ')})`);
+  assert(res.table.objects[0]['Filière de formation (2)'] === 'PASS Bordeaux' && res.table.objects[0]['Filière de formation'] === 'PASS', 'chaque colonne garde ses propres valeurs');
+});
+
 await describe('Réponses aux questions types', async () => {
   assert(R.pass.count === 100, `« combien de PASS » → 100 (obtenu : ${R.pass.reponse})`);
   assert(R.droit.count === 40, `« PASS option Droit » → 40 (obtenu : ${R.droit.reponse})`);
@@ -70,7 +77,7 @@ await describe('Réponses aux questions types', async () => {
 await describe('Contrôles de cohérence : ceux de la correction PASS réussissent sur des données saines', async () => {
   // Les contrôles « à Bordeaux » et « publics » portent sur des limites du moteur antérieures à la correction PASS :
   // l'essai doit les évaluer et les signaler, sans que ce test présume de leur résultat.
-  const pass = res.controles.filter(c => /PASS|liste|formulations|Zoologie|licences de droit|filière très agrégée|plus demandées|qu'est-ce|BTS|« combien de formations »/.test(c.libelle) && !/ne compte pas tout le fichier|statut public/.test(c.libelle));
+  const pass = res.controles.filter(c => /PASS|liste|formulations|Zoologie|licences de droit|filière très agrégée|plus demandées|qu'est-ce|BTS|« combien de formations »/.test(c.libelle) && !/ne compte pas tout le fichier|statut public|licences de droit » : entre/.test(c.libelle));
   const echecs = pass.filter(c => !c.ok);
   assert(pass.length >= 12, `au moins 12 contrôles liés à la correction (obtenu : ${pass.length})`);
   assert(echecs.length === 0, `aucun échec (échecs : ${echecs.map(c => c.libelle + ' — ' + c.detail).join(' / ') || 'aucun'})`);
@@ -99,6 +106,24 @@ await describe('Contrôles de cohérence : détectent les incohérences (faux po
   r.find(x => x.id === 'liste2').lignes.pop();
   c = controler(r);
   assert(c.some(x => !x.ok && /deux formulations/.test(x.libelle)), 'deux formulations divergentes → contrôle en échec');
+});
+
+await describe('Contrôles adaptés au réel : une option absente des données n\'est pas une erreur', async () => {
+  const r = JSON.parse(JSON.stringify(res.resultats));
+  Object.assign(r.find(x => x.id === 'droit'), { kind: 'unresolved', count: undefined, reponse: 'Non reconnu' });
+  r.find(x => x.id === 'liste1').lignes = r.find(x => x.id === 'liste1').lignes.filter(l => !/droit/i.test(l.value));
+  r.find(x => x.id === 'liste1').sansValeur = r.find(x => x.id === 'pass').count - r.find(x => x.id === 'liste1').lignes.reduce((t, l) => t + l.count, 0);
+  const c = controler(r);
+  assert(c.find(x => /PASS option Droit » : un nombre plausible/.test(x.libelle))?.ok, '« option Droit » absente et signalée non trouvée → contrôle réussi');
+  assert(c.find(x => /cohérent avec la liste/.test(x.libelle))?.ok, 'non trouvée ET aucune ligne Droit dans la liste → cohérent');
+  assert(c.find(x => /lignes \+ sans valeur/.test(x.libelle))?.ok, 'somme des lignes + sans valeur = nombre de PASS');
+  r.find(x => x.id === 'liste1').lignes.push({ value: 'PASS option Droit', count: 3 });
+  assert(!controler(r).find(x => /cohérent avec la liste/.test(x.libelle))?.ok, 'non trouvée MAIS une ligne Droit dans la liste → incohérence détectée');
+});
+
+await describe('Diagnostic des colonnes de formation', async () => {
+  assert(res.diag && res.diag.n === 100 && res.diag.colonnes.length >= 3, `diagnostic des 100 PASS sur les colonnes de formation (obtenu : ${res.diag?.n}, ${res.diag?.colonnes?.length} colonnes)`);
+  assert(/## Diagnostic : colonnes de formation des PASS/.test(res.texte) && /\| 100 \/ 100 \|/.test(res.texte), 'tableau du diagnostic dans le rapport (remplissage)');
 });
 
 await describe('Rapport', async () => {
