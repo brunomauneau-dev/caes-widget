@@ -225,6 +225,21 @@ await describe('Couche de reformulation : ce qu\'elle change… et ce qu\'elle n
   assert(R('') === '' && R(null) === '' && R(undefined) === '', 'question vide : pas d\'erreur');
 });
 
+await describe('Mesure demandée absente des données : arrêt, pas un comptage de formations', () => {
+  // open data sans colonne « admis » : « combien d'admis en BTS » répondait le nombre de BTS
+  const lignes = OD.slice(0, 500);
+  const ctx = makeCtx();
+  const t = D.tableOpenData(lignes);
+  const sansAdmis = { ...t, headers: t.headers.filter(h => !/admis|accepté/i.test(h)), objects: t.objects.map(o => Object.fromEntries(Object.entries(o).filter(([h]) => !/admis|accepté/i.test(h)))) };
+  ctx.__t = sansAdmis; run(ctx, "defaultOpenDataTable = __t; defaultOpenDataState = 'ready';");
+  const e = ask(ctx, "combien d'admis en BTS");
+  assert(e && e.kind === 'unresolved' && /aucune colonne de admis/.test(e.text), `arrêt « aucune colonne de admis » (obtenu : ${e?.kind} ${e?.result?.count ?? ''})`);
+  const ok = ask(ctx, 'combien de BTS');
+  assert(ok.kind === 'count' && ok.result.count === lignes.filter(o => o.fili === 'BTS').length, 'faux positif : « combien de BTS » reste un comptage');
+  const full = ctxOpenData(lignes);
+  assert(ask(full, "combien d'admis en BTS").kind === 'sum', 'avec la colonne admis : somme, comme avant');
+});
+
 const bilanOD = [], bilanC = [];
 await describe(`Open data simulé (${OD.length} formations) : ${GROUPES_OD.length} questions, ${GROUPES_OD.reduce((s, g) => s + g.variantes.length, 0)} reformulations`, () => {
   bilanOD.push(...poser(ctxOpenData(OD), GROUPES_OD, 'open data'));

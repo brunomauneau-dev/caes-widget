@@ -994,7 +994,9 @@ function applyMeasureSum(plan) {
   for (const m of MESURES_SOMME) {
     if (!m.re.test(q)) continue;
     const col = headers.find(h => m.col.test(normalizeText(h)));
-    if (!col) continue;
+    // v27.12 — mesure demandée (admis, places…) sans colonne correspondante : on s'arrête,
+    // au lieu de compter des formations (« combien d'admis en BTS » répondait le nombre de BTS)
+    if (!col) { plan.mesureIntrouvable = m.unite; return plan; }
     plan.tool = 'sum';
     plan.sumCol = col;
     plan.sumUnit = m.unite;
@@ -1949,6 +1951,7 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     return { kind: 'export', plan, action, result: res, html: res?.html || '' };
   }
   const rows = applyLocalActionFilters(plan.table.objects || [], plan.filters || []);
+  if (plan.tool === 'count_rows' && plan.mesureIntrouvable) return unresolvedConceptExecution(plan, [], `aucune colonne de ${plan.mesureIntrouvable} dans les données`);
   if (plan.tool === 'count_rows') {
     const exec = {
       kind: 'count',

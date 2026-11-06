@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-27 fichiers, 1 168 tests. Depuis la racine du repo :
+27 fichiers, 1 194 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -122,6 +122,10 @@ Les tests ci-dessus utilisent des données simulées. Pour vérifier le moteur s
 3. Après une minute environ, cliquer sur l'exécution : le **résumé** affiche les contrôles de cohérence (✅ / ❌) puis les réponses du moteur à chaque question. Le rapport est aussi téléchargeable (*essai-resultats*).
 
 Le script (`scripts/essai_donnees_reelles.mjs`) charge les vrais fichiers `js/` du widget, comme le navigateur, sans Albert ni Grist : il montre ce que le moteur de calcul répond. Lecture seule. Le rapport compare aussi chaque réponse avec le **lancement précédent** (section « Évolution ») : « aucune réponse n'a changé », ou le tableau avant / maintenant avec l'écart, et un avertissement si les données du ministère ont changé. Une croix rouge signifie qu'au moins un contrôle de cohérence a échoué (ex. une question sur une formation qui compte tout le fichier).
+
+### Chiffres officiels
+
+À chaque lancement, l'essai demande aussi au **serveur du ministère** (API de data.enseignementsup-recherche.gouv.fr) de calculer lui-même une vingtaine de chiffres : nombre de formations, de BTS, de PASS, formations publiques et privées, académie et ville de Bordeaux, Gironde, sélectives, places, candidats, admis, capacité moyenne, répartitions par région et par filière. Le widget doit retrouver chacun **à l'unité près**. Ce sont deux chemins indépendants : toute erreur de chargement, de colonne, de filtre ou de calcul du widget apparaît comme un écart ❌. Si l'API est indisponible, le chiffre est marqué ⚠️ « non vérifié » ; il n'est compté ni comme réussi ni comme échoué.
 
 ## Outils annexes
 
