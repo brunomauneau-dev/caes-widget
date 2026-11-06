@@ -67,3 +67,7 @@ parcoursup-opendata-reference-v1.json
 - Export PDF multi-blocs
 - Bouton « National 2025 » : utiliser la session détectée au lieu de 2025 en dur
 - Nettoyer le code mort de `documents.js` (`PARCOURSUP_ONTOLOGY_RULES`, `classifyParcoursupColumn`, jamais appelés)
+- **Options des PASS (et autres filières à intitulé identique)** — constat du 06/11/2026 sur l'open data 2025 : l'option n'est précisée que pour 70 PASS sur 287 (colonne « très détaillée », qui mélange options et lieux) ; plusieurs PASS d'un même établissement ont exactement le même intitulé (ex. Université de Bordeaux, Talence : capacités 165 et 270). Pistes :
+  1. **Rapprocher par la capacité** : relever l'option et la capacité sur la fiche de chaque formation dans Parcoursup (site indisponible le 06/11, à refaire), puis faire correspondre avec la capacité de l'open data (même établissement + même capacité) ;
+  2. **Dans le widget** : quand les options ne sont pas distinguées, l'écrire (« option précisée pour 70 PASS sur 287 ») et lister les PASS par établissement et capacité, avec le lien vers la fiche Parcoursup si l'open data le fournit (champ à vérifier) ;
+  3. **Autre source** : vérifier si la « cartographie des formations Parcoursup » du ministère donne l'option (diagnostic ponctuel dans l'essai sur données réelles).
