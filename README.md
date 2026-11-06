@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-27 fichiers, 1 194 tests. Depuis la racine du repo :
+28 fichiers, 1 319 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -102,6 +102,16 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 - colonnes d'**état** écrites Oui/Non, **1/0** ou **VRAI/FAUX** : filtrées, jamais additionnées ni moyennées ;
 - classeur dont le 1er onglet est une **notice** ;
 - **open data** de 14 000 formations : statut public/privé, académie, département, ville, région, sélectivité, sommes (places, candidats, admis), moyennes (capacité, taux d'accès), en moins de 3 secondes par question.
+
+### Fiches métiers
+
+`js/test_fiches_metiers.js` : 5 fichiers **fictifs**, un par métier, avec leur façon de nommer les colonnes : export BO du SAIO, suivi des terminales d'un proviseur, entretiens d'un CIO, candidatures d'un BTS, tableau agrégé d'un chargé d'études (`tests/fixtures/`). Le test vérifie, par le vrai chemin d'import :
+- le sens de chaque colonne ;
+- le chiffre exact de chaque question métier ;
+- ce qu'Albert reçoit ;
+- l'arrêt quand l'information est absente.
+
+Il couvre aussi les statuts de candidature en clair (Admis / Refusé / En liste d'attente) et les valeurs O/N.
 
 ### Reformulations
 

@@ -63,6 +63,7 @@ parcoursup-opendata-reference-v1.json
 | REFORM | Reformulations : 31 questions types × 3 à 16 tournures, bonne réponse calculée sur les données (`test_reformulations.js`) ; couche `reformulerQuestion` (nb de, négations, « dans chaque », prépas, bacheliers généraux, « commune de ») ; 12 chiffres faux en silence corrigés (« sur la commune de Bordeaux » comptait l'académie, « qui ne sont pas boursiers », « candidates », « bacheliers généraux » comptaient tout le fichier, « non sélectives » donnait 17 au lieu de 3 196 sur l'open data réel…) ; contrôle « même chiffre pour toutes les tournures » dans l'essai sur données réelles | ✅ |
 | REFORM-2 | Questions réelles des agents à ajouter aux reformulations dès qu'elles sont collectées | ⏳ |
 | OFFICIEL | Chiffres officiels : l'essai fait calculer ~20 chiffres par l'API du ministère (count, sum, avg, group_by) et exige l'égalité à l'unité avec le widget ; API indisponible → « non vérifié ». Bug corrigé : mesure absente des données (« combien d'admis » sans colonne admis) → arrêt au lieu du nombre de formations | ✅ |
+| METIERS | Fiches métiers reprises de la branche `friendly-brahmagupta` (PR 8, non fusionnée : conflits avec la conception actuelle) : 5 fichiers fictifs SAIO / proviseur / CIO / BTS / chargé d'études, 131 tests ; statut de candidature en clair reconnu ; « combien de refusés » (150 → 48), « liste d'attente » (export → 59), « non admis » (admis → 107) ; information absente → « critère non reconnu » | ✅ |
 
 ---
 
