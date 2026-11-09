@@ -275,6 +275,19 @@ function buildCopilotActionBar(bubble, dataExecution = null, question = '') {
     const text = bubble.innerText || bubble.textContent || '';
     try { await navigator.clipboard.writeText(text); } catch(e) { console.warn(e); }
   }));
+  // v27.17 — « 👎 Réponse incorrecte » : signalement noté dans « À revoir » (reste dans le navigateur)
+  bar.appendChild(mk('👎 Réponse incorrecte', 'Signaler une réponse fausse ou mal comprise (reste dans ce navigateur)', (btn) => {
+    if (typeof ouvrirFormulaireRetour !== 'function') return;
+    // question : celle passée au message, sinon la dernière question de l'agent affichée avant cette réponse
+    let q = question;
+    if (!q) {
+      let el = bubble.closest('.msg');
+      while (el && (el = el.previousElementSibling)) { if (el.classList && el.classList.contains('user')) { q = el.innerText || el.textContent || ''; break; } }
+    }
+    const resume = dataExecution && typeof resumeExecution === 'function' ? resumeExecution(dataExecution)
+      : { outil: 'albert', perimetre: String(bubble.innerText || bubble.textContent || '').replace(/\s+/g, ' ').slice(0, 200) };
+    ouvrirFormulaireRetour(btn, { question: q, ...resume });
+  }));
   // Bouton épingler les filtres du résultat courant
   bar.appendChild(mk('📌 Filtres', 'Épingler les filtres de ce résultat pour toutes les prochaines questions', () => {
     const state = (typeof getDataEngineState === 'function') ? getDataEngineState() : null;
