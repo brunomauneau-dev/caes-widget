@@ -69,6 +69,7 @@ parcoursup-opendata-reference-v1.json
 | CHIFFRES-COND | Conditions chiffrées (plus de / moins de / au moins / au plus N places, candidats, admis ; taux d'accès inférieur / supérieur / égal à N) ; condition non comprise → arrêt (avant : ignorée, toutes les lignes comptées, ex. « BTS avec un taux d'accès de 0 » → 5 351) ; « les plus sélectifs » écarte les taux de 0 (aucune proposition Parcoursup) | ✅ |
 | PARTS | Taux et parts calculés par le widget : effectifs (somme ÷ somme, définitions du ministère : boursiers parmi les admis néo-bacheliers ; filles admises, candidates, néo-bacheliers, bacheliers généraux, même académie, remplissage, proposition, admission) et lignes (fichiers de candidats, part de formations) ; arrêt si colonne absente ; « pourcentage moyen » prend la colonne des % ; « pourcentage de filles parmi les boursiers » ne donne plus une répartition par série ; 4 parts vérifiées contre le serveur du ministère | ✅ |
 | SESSIONS | Comparaison entre deux sessions de l'open data (évolution, « depuis 2024 », « l'an dernier », « par rapport à … ») et calcul sur une autre session (« combien de BTS en 2024 ») ; session chargée à la demande ; colonnes rapprochées par nom technique ; comptage, somme, moyenne, part (en points) ; offre changée signalée ; année future ou session non chargée → arrêt ; « par rapport à » n'est plus pris pour une répartition ; 4 vérifications par le serveur du ministère (session précédente et évolution) | ✅ |
+| NATIONAL | Bouton « National 2025 » retiré : il ne changeait que le sous-titre (aucun calcul ni Albert ne lisait ce mode) et faisait croire à un calcul France entière 2025 ; chargement inutile de la table `Parcoursup_National` au démarrage supprimé (`test_sans_mode_national.js`) | ✅ |
 | RETOURS | Bouton « 👎 Réponse incorrecte » (commentaire facultatif) ; questions non comprises et chiffres d'Albert non vérifiés notés automatiquement ; « 📝 À revoir » : liste, export CSV / texte, effacement ; tout reste dans le navigateur (localStorage), résumé du résultat seulement, 300 entrées au plus | ✅ |
 
 ---
@@ -77,7 +78,6 @@ parcoursup-opendata-reference-v1.json
 
 - Mise à jour KB vers v3 (`build_parcoursup_kb_v3.py` prêt dans `scripts/`)
 - Export PDF multi-blocs
-- Bouton « National 2025 » : utiliser la session détectée au lieu de 2025 en dur
 - Nettoyer le code mort de `documents.js` (`PARCOURSUP_ONTOLOGY_RULES`, `classifyParcoursupColumn`, jamais appelés)
 - **Options des PASS (et autres filières à intitulé identique)** — constat du 06/11/2026 sur l'open data 2025 : l'option n'est précisée que pour 70 PASS sur 287 (colonne « très détaillée », qui mélange options et lieux) ; plusieurs PASS d'un même établissement ont exactement le même intitulé (ex. Université de Bordeaux, Talence : capacités 165 et 270). Pistes :
   1. **Rapprocher par la capacité** : relever l'option et la capacité sur la fiche de chaque formation dans Parcoursup (site indisponible le 06/11, à refaire), puis faire correspondre avec la capacité de l'open data (même établissement + même capacité) ;

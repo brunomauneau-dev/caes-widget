@@ -92,11 +92,6 @@ const PARCOURSUP_OD_URL = 'parcoursup-opendata-reference-v1.json';
 let parcoursupOD = { meta: null, important_columns: [], dimensions: {}, aggregates: {} };
 let parcoursupODReady = false;
 
-// Module données nationales live (chargées depuis table Grist ou API data.gouv)
-let parcoursupNational = [];
-let parcoursupNationalReady = false;
-let nationalModeActive = false;
-function setNationalMode(active) { nationalModeActive = active; }
 
 function normalizeForSearch(value) {
   return String(value || '')
@@ -143,8 +138,10 @@ async function loadParcoursupKBIndex() {
 function updateKnowledgeStatusBadge() {
   const sub = document.getElementById('chat-sub');
   if (!sub) return;
-  const base = getActiveDataSource && getActiveDataSource()
-    ? `${getActiveDataSource().source} actif`
+  // documents.js peut ne pas être encore chargé (scripts en defer) : pas d'erreur
+  const src = (typeof getActiveDataSource === 'function') ? getActiveDataSource() : null;
+  const base = src
+    ? `${src.source} actif`
     : (documents.filter(d => d.status === 'ok').length ? 'Document(s) chargé(s)' : 'Aucun document chargé');
   const kb = parcoursupKBReady ? ` · KB Parcoursup ${parcoursupKB.entries.length} fiches${parcoursupKBIndexReady ? ' · index hybride' : ''}` : '';
   const od = parcoursupODReady ? ` · OpenData national` : '';
@@ -366,33 +363,8 @@ function buildOpenDataReferenceContext(question) {
 loadParcoursupOpenDataReference();
 
 
-/* ═══════════════════════ DONNÉES NATIONALES LIVE (data.gouv API) ═══════════════════════
-   Chargées au démarrage depuis l'API OpenDataSoft du ministère.
-   Aucune installation requise — l'appel se fait directement depuis le navigateur.
-   Données par formation (agrégées) — pas de données individuelles candidats. */
-
+/* Adresse de l'API open data Parcoursup du ministère et lecteur CSV de ses exports. */
 const PARCOURSUP_GOVAPI = 'https://data.enseignementsup-recherche.gouv.fr/api/explore/v2.1/catalog/datasets/fr-esr-parcoursup';
-const NATIONAL_SESSION = 2025;
-const NATIONAL_ACADEMIE = 'Bordeaux';
-const NATIONAL_SELECT = [
-  'session', 'g_uai', 'g_ea_lib_vx', 'dep_lib', 'acad_mies', 'region_etab_aff',
-  'fili', 'lib_for_voe_ins', 'lib_comp_voe_ins', 'select_form',
-  'capa_fin', 'voe_tot', 'voe_tot_f', 'prop_tot', 'acc_tot', 'acc_tot_f',
-  'acc_bg', 'acc_bt', 'acc_bp',
-  'pct_f', 'pct_bg', 'pct_bt', 'pct_bp', 'pct_bours', 'nb_bours_t',
-  'rang_der_app_b', 'taux_adm'
-].join(',');
-
-/* Colonnes Grist à conserver pour les données nationales (évite de charger les 118 colonnes) */
-const NATIONAL_COLS_KEEP = new Set([
-  'session', 'contrat_etab', 'g_uai', 'g_ea_lib_vx', 'dep', 'dep_lib',
-  'acad_mies', 'region_etab_aff', 'ville_etab',
-  'fili', 'lib_for_voe_ins', 'lib_comp_voe_ins', 'form_lib_voe_acc', 'select_form',
-  'capa_fin', 'voe_tot', 'voe_tot_f', 'prop_tot', 'acc_tot', 'acc_tot_f',
-  'acc_bg', 'acc_bt', 'acc_bp',
-  'pct_f', 'pct_bg', 'pct_bt', 'pct_bp', 'pct_bours', 'nb_bours_t',
-  'rang_der_app_b', 'taux_adm'
-]);
 
 function parseCSVSimple(text, sep = ';') {
   const lines = text.replace(/\r\n?/g, '\n').trim().split('\n');
@@ -420,107 +392,6 @@ function parseCSVSimple(text, sep = ';') {
   });
 }
 
-async function loadParcoursupNational() {
-  // 1. Source principale : table Grist Parcoursup_National
-  try {
-    if (typeof grist !== 'undefined' && grist.docApi) {
-      const raw = await grist.docApi.fetchTable('Parcoursup_National');
-      if (raw && raw.id && raw.id.length > 0) {
-        const keys = Object.keys(raw).filter(k => k !== 'id' && !k.startsWith('manualSort') && NATIONAL_COLS_KEEP.has(k));
-        parcoursupNational = raw.id.map((_, i) => {
-          const obj = {};
-          keys.forEach(k => { obj[k] = raw[k][i]; });
-          return obj;
-        });
-        parcoursupNationalReady = parcoursupNational.length > 0;
-        updateKnowledgeStatusBadge();
-        return;
-      }
-    }
-  } catch (e) {
-    console.warn('[Parcoursup National] table Grist non disponible, essai data.gouv :', e.message);
-  }
-
-  // 2. Fallback : API data.gouv directement (si la table Grist n'existe pas encore)
-  try {
-    const params = new URLSearchParams({
-      where: `session=${NATIONAL_SESSION} AND acad_mies="${NATIONAL_ACADEMIE}"`,
-      select: NATIONAL_SELECT,
-      limit: -1,
-      delimiter: ';'
-    });
-    const r = await fetch(`${PARCOURSUP_GOVAPI}/exports/csv?${params}`, { cache: 'no-store' });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const text = await r.text();
-    parcoursupNational = parseCSVSimple(text, ';');
-    parcoursupNationalReady = parcoursupNational.length > 0;
-    updateKnowledgeStatusBadge();
-  } catch (e) {
-    console.warn('[Parcoursup National] données non chargées :', e.message);
-    parcoursupNationalReady = false;
-    updateKnowledgeStatusBadge();
-  }
-}
-
-function searchNationalFormations(question, maxResults = 8) {
-  if (!parcoursupNationalReady || !parcoursupNational.length) return [];
-  const terms = extractSearchTerms(question);
-  if (!terms.length) return [];
-  const scored = parcoursupNational.map(row => {
-    const hay = normalizeForSearch(
-      `${row.lib_comp_voe_ins || ''} ${row.lib_for_voe_ins || ''} ${row.fili || ''} ${row.g_ea_lib_vx || ''} ${row.dep_lib || ''}`
-    );
-    let score = 0;
-    for (const t of terms) {
-      if (hay.includes(t)) score += t.length;
-    }
-    return { row, score };
-  }).filter(x => x.score > 0).sort((a, b) => b.score - a.score);
-  return scored.slice(0, maxResults).map(x => x.row);
-}
-
-function formatNationalRows(rows) {
-  if (!rows.length) return '';
-  return rows.map(r =>
-    `- ${r.lib_comp_voe_ins || r.fili || 'Formation'} · ${r.g_ea_lib_vx || ''} (${r.dep_lib || ''})` +
-    ` · capacité=${r.capa_fin || 'n.d.'}, voeux=${r.voe_tot || 'n.d.'}, admis=${r.acc_tot || 'n.d.'}` +
-    `, taux admission=${r.taux_adm || 'n.d.'}%` +
-    `, boursiers=${r.pct_bours || 'n.d.'}%` +
-    `, rang dernier appelé=${r.rang_der_app_b || 'n.d.'}`
-  ).join('\n');
-}
-
-function buildNationalDataContext(question) {
-  if (!parcoursupNationalReady) {
-    if (nationalModeActive) return `MODE NATIONAL ACTIVÉ — les données nationales ${NATIONAL_SESSION} ne sont pas encore chargées. Informe l'utilisateur et invite-le à patienter quelques secondes puis à reposer sa question.`;
-    return '';
-  }
-  const q = normalizeForSearch(question);
-  if (!nationalModeActive && !/national|bordeaux|formation|comparer|comparaison|taux|admission|rang|pression|boursier|filiere|capacite|bts|but|cpge|licence|ifsi|pass|las/.test(q)) return '';
-
-  const hits = searchNationalFormations(question, nationalModeActive ? 15 : 8);
-  const header = `DONNÉES NATIONALES PARCOURSUP — académie Bordeaux, session ${NATIONAL_SESSION} (source : data.gouv.fr)\nDonnées agrégées par formation. Ne contiennent PAS de données individuelles candidats.\nINSTRUCTION : quand tu cites ces données, précise systématiquement l'année (ex : "en ${NATIONAL_SESSION}, à titre de comparaison nationale...") pour distinguer des données locales de la session en cours.`;
-
-  if (!hits.length && nationalModeActive) {
-    // Question trop générique ou formation absente — deux sous-cas
-    const isGeneric = /resume|synthese|synthèse|overview|apercu|liste|toutes?|ensemble|global/i.test(q);
-    if (isGeneric) {
-      // Retourner un échantillon représentatif (10 formations variées)
-      const sample = parcoursupNational.slice(0, 10);
-      return `MODE NATIONAL ACTIVÉ — question générale détectée, voici un aperçu de la base.\n${header}\n\nÉchantillon (${sample.length} formations sur ${parcoursupNational.length}) :\n${formatNationalRows(sample)}\nINSTRUCTION : signale que la base contient ${parcoursupNational.length} formations et propose à l'utilisateur de préciser une filière ou une formation pour une analyse ciblée.`;
-    }
-    // Formation non trouvée
-    return `MODE NATIONAL ACTIVÉ — aucune formation correspondant à cette question n'a été trouvée dans la base nationale ${NATIONAL_SESSION}.\n${header}\n\nINSTRUCTION : explique à l'utilisateur qu'aucune formation ne correspond à sa recherche dans la base nationale ${NATIONAL_SESSION} (${parcoursupNational.length} formations académie Bordeaux disponibles) et propose-lui de reformuler avec un autre nom de filière ou de formation.`;
-  }
-
-  if (!hits.length) return '';
-  const modeNote = nationalModeActive
-    ? 'MODE NATIONAL ACTIVÉ — INSTRUCTION PRIORITAIRE : utilise UNIQUEMENT les données nationales ci-dessous pour répondre. Ignore toute répartition ou statistique calculée sur la table locale. La question porte sur la base nationale Parcoursup 2025, pas sur les données locales de la session en cours.\n'
-    : '';
-  return `${modeNote}${header}\n\n${formatNationalRows(hits)}`;
-}
-
-loadParcoursupNational();
 
 
 /* ═══════════════════════ TABLE PAR DÉFAUT : OPEN DATA PARCOURSUP ═══════════════════════
