@@ -144,6 +144,7 @@ export const OD = {
   voe_f: 'Dont effectif des candidates pour une formation', prop: "Effectif total des candidats ayant reçu une proposition d'admission de la part de l'établissement",
   acc: "Effectif total des candidats ayant accepté la proposition de l'établissement (admis)",
   acc_bours: 'Dont effectif des admis boursiers néo bacheliers', pct_bours: "% d'admis néo bacheliers boursiers",
+  acc_neobac: 'Effectif des admis néo bacheliers', acc_f: 'Dont effectif des candidates admises', acc_bg: 'Dont effectif des admis néo bacheliers généraux',
   pct_f: "% d'admis dont filles", taux: "Taux d'accès",
 };
 // Noms techniques des mêmes champs dans l'API open data (pour simuler l'API elle-même)
@@ -151,7 +152,7 @@ export const OD_API = {
   session: 'session', statut: 'contrat_etab', etab: 'g_ea_lib_vx', dep: 'dep_lib', region: 'region_etab_aff', aca: 'acad_mies',
   commune: 'ville_etab', selectivite: 'select_form', fili: 'fili', form: 'form_lib_voe_acc', fil_det: 'fil_lib_voe_acc',
   detail: 'detail_forma', nom: 'lib_for_voe_ins', capa: 'capa_fin', voe: 'voe_tot', voe_f: 'voe_tot_f', prop: 'prop_tot',
-  acc: 'acc_tot', acc_bours: 'acc_brs', pct_bours: 'pct_bours', pct_f: 'pct_f', taux: 'taux_acces_ens',
+  acc: 'acc_tot', acc_bours: 'acc_brs', acc_neobac: 'acc_neobac', acc_f: 'acc_tot_f', acc_bg: 'acc_bg', pct_bours: 'pct_bours', pct_f: 'pct_f', taux: 'taux_acces_ens',
 };
 const ACAS = [
   ['Bordeaux', 'Nouvelle-Aquitaine', [['Gironde', 'Bordeaux'], ['Gironde', 'Talence'], ['Landes', 'Mont-de-Marsan'], ['Pyrénées-Atlantiques', 'Pau'], ['Pyrénées-Atlantiques', 'Bayonne'], ['Dordogne', 'Périgueux'], ['Lot-et-Garonne', 'Agen']]],
@@ -204,6 +205,11 @@ export function openData(n = 14000, graine = 11) {
       acc_bours: Math.round(acc * h.r() * 0.35), pct_bours: Math.round(h.r() * 400) / 10, pct_f: Math.round(h.r() * 1000) / 10,
       taux: Math.round(h.r() * 1000) / 10,
     });
+    // v27.15 — colonnes déduites sans tirage aléatoire (les autres valeurs du jeu restent identiques)
+    const d = out[out.length - 1];
+    d.acc_neobac = Math.max(d.acc_bours, Math.round(d.acc * 0.85));
+    d.acc_f = Math.round(d.acc * d.pct_f / 100);
+    d.acc_bg = Math.round(d.acc_neobac * 0.6);
   }
   return out;
 }
