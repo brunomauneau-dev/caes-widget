@@ -2161,7 +2161,7 @@ function isDataEngineQuestion(question) {
   try { if (detecterPart((getActiveQueryTables() || [])[0], question)) return true; } catch (e) { /* source absente */ }
   // v27.16 — « les places en BTS ont-elles augmenté depuis 2024 ? »
   try { const _t = (getActiveQueryTables() || [])[0]; if (sessionsDeLaQuestion(_t, question) && (formationTermsFromQuestion(_t, question).terms.length || /\b(places?|candidats?|admis|formations?|boursiers?|capacite|taux|part|bts|pass|cpge|licences?|but)\b/.test(q))) return true; } catch (e) { /* source absente */ }
-  return /compare|comparaison|comparer|versus| vs |combien|nombre|\btotale?\b|effectif|compte|compter|repartition|r[eé]partition|ventilation|par |groupe|group[eé]|top|classement|principa|plus frequen|plus fréquent|croise|crois[eé]|tableau crois[eé]|pivot|moyen|moyenne|median|m[eé]diane|minimum|maximum|min|max|export|excel|csv|liste|filtre|graphique|graphe|diagramme|histogramme|camembert|barres?|boursier|basque|hors|sauf|seulement|uniquement|visualis|repr[eé]sent|montre-?moi|dessine|trace|issus?\s+d[ue]|originaires?|venant\s+d[ue]|provenant|scolaris|scolarit/.test(q) || isListValuesRequest(question) || isFollowUpQuestion(question);
+  return /taux d ?acces|compare|comparaison|comparer|versus| vs |combien|nombre|\btotale?\b|effectif|compte|compter|repartition|r[eé]partition|ventilation|par |groupe|group[eé]|top|classement|principa|plus frequen|plus fréquent|croise|crois[eé]|tableau crois[eé]|pivot|moyen|moyenne|median|m[eé]diane|minimum|maximum|min|max|export|excel|csv|liste|filtre|graphique|graphe|diagramme|histogramme|camembert|barres?|boursier|basque|hors|sauf|seulement|uniquement|visualis|repr[eé]sent|montre-?moi|dessine|trace|issus?\s+d[ue]|originaires?|venant\s+d[ue]|provenant|scolaris|scolarit/.test(q) || isListValuesRequest(question) || isFollowUpQuestion(question);
 }
 
 function inferMeasureIntent(question) {
@@ -2194,6 +2194,8 @@ function inferMeasureIntent(question) {
     if ((_isF(d1) && _isA(d2)) || (_isA(d1) && _isF(d2)) || (_isF(d1) && _isS(d2)) || (_isS(d1) && _isF(d2))) return 'pivot';
   }
   if (/moyen|moyenne|median|m[eé]diane|minimum|maximum|\bmin\b|\bmax\b/.test(q)) return 'stats';
+  // v27.24 — « taux d'accès des PASS », « taux d'accès au lycée Montaigne » : statistiques du taux (pas un comptage)
+  if (/\btaux d ?acces\b/.test(q) && !/\b(combien|nombre|plus|moins|classement|top)\b|\b(inferieur|superieur|egal)\b/.test(q)) return 'stats';
   if (/top|classement|principales?|plus frequentes?|plus fréquentes?|les plus/.test(q)) return 'top';
   if (/repartition|r[eé]partition|ventilation|par |groupe|group[eé]|pourcentage|proportion/.test(q)) return 'group_by';
   if (/combien|nombre|effectif|compte|compter|total/.test(q)) return 'count_rows';
@@ -2343,6 +2345,10 @@ function detectDataEnginePlan(question, filterContextText = question) {
 function currentExecutionToRows(exec) {
   if (!exec) return [];
   const p = exec.plan || {};
+  if (exec.kind === 'stats_groupes') {
+    const r = exec.result;
+    return r.groupes.map(g => ({ [r.dim]: g.valeur, Formations: g.numericCount, Moyenne: g.avg === null ? '' : Math.round(g.avg * 100) / 100, 'Médiane': g.median ?? '', Min: g.min ?? '', Max: g.max ?? '' }));
+  }
   if (exec.kind === 'evolution_groupes') {
     const r = exec.result; const [s1, s2] = r.sessions;
     return (r.lignes || []).map(l => ({ [r.col]: l.valeur, ...(r.type === 'classement' ? { [`Rang ${s2}`]: l.rang2 ?? '', [`Rang ${s1}`]: l.rang1 ?? '' } : {}), [`${s1} (${r.unite})`]: l.v1 ?? '', [`${s2} (${r.unite})`]: l.v2 ?? '', 'Écart': l.ecart ?? '', 'Évolution (%)': l.ecartPct === null ? '' : Math.round(l.ecartPct * 10) / 10 }));
@@ -2461,6 +2467,14 @@ function renderCurrentChartExecution(plan) {
     const titre = `Graphique — évolution ${prev.result.lignes[0].session} → ${prev.result.lignes[prev.result.lignes.length - 1].session}`;
     const html = `${deTitleHtml(titre, prev.plan?.blockId, prev.plan?.originalTitle || titre)}${renderMiniBarChart(rows, rows.reduce((t, r) => t + r.count, 0), 'evolution.png')}`;
     return { kind: 'evolution', plan: prev.plan, result: prev.result, text: prev.text, html };
+  }
+  // v27.24 — statistiques par groupe : barres de la statistique demandée
+  if (prev.kind === 'stats_groupes') {
+    const r = prev.result;
+    const rows = r.groupes.slice(0, 12).map(g => ({ value: g.valeur, count: Math.round((g[r.demandee] ?? 0) * 100) / 100 }));
+    const titre = `Graphique — ${_shortColName(r.col)} : ${_NOMS_STAT[r.demandee]} par ${_shortColName(r.dim) || r.dim}`;
+    const html = `${deTitleHtml(titre, prev.plan?.blockId, prev.plan?.originalTitle || titre)}${renderMiniBarChart(rows, rows.reduce((t, x) => t + x.count, 0), 'statistiques.png')}`;
+    return { kind: 'stats_groupes', plan: prev.plan, result: prev.result, text: prev.text, html };
   }
   // v27.18 — évolution par groupe : deux barres par groupe (session précédente, session courante)
   if (prev.kind === 'evolution_groupes') {
@@ -3188,12 +3202,38 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
       && numericStats(plan.table.objects || [], c).numericCount >= Math.max(5, (plan.table.objects || []).length * 0.1));
     const col = inferredStatsCol || repli;
     if (!col) return unresolvedConceptExecution(plan, [], 'aucune colonne numérique ne correspond à la question');
-    const stats = numericStats(rows, col);
+    // v27.24 — taux d'accès de 0 : aucune proposition faite par Parcoursup (pas une formation très sélective) → écartés,
+    // comme dans les classements ; le nombre est dit dans le périmètre
+    const tauxAcces = /taux d acces/.test(_hx(col));
+    const tauxNuls = tauxAcces ? rows.filter(r => _nombreCellule(r?.[col]) === 0).length : 0;
+    const lignes = tauxNuls ? rows.filter(r => _nombreCellule(r?.[col]) !== 0) : rows;
+    const qn = normalizeText(plan.question || '');
+    const demandee = /\bmedian/.test(qn) ? 'median' : /\bminimum\b|\bmin\b|\ble plus bas\b|\bplus faible\b/.test(qn) ? 'min' : /\bmaximum\b|\bmax\b|\ble plus (haut|eleve)\b/.test(qn) ? 'max' : 'avg';
+    // « … par académie / par filière » : une statistique par groupe
+    const dim = _colonneDimension(plan.table, qn, col);
+    if (dim) {
+      const groupes = new Map();
+      lignes.forEach(r => { const v = String(r?.[dim] ?? '').trim(); if (!v) return; if (!groupes.has(v)) groupes.set(v, []); groupes.get(v).push(r); });
+      const lignesG = [...groupes.entries()].map(([valeur, rs]) => ({ valeur, ...numericStats(rs, col) })).filter(g => g.numericCount > 0)
+        .sort((a, b) => (b[demandee] ?? -Infinity) - (a[demandee] ?? -Infinity) || a.valeur.localeCompare(b.valeur, 'fr'));
+      const result = { col, dim, demandee, groupes: lignesG, total: rows.length, tauxNuls, ensemble: numericStats(lignes, col) };
+      const p2 = { ...plan, tool: 'stats_groupes', targetCol: col };
+      const exec = { kind: 'stats_groupes', plan: p2, result, text: `Stats ${col} par ${dim} :\n` + lignesG.slice(0, 40).map(g => `${g.valeur} : moyenne ${g.avg}, médiane ${g.median} (${g.numericCount})`).join('\n') };
+      exec.html = renderStatsGroupesHtml(p2, result);
+      rememberDataEngineExecution(exec);
+      return exec;
+    }
+    const stats = { ...numericStats(lignes, col), total: rows.length, tauxNuls, demandee };
+    if (stats.numericCount === 1) {
+      const desc = _colonnesDescription(plan.table);
+      const r1 = lignes.find(r => _nombreCellule(r?.[col]) !== null);
+      stats.uneFormation = desc.map(h => String(r1?.[h] ?? '').trim()).filter(Boolean).join(' — ');
+    }
     const exec = {
       kind: 'stats',
       plan: { ...plan, targetCol: col },
       result: stats,
-      text: `Stats ${col}: moyenne ${stats.avg}`,
+      text: `Stats ${col}: ${({ avg: 'moyenne', median: 'médiane', min: 'minimum', max: 'maximum' })[demandee]} ${stats[demandee]} (moyenne ${stats.avg}, médiane ${stats.median}, min ${stats.min}, max ${stats.max})`,
       html: renderDataEngineResultHtml('stats', { ...plan, targetCol: col }, stats)
     };
     rememberDataEngineExecution(exec);
@@ -3240,6 +3280,44 @@ function _nombreCellule(v) {
   const n = Number(t);
   return Number.isFinite(n) ? n : null;
 }
+// v27.24 — « par académie / région / département / commune / établissement / filière / statut / sélectivité »
+function _colonneDimension(table, q, sauf = null) {
+  const m = String(q || '').match(/\bpar\s+(?:type\s+de\s+|grande\s+)?([a-z]+)/g);
+  if (!m) return null;
+  const headers = (table?.headers || []).filter(Boolean);
+  const trouve = mot => {
+    if (/^academies?$/.test(mot)) return headers.find(h => /^academie/.test(_hx(h)) && !/code|origine/.test(_hx(h)));
+    if (/^regions?$/.test(mot)) return headers.find(h => /^region/.test(_hx(h)) && !/code|origine/.test(_hx(h)));
+    if (/^departements?$/.test(mot)) return headers.find(h => /^departement/.test(_hx(h)) && !/code|origine/.test(_hx(h)));
+    if (/^(communes?|villes?)$/.test(mot)) return headers.find(h => /^(commune|ville)/.test(_hx(h)) && !/code|insee|postal|origine/.test(_hx(h)));
+    if (/^(etablissements?|lycees?|universites?)$/.test(mot)) return _colEtablissement(table);
+    if (/^(filieres?|formations?|diplomes?)$/.test(mot)) { try { return _colonneCategories(table, formationTermsInfo(table)); } catch (e) { return null; } }
+    if (/^(statuts?|secteurs?)$/.test(mot)) return headers.find(h => /^statut/.test(_hx(h)));
+    if (/^selectivite$/.test(mot)) return headers.find(h => /selectiv/.test(_hx(h)));
+    return null;
+  };
+  for (const x of m) { const c = trouve(x.replace(/^par\s+(?:type\s+de\s+|grande\s+)?/, '')); if (c && c !== sauf) return c; }
+  return null;
+}
+const _NOMS_STAT = { avg: 'moyenne', median: 'médiane', min: 'minimum', max: 'maximum' };
+function renderStatsGroupesHtml(plan, r) {
+  const fmt = v => v === null || v === undefined ? '—' : Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 2 });
+  const dim = _shortColName(r.dim) || r.dim;
+  const titre = `${_shortColName(r.col)} : ${_NOMS_STAT[r.demandee]} par ${dim}`;
+  const th = 'text-align:left;padding:6px 8px;background:#e8edff;color:var(--bleu,#003189);font-size:11px;white-space:nowrap';
+  const td = 'padding:5px 8px;border-bottom:1px solid var(--gris1,#f3f4f6);font-size:12px';
+  const tdr = td + ';text-align:right';
+  const fort = k => r.demandee === k ? 'font-weight:800' : '';
+  const corps = r.groupes.slice(0, 40).map(g => `<tr><td style="${td}">${escapeHtml(g.valeur)}</td><td style="${tdr}">${g.numericCount.toLocaleString('fr-FR')}</td><td style="${tdr};${fort('avg')}">${fmt(g.avg)}</td><td style="${tdr};${fort('median')}">${fmt(g.median)}</td><td style="${tdr};${fort('min')}">${fmt(g.min)}</td><td style="${tdr};${fort('max')}">${fmt(g.max)}</td></tr>`).join('');
+  const e = r.ensemble;
+  const pied = `<tr style="background:#e8edff"><td style="${td};font-weight:800">Ensemble</td><td style="${tdr};font-weight:800">${e.numericCount.toLocaleString('fr-FR')}</td><td style="${tdr};font-weight:800">${fmt(e.avg)}</td><td style="${tdr};font-weight:800">${fmt(e.median)}</td><td style="${tdr};font-weight:800">${fmt(e.min)}</td><td style="${tdr};font-weight:800">${fmt(e.max)}</td></tr>`;
+  const table = `<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;margin:8px 0"><thead><tr><th style="${th}">${escapeHtml(dim)}</th><th style="${th};text-align:right">Formations</th><th style="${th};text-align:right">Moyenne</th><th style="${th};text-align:right">Médiane</th><th style="${th};text-align:right">Min</th><th style="${th};text-align:right">Max</th></tr></thead><tbody>${corps}${pied}</tbody></table></div>`;
+  const note = `<p style="font-size:12px;color:var(--gris3)">Moyenne simple des valeurs de chaque formation (non pondérée par le nombre de candidats).${r.groupes.length > 40 ? ` 40 groupes affichés sur ${r.groupes.length}.` : ''}</p>`;
+  const perim = perimetreResultat('stats_groupes', plan, r).html;
+  const debug = `<details class="msg-sources"><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : statistiques par groupe · ${escapeHtml(r.col)} × ${escapeHtml(r.dim)}</div></details>`;
+  return `${deTitleHtml(titre, plan.blockId, plan.originalTitle || titre)}${perim}${table}${note}${debug}`;
+}
+
 function numericStats(rows, col) {
   // v27.10 — case vide ≠ 0 : Number('') vaut 0 et faussait moyenne, médiane et minimum
   const nums = rows.map(r => _nombreCellule(r[col])).filter(v => v !== null).sort((a,b)=>a-b);
@@ -3328,6 +3406,14 @@ function dataEngineResultToContext(exec) {
   }
   if (exec.kind === 'stats') {
     out += `Colonne statistique : ${p.targetCol}\nValeurs numériques : ${exec.result.numericCount}/${exec.result.total}\nMoyenne : ${exec.result.avg} · Médiane : ${exec.result.median} · Min : ${exec.result.min} · Max : ${exec.result.max}\n`;
+    if (exec.result.demandee && exec.result.demandee !== 'avg') out += `Statistique demandée : ${_NOMS_STAT[exec.result.demandee]} = ${exec.result[exec.result.demandee]}\n`;
+    if (exec.result.uneFormation) out += `Une seule formation : ${exec.result.uneFormation}\n`;
+  }
+  if (exec.kind === 'stats_groupes') {
+    const r = exec.result;
+    out += `Statistiques de « ${r.col} » par « ${r.dim} » (moyenne simple des formations, non pondérée ; statistique demandée : ${_NOMS_STAT[r.demandee]}) :\n`
+      + r.groupes.slice(0, 40).map(g => `- ${g.valeur} : ${g.numericCount} formations · moyenne ${g.avg} · médiane ${g.median} · min ${g.min} · max ${g.max}`).join('\n')
+      + `\nEnsemble : moyenne ${r.ensemble.avg} · médiane ${r.ensemble.median}\n`;
   }
   if (exec.kind === 'compare') {
     const rows = exec.result?.rows || [];
@@ -3479,8 +3565,9 @@ function perimetreResultat(kind, plan, result) {
     const sans = (result.total || 0) - (result.filled || 0);
     notes.push(`${_nf(sans)} ${mot(sans)} sur ${_nf(result.total)} sans précision dans « ${plan.targetCol} » : la liste ne couvre que ${_nf(result.filled)} ${mot(result.filled)}`);
   }
-  if (kind === 'stats' && result.total > result.numericCount) {
-    const ign = result.total - result.numericCount;
+  if ((kind === 'stats' || kind === 'stats_groupes') && result.tauxNuls > 0) notes.push(`${_nf(result.tauxNuls)} ${mot(result.tauxNuls)} au taux d'accès de 0 (aucune proposition d'admission par Parcoursup) écartée${result.tauxNuls > 1 ? 's' : ''} du calcul`);
+  if (kind === 'stats' && result.total > result.numericCount + (result.tauxNuls || 0)) {
+    const ign = result.total - result.numericCount - (result.tauxNuls || 0);
     notes.push(`calcul sur ${_nf(result.numericCount)} valeur${result.numericCount > 1 ? 's' : ''} chiffrée${result.numericCount > 1 ? 's' : ''} ; ${_nf(ign)} ${mot(ign)} sans valeur chiffrée ignorée${ign > 1 ? 's' : ''}`);
   }
   if (kind === 'sum' && result.renseignees !== undefined && result.renseignees < result.count) {
@@ -3587,8 +3674,13 @@ function renderDataEngineResultHtml(tool, plan, result) {
   }
   if (tool === 'stats') {
     const fmt = v => v === null || v === undefined ? '—' : Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 2 });
-    const clearTitle = `Statistiques — ${_shortColName(plan.targetCol)}`;
-    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}${perim}<p>Colonne : <strong>${escapeHtml(plan.targetCol)}</strong></p><ul><li>Valeurs numériques : <strong>${result.numericCount.toLocaleString('fr-FR')}</strong> / ${result.total.toLocaleString('fr-FR')}</li><li>Moyenne : <strong>${fmt(result.avg)}</strong></li><li>Médiane : <strong>${fmt(result.median)}</strong></li><li>Min : <strong>${fmt(result.min)}</strong></li><li>Max : <strong>${fmt(result.max)}</strong></li></ul>${filtersHtml}${debug}`;
+    // v27.24 — la statistique demandée (médiane, minimum…) en titre ; une seule formation : sa valeur
+    const dem = result.demandee || 'avg';
+    const clearTitle = result.numericCount === 1 ? `${_shortColName(plan.targetCol)} : ${fmt(result.avg)}` : `${_shortColName(plan.targetCol)} — ${_NOMS_STAT[dem]} : ${fmt(result[dem])}`;
+    const corpsStats = result.numericCount === 1
+      ? `<p>Une seule formation correspond : <strong>${escapeHtml(result.uneFormation || '')}</strong> — ${escapeHtml(plan.targetCol)} : <strong>${fmt(result.avg)}</strong>.</p>${filtersHtml}${debug}`
+      : null;
+    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}${perim}${corpsStats !== null ? corpsStats : `<p>Colonne : <strong>${escapeHtml(plan.targetCol)}</strong> (moyenne simple des formations, non pondérée)</p><ul><li>Valeurs numériques : <strong>${result.numericCount.toLocaleString('fr-FR')}</strong> / ${result.total.toLocaleString('fr-FR')}</li><li>Moyenne : <strong>${fmt(result.avg)}</strong></li><li>Médiane : <strong>${fmt(result.median)}</strong></li><li>Min : <strong>${fmt(result.min)}</strong></li><li>Max : <strong>${fmt(result.max)}</strong></li></ul>${filtersHtml}${debug}`}`;
   }
   return `${deTitleHtml('Résultat', plan.blockId, plan.originalTitle || 'Résultat')}${debug}`;
 }
@@ -3598,7 +3690,7 @@ function shouldAnswerLocallyWithoutAlbert(exec) {
   // Les requêtes de comptage/répartition simples doivent être résolues par le moteur,
   // sinon Albert risque de répondre à partir d'un résumé incomplet.
   // v27.7 — « unresolved » : terme introuvable, on le dit plutôt que de laisser Albert inventer
-  return ['count','group_by','top','pivot','stats','export','compare','unresolved','sum','classement','part','evolution','evolution_groupes'].includes(exec.kind);
+  return ['count','group_by','top','pivot','stats','export','compare','unresolved','sum','classement','part','evolution','evolution_groupes','stats_groupes'].includes(exec.kind);
 }
 /* ═══════════════ v27.9 — Chiffres écrits par Albert : vérifiés contre les données fournies ═══════════════
    Albert rédige ; il ne doit pas produire de chiffres. Chaque nombre de sa réponse est comparé aux nombres

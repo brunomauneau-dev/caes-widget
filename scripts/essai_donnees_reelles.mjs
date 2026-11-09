@@ -30,6 +30,7 @@ export const QUESTIONS = [
   { id: 'bio_bdx', q: 'combien de PASS option biologie à Bordeaux' },
   // v27.22 — mot non reconnu : arrêt, jamais un compte plus large
   { id: 'mot_inconnu', q: 'combien de formations de pilote de ligne' },
+  { id: 'taux_par_aca', q: "taux d'accès moyen par académie" },
   // v27.23 — établissements différents, pas des formations
   { id: 'etab_bdx', q: "combien d'établissements dans l'académie de Bordeaux" },
   { id: 'formations_bdx_par_etab', q: "nombre de formations par établissement dans l'académie de Bordeaux" },
@@ -155,8 +156,13 @@ function resumer(ctx, question) {
     r.sum = exec.result.sum; r.count = exec.result.count; r.colonne = exec.result.col;
     r.reponse = `${r.sum.toLocaleString('fr-FR')} ${exec.result.unite} (somme de « ${r.colonne} ») sur ${r.count.toLocaleString('fr-FR')} formations`;
   } else if (exec.kind === 'stats') {
-    r.moyenne = exec.result.avg; r.colonne = exec.plan?.targetCol;
-    r.reponse = `moyenne ${Number(r.moyenne).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} (colonne « ${r.colonne} »)`;
+    r.moyenne = exec.result.avg; r.colonne = exec.plan?.targetCol; r.demandee = exec.result.demandee || 'avg';
+    const _nomStat = { avg: 'moyenne', median: 'médiane', min: 'minimum', max: 'maximum' }[r.demandee];
+    r.reponse = `${_nomStat} ${Number(exec.result[r.demandee]).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} (colonne « ${r.colonne} »${exec.result.numericCount === 1 ? ', une seule formation' : ''})`;
+  } else if (exec.kind === 'stats_groupes') {
+    const x = exec.result;
+    r.colonne = x.col; r.dimension = x.dim; r.groupes = x.groupes.map(g => ({ valeur: g.valeur, n: g.numericCount, moyenne: g.avg }));
+    r.reponse = `${x.groupes.length} groupes de « ${x.dim} » · ${x.groupes.slice(0, 3).map(g => `${g.valeur} ${Number(g[x.demandee]).toLocaleString('fr-FR', { maximumFractionDigits: 2 })}`).join(' · ')}…`;
   } else if (exec.kind === 'evolution_groupes') {
     const x = exec.result;
     r.sessions = x.sessions; r.colonne = x.col; r.type = x.type; r.totaux = x.totaux; r.nbGroupes = x.nbGroupes;
@@ -275,6 +281,7 @@ export function controler(resultats) {
   }
   if (R.evo_formations_demandees) ctl('évolution d\'un classement de formations : arrêt expliqué (pas suivies une à une)', R.evo_formations_demandees.kind === 'unresolved', R.evo_formations_demandees.reponse);
   if (R.etab_bdx && R.formations_bdx_par_etab) ctl("« combien d'établissements » = nombre d'établissements différents (pas de formations)", R.etab_bdx.kind === 'count' && R.etab_bdx.count >= R.formations_bdx_par_etab.distinct && R.etab_bdx.count < R.formations_bdx_par_etab.total, `${R.etab_bdx.reponse} · répartition : ${R.formations_bdx_par_etab.distinct ?? '?'} établissements pour ${R.formations_bdx_par_etab.total ?? '?'} formations`);
+  if (R.taux_par_aca) ctl("« taux d'accès moyen par académie » : une moyenne par académie, pas une seule", R.taux_par_aca.kind === 'stats_groupes' && (R.taux_par_aca.groupes || []).length > 20, R.taux_par_aca.reponse);
   if (R.mot_inconnu) ctl('mot absent des données (« pilote ») : arrêt, pas tout le fichier', R.mot_inconnu.kind === 'unresolved', R.mot_inconnu.reponse);
   // sigle absent des intitulés : traduit (une partie des BTS) ou arrêt — jamais tous les BTS
   if (R.bts_ndrc && R.bts) ctl('« BTS NDRC » : une partie des BTS (ou arrêt), jamais tous', R.bts_ndrc.kind === 'unresolved' || (R.bts_ndrc.kind === 'count' && R.bts_ndrc.count > 0 && R.bts_ndrc.count < R.bts.count), `${R.bts_ndrc.reponse} · BTS : ${R.bts.count ?? '?'}`);
@@ -333,7 +340,7 @@ export function controler(resultats) {
     ctl(`reformulations « ${g} » : même chiffre pour les ${rs.length} tournures`, ok, rs.map(r => `« ${r.question} » → ${valeurReponse(r)}`).join(' · '));
   });
   // Chaque résultat chiffré porte son périmètre
-  const chiffres = resultats.flatMap(r => r.conversation || [r]).filter(r => ['count', 'sum', 'group_by', 'top', 'stats', 'classement', 'part', 'evolution', 'evolution_groupes'].includes(r.kind));
+  const chiffres = resultats.flatMap(r => r.conversation || [r]).filter(r => ['count', 'sum', 'group_by', 'top', 'stats', 'stats_groupes', 'classement', 'part', 'evolution', 'evolution_groupes'].includes(r.kind));
   if (chiffres.length) ctl('chaque résultat chiffré dit sur quoi il porte (périmètre)', chiffres.every(r => r.perimetre && /retenues? sur/.test(r.perimetre)), `${chiffres.filter(r => r.perimetre).length} / ${chiffres.length}`);
 
   // Contrôle général : une question qui cite une formation ne doit jamais compter tout le fichier
@@ -508,6 +515,8 @@ export const REFERENCES = [
   // v27.23 — établissements : nom exact côté serveur
   { id: 'ref_lycee_jullian', q: 'combien de formations au lycée Camille Jullian', type: 'count', egal: { g_ea_lib_vx: 'Lycée Camille Jullian' } },
   { id: 'ref_lycee_montaigne', q: 'combien de formations au lycée Montaigne', type: 'count', egal: { g_ea_lib_vx: 'Lycée Montaigne' } },
+  // v27.24 — taux d'accès moyen, hors taux de 0 (aucune proposition Parcoursup), comme le widget
+  { id: 'ref_taux_moy_bts', q: "taux d'accès moyen des BTS", type: 'avg', champ: 'taux_acces_ens', egal: { fili: 'BTS' }, superieur: { taux_acces_ens: 0 } },
   { id: 'ref_orthophonie', q: "combien de formations d'orthophonie", type: 'count', egal: { fil_lib_voe_acc: "Certificat de capacité d'Orthophoniste" } },
   { id: 'ref_top_places_bdx', q: 'les 5 formations avec le plus de places à Bordeaux', type: 'top', champ: 'capa_fin', ordre: 'desc', n: 5, egal: { ville_etab: 'Bordeaux' } },
 ];
