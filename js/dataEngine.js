@@ -427,6 +427,7 @@ function inheritConversationContext(plan, question) {
       plan.tool = prev.tool || plan.tool;
       if (prev.tool === 'classement' && prev.classement && !plan.classement) plan.classement = prev.classement; // « et à Bordeaux ? »
       if (prev.tool === 'part' && prev.part && !plan.part) plan.part = prev.part;
+      if (prev.sessionsDemandees && !plan.sessionsDemandees) plan.sessionsDemandees = prev.sessionsDemandees; // « et pour les PASS ? » après une évolution
       if (prev.targetCol)  plan.targetCol  = prev.targetCol;
       if (prev.targetCol2) plan.targetCol2 = prev.targetCol2;
       if (prev.limit)      plan.limit      = prev.limit;
@@ -1164,7 +1165,7 @@ const PARTS_EFFECTIFS = [
 ];
 function _phrasePart(q) {
   // « part des boursiers parmi les admis en BTS » → « boursiers » ; « quelle part des formations sont sélectives » → « formations sont selectives »
-  const m = q.match(/\b(?:part|parts|pourcentage|proportion|ratio|pour ?cent|taux)\s+(?:de |d |des |du |de la |de l )?(.+?)(?=\s+(?:parmi|chez|au sein|sur l ensemble|par rapport)\b|$)/);
+  const m = q.match(/\b(?:part|parts|pourcentage|proportion|ratio|pour ?cent|taux)\s+(?:de |d |des |du |de la |de l )?(.+?)(?=\s+(?:parmi|chez|au sein|sur l ensemble|par rapport|relativement)\b|$)/);
   return m ? m[1].trim() : '';
 }
 function detecterPart(table, question) {
@@ -1285,6 +1286,144 @@ function renderPartHtml(plan, result) {
   const perim = perimetreResultat('part', plan, result).html;
   const debug = `<details class="msg-sources"><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : part (${d.mode}) · ${escapeHtml(String(result.num))} / ${escapeHtml(String(result.den))}</div></details>`;
   return `${deTitleHtml(titre, plan.blockId, plan.originalTitle || titre)}${perim}${phrase}${methode}${debug}`;
+}
+
+/* ═══════════════ v27.16 — Comparaison entre deux sessions de l'open data ═══════════════
+   « les places en BTS ont-elles augmenté depuis 2024 ? », « évolution du nombre de PASS entre 2023 et 2025 »,
+   « combien de BTS en 2024 ? ». Le même calcul (comptage, somme, moyenne, part) est rejoué sur chaque session ;
+   les colonnes sont rapprochées par leur nom technique dans l'API (un libellé peut changer d'une année à l'autre).
+   La session demandée est chargée juste avant le calcul (preparerSessionsDemandees, appelée par albert.js). */
+const EVOLUTION_FORTE = /\b(evolution|evolue\w*|augment\w*|diminu\w*|baiss\w*|progress\w*|hausse|recul\w*|variation)\b/;
+const EVOLUTION_AVEC_ANNEE = /\b(compar\w*|par rapport|relativement|depuis|entre|ecart|versus|vs)\b/;
+const AN_DERNIER = /\b(l an dernier|l annee derniere|annee precedente|session precedente|l an passe|l annee passee|n ?- ?1)\b/;
+function sessionsDeLaQuestion(table, question) {
+  if (!table || table.source !== 'Open data' || !table.session) return null;
+  const q = normalizeText(question || '');
+  const cur = Number(table.session);
+  let annees = [...new Set((q.match(/\b20[12]\d\b/g) || []).map(Number))];
+  const futures = annees.filter(y => y > cur);
+  if (futures.length) return { mode: 'future', sessions: futures, courante: cur };
+  annees = annees.filter(y => y >= 2018);
+  if (AN_DERNIER.test(q) && !annees.includes(cur - 1)) annees.push(cur - 1);
+  // « l'an dernier » désigne une session ; seule une évolution / comparaison demande les deux
+  const evolution = EVOLUTION_FORTE.test(q) || (annees.length && EVOLUTION_AVEC_ANNEE.test(q));
+  if (evolution) {
+    let ss = [...new Set(annees)];
+    if (ss.length === 1 && !ss.includes(cur)) ss.push(cur);
+    if (!ss.length && EVOLUTION_FORTE.test(q)) ss = [cur - 1, cur]; // « évolution du nombre de BTS » : session précédente → courante
+    ss.sort((a, b) => a - b);
+    if (ss.length >= 2) return { mode: 'evolution', sessions: [ss[0], ss[ss.length - 1]], courante: cur };
+    return null;
+  }
+  const autres = annees.filter(y => y !== cur);
+  if (autres.length === 1) return { mode: 'seule', sessions: [autres[0]], courante: cur };
+  return null;
+}
+function tableDeSession(session, base) {
+  if (base && Number(base.session) === Number(session)) return base;
+  return (typeof getOpenDataSessionTable === 'function') ? getOpenDataSessionTable(Number(session)) : null;
+}
+// Appelée avant le calcul (asynchrone) : charge les sessions demandées qui ne sont pas encore en mémoire
+async function preparerSessionsDemandees(question) {
+  let t = null;
+  try { t = (getActiveQueryTables() || [])[0]; } catch (e) { return []; }
+  const d = sessionsDeLaQuestion(t, question);
+  if (!d || d.mode === 'future') return [];
+  const charges = [];
+  for (const s of d.sessions) {
+    if (tableDeSession(s, t)) continue;
+    try { if (typeof chargerSessionOpenData === 'function') { await chargerSessionOpenData(s); charges.push(s); } } catch (e) { console.warn('[Open data] session', s, 'non chargée :', e.message); }
+  }
+  return charges;
+}
+function applySessions(plan) {
+  if (!plan || !plan.table || ['compare', 'chart_current', 'export_current_excel', 'export_current_csv', 'export_excel', 'export_csv'].includes(plan.tool)) return plan;
+  const d = sessionsDeLaQuestion(plan.table, plan.question);
+  if (!d) return plan;
+  plan.sessionsDemandees = d;
+  // une année citée n'est pas un filtre (« Session = 2024 » sur la table 2025 donnerait 0)
+  const annees = [...new Set((normalizeText(plan.question || '').match(/\b20[12]\d\b/g) || []))];
+  // … ni un morceau d'année lu comme une valeur (« 20 », « 24 », « 202 » dans « 2024 ») sur une colonne chiffrée
+  const morceau = v => { const t = String(v ?? '').trim(); return /^\d+$/.test(t) && annees.some(a => a.includes(t)); };
+  plan.filters = (plan.filters || []).filter(f => f && !/^session/.test(normalizeText(f.col))
+    && !(f.op !== 'contains_all' && f.source !== 'condition_chiffree' && (annees.includes(String(f.value)) || (morceau(f.value) && _estNumerique(plan.table, f.col)))));
+  return plan;
+}
+// Même filtre, colonne de l'autre session (rapprochée par le nom technique de l'API)
+function _colAutreSession(col, de, vers) {
+  if (!col || !de || !vers || de === vers) return col;
+  const nom = de.champs?.[col];
+  return (nom && vers.libelles?.[nom]) || col;
+}
+function _planPourSession(plan, table) {
+  const tr = c => _colAutreSession(c, plan.table, table);
+  const p = { ...plan, table, _sousSession: true, sessionsDemandees: null, blockId: null,
+    filters: (plan.filters || []).map(f => f && ({ ...f, col: tr(f.col), cols: f.cols ? f.cols.map(tr) : f.cols })),
+    targetCol: tr(plan.targetCol), sumCol: tr(plan.sumCol) };
+  if (plan.part) p.part = { ...plan.part, num: tr(plan.part.num), den: tr(plan.part.den), condition: plan.part.condition ? plan.part.condition.map(f => ({ ...f, col: tr(f.col) })) : plan.part.condition };
+  if (plan.classement) p.classement = { ...plan.classement, col: tr(plan.classement.col) };
+  return p;
+}
+const _valeurExec = e => e.kind === 'count' ? e.result.count : e.kind === 'sum' ? e.result.sum : e.kind === 'stats' ? e.result.avg : e.kind === 'part' ? e.result.pct : null;
+function executerSessions(plan) {
+  const d = plan.sessionsDemandees;
+  if (d.mode === 'future') return unresolvedConceptExecution(plan, [], `la session ${d.sessions.join(', ')} n'est pas encore publiée dans l'open data (dernière session : ${d.courante})`);
+  const tables = d.sessions.map(s => ({ s, t: tableDeSession(s, plan.table) }));
+  const absente = tables.find(x => !x.t);
+  if (absente) return unresolvedConceptExecution(plan, [], `la session ${absente.s} de l'open data n'a pas pu être chargée (site du ministère indisponible ?) : réessayez dans un instant`);
+  const execs = tables.map(({ s, t }) => ({ s, e: runDataEnginePlan(_planPourSession(plan, t)) }));
+  const ko = execs.find(x => !x.e || x.e.kind === 'unresolved');
+  if (ko) return ko.e ? { ...ko.e, text: `${ko.e.text} (session ${ko.s})` } : null;
+  if (d.mode === 'seule') {
+    const e = execs[0].e;
+    e.html = e.html.replace(/(<h4[^>]*>(?:<span[^>]*>)?)([^<]*)/, (m, a, t) => `${a}${t} — session ${execs[0].s}`);
+    e.plan.sessionUnique = execs[0].s;
+    rememberDataEngineExecution(e);
+    return e;
+  }
+  if (!execs.every(x => ['count', 'sum', 'stats', 'part'].includes(x.e.kind)))
+    return unresolvedConceptExecution(plan, [], `la comparaison entre sessions est disponible pour les comptages, sommes, moyennes et parts (pas encore pour les ${execs[0].e.kind === 'classement' ? 'classements' : 'répartitions'})`);
+  const lignes = execs.map(x => ({ session: x.s, valeur: _valeurExec(x.e), exec: x.e, formations: (x.e.plan.table.objects || []).length,
+    // lignes retenues par les critères : comptage et somme → result.count ; moyenne et part → result.total (lignes du périmètre)
+    retenues: ['count', 'sum'].includes(x.e.kind) ? x.e.result.count : x.e.result.total }));
+  const a = lignes[0].valeur, b = lignes[lignes.length - 1].valeur;
+  const kind = execs[0].e.kind;
+  const result = { lignes, ecart: b - a, ecartPct: kind !== 'part' && a ? (b - a) / a * 100 : null, mesure: kind };
+  const exec = { kind: 'evolution', plan, result, text: lignes.map(l => `${l.session} : ${l.valeur}`).join(' ; ') };
+  exec.html = renderEvolutionHtml(plan, result);
+  rememberDataEngineExecution(exec);
+  return exec;
+}
+function _uniteEvolution(r) {
+  const e = r.lignes[0].exec;
+  if (r.mesure === 'count') return e.plan.table?.rowUnit === 'formation' ? 'formations' : 'lignes';
+  if (r.mesure === 'sum') return e.result.unite || 'au total';
+  if (r.mesure === 'stats') return `(moyenne de « ${e.plan.targetCol} »)`;
+  return '%';
+}
+function renderEvolutionHtml(plan, r) {
+  const fmt = v => r.mesure === 'part' ? `${_pctFr(v)} %` : Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 2 });
+  const signe = v => (v > 0 ? '+' : v < 0 ? '−' : '') ;
+  const abs = v => Math.abs(v);
+  // écart de part sous 0,05 point : affiché avec 2 décimales et qualifié de stable (pas « baisse de −0,0 point »)
+  const petit = r.mesure === 'part' && abs(r.ecart) < 0.05;
+  const ecartTxt = r.mesure === 'part'
+    ? `${signe(r.ecart)}${petit ? abs(r.ecart).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : _pctFr(abs(r.ecart))} point${abs(r.ecart) >= 2 ? 's' : ''}`
+    : `${signe(r.ecart)}${abs(r.ecart).toLocaleString('fr-FR', { maximumFractionDigits: 2 })}${r.ecartPct !== null ? ` (${signe(r.ecartPct)}${_pctFr(abs(r.ecartPct))} %)` : ''}`;
+  const [l1, l2] = [r.lignes[0], r.lignes[r.lignes.length - 1]];
+  const sens = petit ? 'stable' : r.ecart > 0 ? 'hausse' : r.ecart < 0 ? 'baisse' : 'stable';
+  const unite = _uniteEvolution(r);
+  const titre = `Évolution ${l1.session} → ${l2.session} : ${sens}${r.ecart ? (petit ? ` (${ecartTxt})` : ` de ${ecartTxt}`) : ''}`;
+  const th = 'text-align:left;padding:6px 8px;background:#e8edff;color:var(--bleu,#000091);font-size:11px';
+  const td = 'padding:6px 8px;border-bottom:1px solid var(--gris1,#f3f4f6);font-size:12px';
+  const table = `<table style="border-collapse:collapse;width:auto;min-width:320px;margin:8px 0"><thead><tr><th style="${th}">Session</th><th style="${th};text-align:right">${escapeHtml(r.mesure === 'part' ? 'Part' : r.mesure === 'stats' ? 'Moyenne' : unite)}</th>${r.mesure === 'part' ? `<th style="${th};text-align:right">Détail</th>` : ''}<th style="${th};text-align:right">Formations retenues</th></tr></thead><tbody>`
+    + r.lignes.map(l => `<tr><td style="${td}">${l.session}</td><td style="${td};text-align:right"><strong>${fmt(l.valeur)}</strong></td>${r.mesure === 'part' ? `<td style="${td};text-align:right">${_nf(l.exec.result.num)} / ${_nf(l.exec.result.den)}</td>` : ''}<td style="${td};text-align:right">${_nf(l.retenues)} sur ${_nf(l.formations)}</td></tr>`).join('')
+    + `</tbody></table>`;
+  const phrase = `<p>De ${l1.session} à ${l2.session} : <strong>${fmt(l1.valeur)}</strong> → <strong>${fmt(l2.valeur)}</strong>${r.mesure === 'count' || r.mesure === 'sum' ? ` ${escapeHtml(unite)}` : ''}, soit <strong>${ecartTxt}</strong>.</p>`;
+  const offre = l1.formations !== l2.formations ? `<p style="font-size:12px;color:var(--gris3)">À savoir : l'offre a changé entre les deux sessions (${_nf(l1.formations)} formations en ${l1.session}, ${_nf(l2.formations)} en ${l2.session}). Une variation peut venir de formations ouvertes ou fermées, pas seulement d'une évolution des formations existantes.</p>` : '';
+  const perim = perimetreResultat(r.lignes[1].exec.kind, r.lignes[1].exec.plan, r.lignes[1].exec.result).html.replace('Sur quoi porte ce calcul</strong> :', 'Sur quoi porte ce calcul</strong> (chaque session) :').replace(/\d[\d\s\u00a0\u202f]* (?:formations?|lignes?) retenues? sur [\d\s\u00a0\u202f]+ · open data Parcoursup \d+/, 'mêmes critères appliqués à chaque session · open data Parcoursup');
+  const debug = `<details class="msg-sources"><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : évolution ${l1.session} → ${l2.session} · ${escapeHtml(r.mesure)}</div></details>`;
+  return `${deTitleHtml(titre, plan.blockId, plan.originalTitle || titre)}${perim}${phrase}${table}${offre}${debug}`;
 }
 
 // Colonnes qui décrivent une formation dans le classement : intitulé, établissement, commune
@@ -1443,6 +1582,7 @@ const REFORMULATIONS = [
   [/\bsans\s+s[eé]lection\b/gi, 'non sélectives'],
   [/\b(?:classes?\s+)?pr[eé]paratoires?\s+aux\s+grandes\s+[eé]coles\b|\bclasses?\s+pr[eé]paratoires?\b|\bclasses?\s+pr[eé]pas?\b|\bpr[eé]pas?\b/gi, 'CPGE'],
   [/(?<!\b(?:filles|candidates|femmes)\s+)(?<!non\s)\bboursi[eè]res\b/gi, 'filles boursières'],
+  [/\bpar\s+rapport\s+(?:aux|au|a|à)(?=\s|$)/gi, 'relativement à'], // v27.16 — « par rapport à 2024 » n'est pas une répartition
   [/\b(?:dans|pour|de|sur)\s+chaque\s+/gi, 'par '],
   [/\bchaque\s+/gi, 'par '],
   [/\bbacheli[eè]re?s?\s+g[eé]n[eé]ra(?:ux|le|les|l)\b|\bvoie\s+g[eé]n[eé]rale\b|\bfili[eè]re\s+g[eé]n[eé]rale\b/gi, 'bac général'],
@@ -1466,13 +1606,17 @@ function isDataEngineQuestion(question) {
   try { if (CLASSEMENT_CUE.test(q) && detecterClassement((getActiveQueryTables() || [])[0], question)) return true; } catch (e) { /* source absente */ }
   // v27.15 — taux et parts (« part des boursiers parmi les admis »)
   try { if (detecterPart((getActiveQueryTables() || [])[0], question)) return true; } catch (e) { /* source absente */ }
+  // v27.16 — « les places en BTS ont-elles augmenté depuis 2024 ? »
+  try { const _t = (getActiveQueryTables() || [])[0]; if (sessionsDeLaQuestion(_t, question) && (formationTermsFromQuestion(_t, question).terms.length || /\b(places?|candidats?|admis|formations?|boursiers?|capacite|taux|part|bts|pass|cpge|licences?|but)\b/.test(q))) return true; } catch (e) { /* source absente */ }
   return /compare|comparaison|comparer|versus| vs |combien|nombre|\btotale?\b|effectif|compte|compter|repartition|r[eé]partition|ventilation|par |groupe|group[eé]|top|classement|principa|plus frequen|plus fréquent|croise|crois[eé]|tableau crois[eé]|pivot|moyen|moyenne|median|m[eé]diane|minimum|maximum|min|max|export|excel|csv|liste|filtre|graphique|graphe|diagramme|histogramme|camembert|barres?|boursier|basque|hors|sauf|seulement|uniquement|visualis|repr[eé]sent|montre-?moi|dessine|trace|issus?\s+d[ue]|originaires?|venant\s+d[ue]|provenant|scolaris|scolarit/.test(q) || isListValuesRequest(question) || isFollowUpQuestion(question);
 }
 
 function inferMeasureIntent(question) {
   // v27.13 — « liste d'attente » est un statut de candidature, pas une demande de liste / d'export
   const q = normalizeText(question || '').replace(/\bliste d ?attente\b|\bliste complementaire\b/g, 'attente');
-  if (/compare|comparaison|comparer|versus| vs /.test(q)) return 'compare';
+  // v27.16 — « comparé à 2024 », « par rapport à l'an dernier » : comparaison de sessions, pas de groupes
+  const _sessionCitee = /\b20[12]\d\b|\bl an (dernier|passe)\b|\bl annee (derniere|passee|precedente)\b|\bsession precedente\b/.test(q);
+  if (/compare|comparaison|comparer|versus| vs /.test(q) && !_sessionCitee) return 'compare';
   if (/graphique|graphe|diagramme|histogramme|camembert|barres?|chart|visualis|repr[eé]sent|montre-?moi|dessine|trace/.test(q)) return 'group_by';
   // v27.7 — « liste des filières / options » = valeurs distinctes ; l'export reste pour « exporte / Excel / CSV »
   if (isListValuesRequest(question)) return 'group_by';
@@ -1589,6 +1733,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
   // v27.14 — « quelle formation a le plus de candidats » : classement, même sans mot d'analyse reconnu
   if ((!tool || tool === 'stats' || tool === 'count_rows') && detecterClassement(table, question)) tool = 'top';
   if ((!tool || tool === 'group_by') && detecterPart(table, question)) tool = 'count_rows';
+  if (!tool && sessionsDeLaQuestion(table, question)) tool = 'count_rows';
   if (!tool) return null;
 
   if (tool === 'compare') {
@@ -1617,7 +1762,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
     // à partir de filtres structurés validés, jamais depuis les résultats calculés
     // (moyenne, médiane, valeur de tableau, etc.).
     const plannerPlan = buildPlannerPlan(question, question, table, tool);
-    if (plannerPlan) return inheritConversationContext(applyPart(applyConditionsChiffrees(applyClassement(applyMeasureSum(applyListMode(applyFormationTerms(plannerPlan)))))), question);
+    if (plannerPlan) return inheritConversationContext(applySessions(applyPart(applyConditionsChiffrees(applyClassement(applyMeasureSum(applyListMode(applyFormationTerms(plannerPlan))))))), question);
   }
 
   // Fallback V16 si planner indisponible.
@@ -1627,7 +1772,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
   // V25.1 — idem : le fallback ne doit pas analyser le contexte textuel
   // précédent comme s'il s'agissait de la question utilisateur.
   const filters = detectFilters(table, normalizeText(question || ''), targetCol);
-  return inheritConversationContext(applyPart(applyConditionsChiffrees(applyClassement(applyMeasureSum(applyListMode(applyFormationTerms({
+  return inheritConversationContext(applySessions(applyPart(applyConditionsChiffrees(applyClassement(applyMeasureSum(applyListMode(applyFormationTerms({
     tool,
     table,
     filters,
@@ -1635,13 +1780,14 @@ function detectDataEnginePlan(question, filterContextText = question) {
     mentionedCols,
     question,
     createdAt: new Date().toISOString()
-  })))))), question);
+  }))))))), question);
 }
 
 
 function currentExecutionToRows(exec) {
   if (!exec) return [];
   const p = exec.plan || {};
+  if (exec.kind === 'evolution') return (exec.result?.lignes || []).map(l => ({ Session: l.session, Valeur: exec.result.mesure === 'part' ? Math.round(l.valeur * 10) / 10 : l.valeur, 'Formations retenues': l.retenues, 'Formations de la session': l.formations }));
   if (exec.kind === 'part') {
     const lp = _libellePart(p);
     return [{ 'Part (%)': Math.round(exec.result.pct * 10) / 10, [`Effectif (${lp.quoi})`]: exec.result.num, [`Total (${lp.sur})`]: exec.result.den }];
@@ -1747,6 +1893,13 @@ function renderCurrentChartExecution(plan) {
     const clonedPlan = { ...(prev.plan || {}), renderChart: true, chartType: isPieChartRequest(plan.question || '') ? 'pie' : (prev.plan?.chartType || 'bar') };
     const html = renderDataEngineResultHtml(prev.plan?.tool || prev.kind, clonedPlan, prev.result);
     return { kind: prev.kind, plan: clonedPlan, result: prev.result, text: prev.text, html };
+  }
+  // v27.16 — évolution : une barre par session
+  if (prev.kind === 'evolution') {
+    const rows = prev.result.lignes.map(l => ({ value: `Session ${l.session}`, count: prev.result.mesure === 'part' ? Math.round(l.valeur * 10) / 10 : l.valeur }));
+    const titre = `Graphique — évolution ${prev.result.lignes[0].session} → ${prev.result.lignes[prev.result.lignes.length - 1].session}`;
+    const html = `${deTitleHtml(titre, prev.plan?.blockId, prev.plan?.originalTitle || titre)}${renderMiniBarChart(rows, rows.reduce((t, r) => t + r.count, 0), 'evolution.png')}`;
+    return { kind: 'evolution', plan: prev.plan, result: prev.result, text: prev.text, html };
   }
   // v27.15 — part : camembert « dans la part » / « reste »
   if (prev.kind === 'part') {
@@ -2276,6 +2429,13 @@ function renderCompareHtml(plan, result) {
 function runDataEnginePlan(plan, persistentFiltersOverride) {
   plan = finalSanitizeAnalysisPlan(plan);
   if (!plan || !plan.table) return null;
+  // v27.16 — comparaison entre sessions : le même calcul rejoué sur chaque session
+  if (plan.sessionsDemandees && !plan._sousSession) {
+    // filtres persistants ajoutés une fois, ici, puis transmis aux calculs de chaque session
+    const _pfs = persistentFiltersOverride || (typeof persistentFilters !== 'undefined' ? persistentFilters : []);
+    if (_pfs && _pfs.length) { const cols = new Set((plan.filters || []).map(f => f.col)); plan.filters = [...(plan.filters || []), ..._pfs.filter(f => !cols.has(f.col))]; }
+    return executerSessions(plan);
+  }
   // Re-injection des filtres persistants APRES le sanitize.
   // Comparaison par COLONNE uniquement (pas par {col,op,value}) pour éviter
   // d'ajouter "Zone = oui" quand la question a explicitement posé "Zone ≠ oui".
@@ -2523,6 +2683,7 @@ function dataEngineResultToContext(exec) {
   if (_perim) out += `${_perim}\n`;
   if (exec.kind === 'count') out += `Résultat : ${exec.result.count} ligne(s) sur ${exec.result.total}.\n`;
   if (exec.kind === 'sum') out += `Résultat : ${exec.result.sum} ${exec.result.unite} (somme de « ${exec.result.col} ») sur ${exec.result.count} formation(s).\n`;
+  if (exec.kind === 'evolution') out += `Évolution calculée par le widget (mêmes critères sur chaque session) :\n${exec.result.lignes.map(l => `- session ${l.session} : ${exec.result.mesure === 'part' ? `${_pctFr(l.valeur)} %` : l.valeur} (${l.retenues} formations retenues sur ${l.formations})`).join('\n')}\nÉcart : ${exec.result.ecart}${exec.result.ecartPct !== null ? ` (${_pctFr(exec.result.ecartPct)} %)` : ''}\n`;
   if (exec.kind === 'part') { const lp = _libellePart(exec.plan); out += `Part calculée par le widget : ${_pctFr(exec.result.pct)} % (${exec.result.num} ${lp.quoi} sur ${exec.result.den} ${lp.sur}).\n`; }
   if (exec.kind === 'classement') out += `Classement selon « ${exec.plan.classement.col} » (${exec.plan.classement.ordre === 'asc' ? 'croissant' : 'décroissant'})${exec.plan.classement.entite ? `, somme par ${exec.plan.classement.entite.col}` : ''} :\n${exec.result.lignes.map(l => `${l.rang}. ${l.libelles.join(' — ')} : ${l.valeur}`).join('\n')}\n`;
   if (exec.kind === 'unresolved') out += `Résultat : aucun calcul. ${exec.text}\nIntitulés proches : ${(exec.result?.suggestions || []).map(s => s.value).join(' ; ')}\n`;
@@ -2739,7 +2900,7 @@ function shouldAnswerLocallyWithoutAlbert(exec) {
   // Les requêtes de comptage/répartition simples doivent être résolues par le moteur,
   // sinon Albert risque de répondre à partir d'un résumé incomplet.
   // v27.7 — « unresolved » : terme introuvable, on le dit plutôt que de laisser Albert inventer
-  return ['count','group_by','top','pivot','stats','export','compare','unresolved','sum','classement','part'].includes(exec.kind);
+  return ['count','group_by','top','pivot','stats','export','compare','unresolved','sum','classement','part','evolution'].includes(exec.kind);
 }
 /* ═══════════════ v27.9 — Chiffres écrits par Albert : vérifiés contre les données fournies ═══════════════
    Albert rédige ; il ne doit pas produire de chiffres. Chaque nombre de sa réponse est comparé aux nombres

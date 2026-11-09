@@ -316,6 +316,13 @@ await describe('v27.12 — Chiffres officiels : le widget retrouve à l\'unité 
   assert(V.ref_part_selectives.statut === 'indisponible', 'données simulées sans colonne sélectivité : part non vérifiée (pas un faux « identique »)');
   const vp = verifierOfficiels({ p: { valeur: { num: 20, den: 100 } } }, [{ id: 'p', kind: 'part', num: 20, den: 99, pct: 20.2, reponse: 'x' }], [{ id: 'p', q: 'p', type: 'part' }]);
   assert(vp[0].statut === 'ecart', 'dénominateur différent d\'une unité → écart');
+  // v27.16 — session précédente et évolution (l'API simulée sert les mêmes lignes pour chaque session)
+  assert(V.ref_n1_bts.statut === 'ok' && V.ref_n1_bts.question === 'combien de BTS en 2024' && V.ref_n1_bts.widget === 300, `« combien de BTS en {N-1} » → question posée pour 2024, identique au serveur (obtenu : ${V.ref_n1_bts.question} ${V.ref_n1_bts.statut} ${V.ref_n1_bts.widget})`);
+  assert(V.ref_evolution_pass.statut === 'ok' && V.ref_evolution_pass.officiel === '100 → 100', `évolution des PASS : chaque session identique au serveur (obtenu : ${V.ref_evolution_pass.officiel} / ${V.ref_evolution_pass.widget})`);
+  assert(/refine=session%3A2024/.test(requeteOfficielle(REFERENCES.find(r => r.id === 'ref_evolution_pass').base, 2024)), 'requête de la session précédente : refine session 2024');
+  assert(appels.some(u => /exports\/csv/.test(u) && /session%3A2024/.test(u)), 'la session précédente est chargée par le vrai code du widget');
+  const ve = verifierOfficiels({ e: { valeur: [10, 12] } }, [{ id: 'e', kind: 'evolution', valeurs: [10, 11], reponse: 'x' }], [{ id: 'e', q: 'e', type: 'evolution' }]);
+  assert(ve[0].statut === 'ecart', 'évolution différente sur une session → écart');
   const vt = verifierOfficiels({ t: { valeur: [9, 8, 7] } }, [{ id: 't', kind: 'classement', valeurs: [9, 7, 8], reponse: 'x' }], [{ id: 't', q: 't', type: 'top' }]);
   assert(vt[0].statut === 'ecart', 'classement dans un autre ordre → écart');
   assert(sectionOfficiels([]).length === 0 && sectionOfficiels(null).length === 0, 'aucune référence : pas de section');
