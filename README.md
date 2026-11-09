@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-40 fichiers, 1 859 tests. Depuis la racine du repo :
+41 fichiers, 1 888 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -104,6 +104,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 - **open data** de 14 000 formations : statut public/privé, académie, département, ville, région, sélectivité, sommes (places, candidats, admis), moyennes (capacité, taux d'accès), en moins de 3 secondes par question.
 
 ### Réponses incorrectes et questions à revoir
+
+`js/test_taux_acces.js` vérifie les **questions sur le taux d'accès**. « Taux d'accès moyen par académie / par filière » donne une statistique par groupe (formations, moyenne, médiane, min, max ; avant : une seule moyenne nationale) ; la statistique demandée (médiane, minimum, maximum) est en titre ; « taux d'accès des PASS », « … au lycée Montaigne » sont calculés par le moteur (une seule formation : sa valeur et son nom). Les formations au taux d'accès de 0 (aucune proposition Parcoursup) sont écartées des moyennes comme des classements, et c'est écrit. La moyenne est simple (non pondérée), et c'est écrit aussi.
 
 `js/test_etablissements.js` vérifie les **questions sur les établissements**. « Formations au lycée Montaigne », « places à l'université de Bordeaux », « BUT à l'IUT de Bordeaux » filtrent sur le nom de l'établissement (expression exacte, puis tous les mots ; « I.U.T » = « IUT ») ; les homonymes de plusieurs villes sont listés avec leur commune. « Les lycées de … », « combien d'universités » portent sur le type d'établissement. « Combien d'établissements / de lycées … » et « nombre d'établissements par académie » comptent des établissements différents (nom + commune), plus des formations. Avant : « université de Bordeaux » → 8 (le mot cherché dans les intitulés de formation), « combien d'établissements dans l'académie de Bordeaux » → 631 (des formations), « les lycées de Bordeaux » → 0.
 
