@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-36 fichiers, 1 703 tests. Depuis la racine du repo :
+37 fichiers, 1 734 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -104,6 +104,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 - **open data** de 14 000 formations : statut public/privé, académie, département, ville, région, sélectivité, sommes (places, candidats, admis), moyennes (capacité, taux d'accès), en moins de 3 secondes par question.
 
 ### Réponses incorrectes et questions à revoir
+
+`js/test_session_kb.js` vérifie la **session décrite par la base de connaissances**. Les 561 fiches viennent du guide Parcoursup de la session 2026 (mis à jour jusqu'au 12 juin 2026). À partir de septembre 2026, la session en préparation est 2027 : Albert reçoit la session des fiches avec la consigne de ne jamais présenter ces dates comme celles de 2027, et un bandeau « 📅 Dates de la session 2026 » s'affiche sous une réponse qui cite des dates ou un calendrier. Le test vérifie aussi que `scripts/construire_index_kb.py` redonne exactement la base et son index.
 
 `js/test_code_mort.js` vérifie que le **code jamais appelé** retiré de `documents.js` (anciens tableaux croisés, ancienne classification des colonnes, ancienne détection des exports : 193 lignes) ne revient pas, que les modules se chargent toujours ensemble, et qu'aucune fonction de `documents.js` ne reste sans appel.
 
@@ -215,7 +217,7 @@ Si tout va bien, aucun ticket n'est créé. Pour essayer le circuit : *Run workf
 |---|---|
 | `generateur_bo.html` | Générateur de requêtes SAP BusinessObjects (page autonome, indépendante du widget) |
 | `scripts/load_parcoursup_to_grist.py` | Chargement de la table `Parcoursup_National` (lancé par `.github/workflows/load-parcoursup.yml`) |
-| `scripts/build_parcoursup_kb_v3.py` | Construction de la future KB v3 (non encore utilisée) |
+| `scripts/construire_index_kb.py` | Reconstruit la base de connaissances et son index (`python3 scripts/construire_index_kb.py [fiches.json]`) ; relancé sur la base actuelle, il la redonne à l’identique |
 
 ---
 

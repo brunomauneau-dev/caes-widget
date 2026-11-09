@@ -122,6 +122,50 @@ async function loadParcoursupKB() {
   }
 }
 
+/* v27.19 — Session décrite par la base de connaissances.
+   Les fiches viennent du guide Parcoursup d'une session (2026 : mis à jour jusqu'au 12 juin 2026). Quand la
+   session en préparation est plus récente, les dates des fiches (saisie des vœux, phases, délais) ne sont plus
+   celles de l'année en cours : Albert doit le dire, et un bandeau le rappelle sous sa réponse.
+   Le contrôle des chiffres d'Albert ne suffit pas ici : ces dates figurent bien dans les fiches. */
+const MOIS_FR = { janvier: 1, fevrier: 2, mars: 3, avril: 4, mai: 5, juin: 6, juillet: 7, aout: 8, septembre: 9, octobre: 10, novembre: 11, decembre: 12 };
+const RE_DATE_FR = new RegExp(`\\b(\\d{1,2})(?:er)? (${Object.keys(MOIS_FR).join('|')}) (20\\d\\d)\\b`);
+function _dateFr(s) {
+  const m = normalizeForSearch(s).match(RE_DATE_FR);
+  return m ? { a: Number(m[3]), m: MOIS_FR[m[2]], j: Number(m[1]) } : null;
+}
+// Le guide de la session N paraît à partir de septembre N-1 : septembre et après → session suivante
+function sessionParcoursupDe(d) { return d.m >= 9 ? d.a + 1 : d.a; }
+function sessionDeLaBase() {
+  if (!parcoursupKBReady) return null;
+  const meta = parcoursupKB.meta || {};
+  if (meta.session_reference) return { session: Number(meta.session_reference), miseAJour: meta.mise_a_jour || '' };
+  let der = null, libelle = '';
+  parcoursupKB.entries.forEach(e => {
+    const d = _dateFr(e.last_modified || '');
+    if (d && (!der || d.a * 400 + d.m * 32 + d.j > der.a * 400 + der.m * 32 + der.j)) { der = d; libelle = e.last_modified; }
+  });
+  return der ? { session: sessionParcoursupDe(der), miseAJour: libelle } : null;
+}
+// { session, miseAJour, sessionCourante, perimee } ; perimee = la base décrit une session passée
+function etatSessionBase(aujourdHui = new Date()) {
+  const b = sessionDeLaBase();
+  if (!b) return null;
+  const cur = sessionParcoursupDe({ a: aujourdHui.getFullYear(), m: aujourdHui.getMonth() + 1, j: aujourdHui.getDate() });
+  return { ...b, sessionCourante: cur, perimee: b.session < cur };
+}
+let derniersHitsKB = [];
+// Bandeau sous une réponse d'Albert qui cite des dates ou un calendrier venant de fiches d'une session passée
+const RE_DATES_CALENDRIER = new RegExp(`\\b\\d{1,2}(?:er)? (?:${Object.keys(MOIS_FR).join('|')})\\b|\\bcalendrier\\b|\\bdate limite\\b|\\bdates? (?:cles?|d ouverture|de cloture)\\b|\\bjusqu au \\d`);
+function bandeauCalendrierKB(reponse, aujourdHui = new Date()) {
+  const etat = etatSessionBase(aujourdHui);
+  if (!etat || !etat.perimee || !derniersHitsKB.length) return '';
+  const texte = normalizeForSearch(String(reponse || '').replace(/<[^>]+>/g, ' '));
+  if (!RE_DATES_CALENDRIER.test(texte)) return '';
+  return `<p class="kb-calendrier" style="font-size:12px;line-height:1.5;background:#fff7ed;border-left:3px solid #c2410c;border-radius:4px;padding:6px 10px;margin:8px 0">`
+    + `📅 <strong>Dates de la session ${etat.session}</strong> : les règles et dates citées viennent du guide Parcoursup de la session ${etat.session}`
+    + `${etat.miseAJour ? ` (mis à jour le ${escapeHtml(etat.miseAJour)})` : ''}. Le calendrier de la session ${etat.sessionCourante} peut être différent : vérifiez-le sur parcoursup.fr avant de le communiquer.</p>`;
+}
+
 async function loadParcoursupKBIndex() {
   try {
     const response = await fetch(PARCOURSUP_KB_INDEX_URL, { cache: 'no-store' });
@@ -143,7 +187,8 @@ function updateKnowledgeStatusBadge() {
   const base = src
     ? `${src.source} actif`
     : (documents.filter(d => d.status === 'ok').length ? 'Document(s) chargé(s)' : 'Aucun document chargé');
-  const kb = parcoursupKBReady ? ` · KB Parcoursup ${parcoursupKB.entries.length} fiches${parcoursupKBIndexReady ? ' · index hybride' : ''}` : '';
+  const _ses = parcoursupKBReady ? sessionDeLaBase() : null;
+  const kb = parcoursupKBReady ? ` · KB Parcoursup ${parcoursupKB.entries.length} fiches${_ses ? ` (session ${_ses.session})` : ''}${parcoursupKBIndexReady ? ' · index hybride' : ''}` : '';
   const od = parcoursupODReady ? ` · OpenData national` : '';
   sub.textContent = base + kb + od;
 }
@@ -291,8 +336,14 @@ function buildParcoursupKnowledgeContext(question, localContext = '') {
     caesWarning = `\nATTENTION — CAES : Les dossiers traités en Commission d'Accès à l'Enseignement Supérieur (CAES) ne sont PAS présents dans cette base de données Parcoursup. Ils font l'objet d'analyses séparées. Ne pas tenter de les chercher dans ce jeu de données.\n`;
   }
 
+  derniersHitsKB = hits;
   if (!hits.length && !caesWarning) return '';
-  return `RÉFÉRENCES MÉTIER PARCOURSUP SÉLECTIONNÉES AUTOMATIQUEMENT${caesWarning}\n` +
+  // v27.19 — session décrite par les fiches, et avertissement si elle est passée
+  const etat = etatSessionBase();
+  const sessionTxt = etat ? `SESSION DES FICHES : session Parcoursup ${etat.session}${etat.miseAJour ? ` (guide mis à jour le ${etat.miseAJour})` : ''}.`
+    + (etat.perimee ? ` ATTENTION : la session en préparation est ${etat.sessionCourante}. Les dates et le calendrier de ces fiches sont ceux de la session ${etat.session} : quand tu cites une date, écris « session ${etat.session} » et préviens que le calendrier ${etat.sessionCourante} peut être différent ; ne présente jamais ces dates comme celles de ${etat.sessionCourante}.` : '')
+    + '\n' : '';
+  return `RÉFÉRENCES MÉTIER PARCOURSUP SÉLECTIONNÉES AUTOMATIQUEMENT${caesWarning}\n${sessionTxt}` +
     hits.map((e, i) => {
       const content = String(e.content || '').slice(0, 1400);
       const tags = (e.tags || []).slice(0, 8).join(', ');
