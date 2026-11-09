@@ -270,7 +270,10 @@ function buildCopilotActionBar(bubble, dataExecution = null, question = '') {
   }));
   }
   bar.appendChild(mk('📄 Excel', 'Exporter le résultat courant en Excel', () => quickAsk('Exporte en Excel')));
-  bar.appendChild(mk('🖨 PDF', 'Imprimer / exporter en PDF', () => window.print()));
+  // v27.21 — cette réponse seule (avant : window.print() imprimait toute la page)
+  bar.appendChild(mk('🖨 PDF', 'Imprimer cette réponse ou l\'enregistrer en PDF (pour en réunir plusieurs : « 📑 Rapport PDF » en haut)', () => {
+    if (typeof imprimerUneReponse === 'function') imprimerUneReponse(bubble, question);
+  }));
   bar.appendChild(mk('📋 Copier', 'Copier le rapport', async () => {
     const text = bubble.innerText || bubble.textContent || '';
     try { await navigator.clipboard.writeText(text); } catch(e) { console.warn(e); }
