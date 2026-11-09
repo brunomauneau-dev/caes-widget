@@ -410,6 +410,7 @@ export const REFERENCES = [
   { id: 'ref_n1_places', q: 'combien de places au total en {N-1}', type: 'sum', champ: 'capa_fin', session: -1 },
   { id: 'ref_evolution_places_bts', q: 'les places en BTS ont-elles augmenté depuis {N-1} ?', type: 'evolution', base: { type: 'sum', champ: 'capa_fin', egal: { fili: 'BTS' } } },
   { id: 'ref_evolution_pass', q: 'évolution du nombre de PASS depuis {N-1}', type: 'evolution', base: { type: 'count', egal: { fili: 'PASS' } } },
+  { id: 'ref_n1_part_boursiers_bts', q: 'part des boursiers parmi les admis en BTS en {N-1}', type: 'part', num: 'acc_brs', den: 'acc_neobac', egal: { fili: 'BTS' }, session: -1 },
   { id: 'ref_top_places_bdx', q: 'les 5 formations avec le plus de places à Bordeaux', type: 'top', champ: 'capa_fin', ordre: 'desc', n: 5, egal: { ville_etab: 'Bordeaux' } },
 ];
 const _odsql = v => `"${String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
@@ -429,7 +430,7 @@ export function requeteOfficielle(ref, session, jeu = null) {
 export async function chiffresOfficiels(fetchImpl, session, refs = REFERENCES, { jeuPrecedent = null } = {}) {
   const out = {};
   const jeuDe = s => (s === session - 1 ? jeuPrecedent : null);
-  const unChiffre = async r => { const x = await fetchImpl(requeteOfficielle(r, session), { cache: 'no-store' }); if (!x.ok) throw new Error(`HTTP ${x.status}`); const res = (await x.json()).results; if (!Array.isArray(res)) throw new Error('réponse sans résultats'); return Number(res[0]?.n ?? 0); };
+  const unChiffre = async r => { const ses = session + (r.session || 0); const x = await fetchImpl(requeteOfficielle(r, ses, jeuDe(ses)), { cache: 'no-store' }); if (!x.ok) throw new Error(`HTTP ${x.status}`); const res = (await x.json()).results; if (!Array.isArray(res)) throw new Error('réponse sans résultats'); return Number(res[0]?.n ?? 0); };
   for (const ref of refs) {
     if (ref.type === 'evolution') {
       try {
@@ -441,8 +442,8 @@ export async function chiffresOfficiels(fetchImpl, session, refs = REFERENCES, {
     if (ref.type === 'part') {
       // part = deux chiffres du serveur : numérateur (somme ou comptage avec condition) et dénominateur
       try {
-        const num = ref.num ? await unChiffre({ type: 'sum', champ: ref.num, egal: ref.egal }) : await unChiffre({ type: 'count', egal: { ...(ref.egal || {}), ...ref.condition } });
-        const den = ref.den ? await unChiffre({ type: 'sum', champ: ref.den, egal: ref.egal }) : await unChiffre({ type: 'count', egal: ref.egal });
+        const num = ref.num ? await unChiffre({ type: 'sum', champ: ref.num, egal: ref.egal, session: ref.session }) : await unChiffre({ type: 'count', egal: { ...(ref.egal || {}), ...ref.condition }, session: ref.session });
+        const den = ref.den ? await unChiffre({ type: 'sum', champ: ref.den, egal: ref.egal, session: ref.session }) : await unChiffre({ type: 'count', egal: ref.egal, session: ref.session });
         out[ref.id] = { valeur: { num, den } };
       } catch (e) { out[ref.id] = { erreur: e.message }; }
       continue;
@@ -521,9 +522,14 @@ export async function essai({ fetchImpl = globalThis.fetch, questions = QUESTION
   const precedente = await chargerSessionPrecedente(fetchImpl, n1);
   const annee = q => String(q).replace(/\{N-1\}/g, n1);
   const questionsAnnee = questions.map(x => ({ ...x, ...(x.q ? { q: annee(x.q) } : {}), ...(x.conversation ? { conversation: x.conversation.map(annee) } : {}) }));
-  const resultats = poserQuestions(table, questionsAnnee, [precedente]);
   references = references.map(r => ({ ...r, q: annee(r.q) }));
-  const resRefs = poserQuestions(table, references.map(r => ({ id: r.id, q: r.q })), [precedente]);
+  // toute autre session citée dans une question (« en 2023 ») est chargée comme le widget le fait à la demande
+  const cites = new Set();
+  [...questionsAnnee.flatMap(x => x.conversation || [x.q]), ...references.map(r => r.q)].forEach(q => (String(q).match(/\b20[12]\d\b/g) || []).forEach(y => { y = Number(y); if (y < table.session && y !== n1) cites.add(y); }));
+  const autres = [precedente];
+  for (const y of cites) autres.push(await chargerSessionPrecedente(fetchImpl, y));
+  const resultats = poserQuestions(table, questionsAnnee, autres);
+  const resRefs = poserQuestions(table, references.map(r => ({ id: r.id, q: r.q })), autres);
   const officiels = references.length ? await chiffresOfficiels(fetchImpl, table.session, references, { jeuPrecedent: precedente?.jeu || null }) : {};
   const verifs = verifierOfficiels(officiels, resRefs, references);
   const controles = [...controler(resultats), ...verifs.filter(v => v.statut !== 'indisponible').map(v => ({ libelle: `chiffre officiel : « ${v.question} »`, ok: v.statut === 'ok', detail: `officiel ${v.officiel} · widget ${v.widget} · ${v.detail}` }))];
