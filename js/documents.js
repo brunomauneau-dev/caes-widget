@@ -2,101 +2,6 @@
    Dépend de : config.js, knowledge.js */
 
 
-/* ═══════════════════════ CROISEMENTS AUTOMATIQUES ═══════════════════════
-   Les statistiques univariées ci-dessus ne répondent pas aux questions du
-   type "parmi les candidats X, quelle est la répartition de Y" — pour ça il
-   faut une ventilation croisée. On ne peut pas croiser TOUTES les paires de
-   colonnes (combinatoire explosive sur ~80 colonnes), donc on applique une
-   heuristique : on détecte les colonnes "filtre" plausibles (peu de valeurs
-   distinctes, souvent binaires/catégorielles courtes type Oui/Non, zone,
-   académie, série...) et on les croise uniquement avec les colonnes
-   "résultat" les plus susceptibles d'être demandées (formation, académie
-   d'accueil, spécialité — repérées par mot-clé), avec des garde-fous de
-   volume pour ne pas saturer le contexte envoyé à Albert. */
-
-const CROSSTAB_FILTER_HINTS = /zone|secteur|boursier|d[ée]roga|hors d[ée]lai|s[ée]rie|type de (classe|bac)|sexe|n[ée]o|apprenti|phase|sant[ée]|handicap/i;
-const CROSSTAB_RESULT_HINTS = /formation|sp[ée]cialit[ée]|mention|domaine|acad[ée]mie|fili[èe]re|[ée]tablissement|grands? groupes?|r[ée]gion/i;
-const MAX_FILTER_COLS = 4;      // nb max de colonnes-filtres traitées
-const MAX_RESULT_COLS_PER_FILTER = 3; // nb max de colonnes-résultat croisées par filtre
-const MAX_VALUES_PER_FILTER = 6;      // nb max de valeurs distinctes d'un filtre à traiter (ex: Oui/Non = 2, pas un problème)
-const MAX_BREAKDOWN_ITEMS = 8;        // nb max de lignes affichées dans une répartition croisée
-
-function buildCrossTabs(headers, dataRows, totalRows) {
-  const idPattern = /num[ée]ro|identifiant|\bid\b|code|uai/i;
-
-  // 1. Identifier les colonnes "filtre" plausibles : peu de valeurs distinctes,
-  //    pas des identifiants, et soit matchent le lexique métier, soit ont une
-  //    cardinalité très faible (≤ MAX_VALUES_PER_FILTER), typique d'un Oui/Non ou
-  //    d'une catégorie à choix limité.
-  const candidateFilters = [];
-  headers.forEach((header, j) => {
-    if (!header || idPattern.test(header)) return;
-    const values = dataRows.map(r => r[j]).filter(v => v !== undefined && v !== null && String(v).trim() !== '');
-    if (!values.length) return;
-    const uniqueVals = new Set(values.map(v => String(v).trim()));
-    const looksLikeFilter = CROSSTAB_FILTER_HINTS.test(header) || uniqueVals.size <= MAX_VALUES_PER_FILTER;
-    if (looksLikeFilter && uniqueVals.size >= 2 && uniqueVals.size <= MAX_VALUES_PER_FILTER) {
-      candidateFilters.push({ header, colIndex: j, uniqueVals: [...uniqueVals] });
-    }
-  });
-  if (!candidateFilters.length) return '';
-
-  // 2. Identifier les colonnes "résultat" plausibles (formation, académie, etc.).
-  //    On priorise les colonnes "accueil/accepté(e)" — c'est l'orientation FINALE
-  //    du candidat, l'information la plus demandée — devant les colonnes décrivant
-  //    sa scolarité d'ORIGINE (établissement, académie, commune de scolarité), qui
-  //    matchent le même regex générique mais répondent à une question différente.
-  const ACCUEIL_HINTS = /accueil|accept[ée]e?/i;
-  const resultCols = [];
-  headers.forEach((header, j) => {
-    if (!header || idPattern.test(header)) return;
-    if (CROSSTAB_RESULT_HINTS.test(header)) {
-      resultCols.push({ header, colIndex: j, isAccueil: ACCUEIL_HINTS.test(header) });
-    }
-  });
-  if (!resultCols.length) return '';
-  resultCols.sort((a, b) => (b.isAccueil ? 1 : 0) - (a.isAccueil ? 1 : 0));
-
-  // 3. Limiter le volume : on garde les filtres les plus "métier" (priorité au
-  //    lexique connu) puis on coupe au maximum autorisé.
-  const prioritizedFilters = candidateFilters
-    .sort((a, b) => (CROSSTAB_FILTER_HINTS.test(b.header) ? 1 : 0) - (CROSSTAB_FILTER_HINTS.test(a.header) ? 1 : 0))
-    .slice(0, MAX_FILTER_COLS);
-  const limitedResultCols = resultCols.slice(0, MAX_RESULT_COLS_PER_FILTER);
-
-  let out = `\n### Tableaux croisés (répartitions conditionnées par sous-groupe, calculées sur L'INTÉGRALITÉ des ${totalRows} lignes)\n`;
-  out += `Ces croisements répondent aux questions du type "parmi les candidats [filtre], quelle est la répartition de [résultat]" — utilisez-les en priorité pour ce type de question plutôt que les statistiques globales ci-dessus, qui elles ne sont PAS filtrées.\n\n`;
-
-  prioritizedFilters.forEach(filterCol => {
-    filterCol.uniqueVals.forEach(filterVal => {
-      const matchingRows = dataRows.filter(r => String(r[filterCol.colIndex] ?? '').trim() === filterVal);
-      const n = matchingRows.length;
-      if (!n) return;
-      out += `**${filterCol.header} = "${filterVal}"** (${n} lignes, ${(n/totalRows*100).toFixed(1)}% du total) :\n`;
-
-      limitedResultCols.forEach(resCol => {
-        if (resCol.colIndex === filterCol.colIndex) return;
-        const vals = matchingRows.map(r => r[resCol.colIndex]).filter(v => v !== undefined && v !== null && String(v).trim() !== '');
-        if (!vals.length) return;
-        const renseigne = vals.length;
-        const counts = new Map();
-        vals.forEach(v => { const k = String(v).trim(); counts.set(k, (counts.get(k)||0)+1); });
-        const sorted = [...counts.entries()].sort((a,b) => b[1]-a[1]).slice(0, MAX_BREAKDOWN_ITEMS);
-        // % calculé sur les valeurs renseignées pour cette colonne (≠ n total du
-        // filtre, car certaines lignes peuvent avoir cette colonne vide — ex: pas
-        // encore de proposition acceptée). On l'indique explicitement pour éviter
-        // toute ambiguïté côté modèle.
-        const breakdown = sorted.map(([val,c]) => `${val}: ${c} (${(c/renseigne*100).toFixed(1)}%)`).join(', ');
-        out += `  - ${resCol.header} (${renseigne}/${n} lignes renseignées) → ${breakdown}\n`;
-      });
-      out += '\n';
-    });
-  });
-
-  return out;
-}
-
-
 /* ═══════════════════════ MOTEUR DE REQUÊTES EXCEL LOCAL ═══════════════════════
    Objectif : faire les comptages/filtrages en JavaScript sur les lignes Excel
    brutes, puis envoyer à Albert un résultat déjà calculé. Le LLM rédige ; il ne
@@ -408,65 +313,6 @@ function selectImportedSheet(sheetName) {
 }
 
 
-/* ═══════════════════════ ONTOLOGIE PARCOURSUP + PROFILAGE GRIST ═══════════════════════
-   Objectif : rester spécialisé Parcoursup, mais adaptatif selon le public demandé
-   (zone, boursiers, apprentis, académie, département, mobilité, formations, etc.).
-   Le widget classe les colonnes détectées dans des familles métier avant d'envoyer
-   le contexte à Albert. Albert raconte l'analyse ; le widget fournit la carte des
-   variables et les indicateurs pertinents. */
-
-const PARCOURSUP_ONTOLOGY_RULES = [
-  { family:'identifiants', role:'identifiant technique', priority:1, re:/\b(id|identifiant|numero|num[eé]ro|code uai|uai|manualsort)\b/i, avoid:true },
-  { family:'territoire', role:'filtre territorial', priority:95, re:/zone.*pays.*basque|pays.*basque|\bzone\b/i },
-  { family:'territoire', role:'département du candidat', priority:82, re:/d[eé]partement(?!.*accueil)|dept/i },
-  { family:'territoire', role:'académie d’origine/scolarité', priority:58, re:/acad[eé]mie.*(scolar|origine|candidat|lyc[eé]e)/i },
-  { family:'territoire', role:'commune d’origine/scolarité', priority:50, re:/commune.*(scolar|origine|candidat|lyc[eé]e)/i },
-
-  { family:'admission', role:'a reçu une proposition', priority:90, re:/proposition.*(oui|non|re[cç]ue|eu)|a.*proposition/i },
-  { family:'admission', role:'a accepté / répondu favorablement', priority:92, re:/r[eé]pondu favorablement|proposition.*accept[eé]e|acceptation/i },
-  { family:'admission', role:'phase Parcoursup', priority:70, re:/phase principale|phase compl[eé]mentaire|\bpp\b|\bpc\b/i },
-  { family:'admission', role:'vœux et candidatures', priority:72, re:/voe?ux?|vœux|confirm[eé]s?|class[eé]s?/i },
-
-  { family:'formation', role:'grand groupe de formation acceptée', priority:98, re:/grands? groupes?.*formation.*accueil.*accept[eé]e|groupe.*formation.*accept/i },
-  { family:'formation', role:'formation/spécialité acceptée', priority:96, re:/sp[eé]cialit[eé].*mention.*formation.*accueil.*accept[eé]e|mention.*formation.*accept|formation.*accueil.*accept[eé]e/i },
-  { family:'formation', role:'filière/domaine', priority:74, re:/fili[eè]re|domaine|discipline/i },
-
-  { family:'mobilité', role:'académie d’accueil acceptée', priority:100, re:/acad[eé]mie.*(accueil|[eé]tablissement).*accept[eé]e|acad[eé]mie.*accueil/i },
-  { family:'mobilité', role:'département d’accueil', priority:86, re:/d[eé]partement.*(accueil|[eé]tablissement).*accept[eé]e/i },
-  { family:'mobilité', role:'région d’accueil', priority:75, re:/r[eé]gion.*(accueil|[eé]tablissement).*accept[eé]e/i },
-  { family:'mobilité', role:'commune d’accueil', priority:70, re:/commune.*(accueil|[eé]tablissement).*accept[eé]e/i },
-
-  { family:'établissement', role:'établissement d’accueil', priority:76, re:/[eé]tablissement.*accueil.*accept[eé]e|nom.*[eé]tablissement.*accueil/i },
-  { family:'établissement', role:'établissement de scolarité', priority:52, re:/[eé]tablissement.*scolarit[eé]|lyc[eé]e/i },
-  { family:'établissement', role:'secteur établissement', priority:68, re:/secteur.*[eé]tablissement|public|priv[eé]/i },
-
-  { family:'profil social', role:'boursier', priority:85, re:/\bboursier\b|bourse/i },
-  { family:'profil social', role:'sexe / genre', priority:64, re:/\bsexe\b|genre/i },
-  { family:'profil social', role:'PCS / catégorie sociale', priority:78, re:/pcs|profession.*parents?|cat[eé]gorie.*sociale/i },
-  { family:'profil social', role:'ASE / accompagnement', priority:60, re:/\base\b|aide sociale/i },
-
-  { family:'scolarité', role:'série du bac', priority:84, re:/\bs[eé]rie\b|s[eé]rie.*classe|bac/i },
-  { family:'scolarité', role:'type de classe', priority:82, re:/type de classe|classe/i },
-  { family:'scolarité', role:'néo-bachelier', priority:70, re:/n[eé]o.?bachelier/i },
-  { family:'scolarité', role:'spécialités suivies', priority:68, re:/enseignement.*sp[eé]cialit[eé]|sp[eé]cialit[eé].*suiv/i },
-  { family:'scolarité', role:'apprentissage', priority:68, re:/apprenti|apprentissage/i },
-
-  { family:'situations particulières', role:'dérogatoire / hors délai / CAES', priority:50, re:/d[eé]roga|hors d[eé]lai|\bcaes\b|handicap|sant[eé]/i }
-];
-
-function classifyParcoursupColumn(col) {
-  const name = String(col || '').trim();
-  const n = normalizeText(name);
-  let best = null;
-  PARCOURSUP_ONTOLOGY_RULES.forEach(rule => {
-    if (rule.re.test(name) || rule.re.test(n)) {
-      if (!best || rule.priority > best.priority) best = { ...rule, column: name };
-    }
-  });
-  if (best) return best;
-  return { column: name, family:'autres variables', role:'variable disponible', priority:10 };
-}
-
 function getActiveDataSource() {
   const tables = getActiveQueryTables();
   if (!tables || !tables.length) return null;
@@ -478,33 +324,6 @@ function getActiveDataSource() {
     rows: t.objects || []
   };
 }
-
-function summarizeColumnForOntology(rows, col) {
-  const top = topCountsForRows(rows, col, 6);
-  const num = numericStatsForRows(rows, col);
-  const numericRatio = num && top.filled ? num.count / top.filled : 0;
-  if (num && numericRatio > 0.9 && top.distinct > 10) {
-    return `numérique, ${top.filled} valeurs renseignées, moyenne ${num.avg.toFixed(2).replace('.', ',')}, médiane ${String(num.median).replace('.', ',')}`;
-  }
-  const vals = top.top.map(x => `${x.value} (${x.count}, ${x.pct.toFixed(1).replace('.', ',')} %)`).join('; ');
-  return `${top.filled} valeurs renseignées, ${top.distinct} modalités${vals ? ` — principales : ${vals}` : ''}`;
-}
-
-function detectParcoursupAnalysisIntent(question, ontology) {
-  const q = normalizeText(question || '');
-  const intents = [];
-  if (/compare|comparaison|versus| vs |reste|autres|difference|diff[eé]rence/.test(q)) intents.push('comparaison de publics');
-  if (/basque|zone|departement|d[eé]partement|academie|acad[eé]mie|territoire|secteur/.test(q)) intents.push('analyse territoriale');
-  if (/mobilite|mobilit[eé]|hors|autre academie|quitt|partent|destination|accueil/.test(q)) intents.push('mobilité / destination');
-  if (/formation|filiere|fili[eè]re|specialite|sp[eé]cialit[eé]|l1|bts|but|dut|cpge|sciences po|ingenieur/.test(q)) intents.push('formations et orientations');
-  if (/boursier|social|pcs|ase|priv[eé]|public/.test(q)) intents.push('profil social');
-  if (/serie|s[eé]rie|bac|classe|neo|n[eé]o|apprenti/.test(q)) intents.push('profil scolaire');
-  if (/proposition|admission|accept|favorable|r[eé]ussite|voeu|vœu/.test(q)) intents.push('résultats Parcoursup');
-  if (/infographie|synthese|synth[eè]se|rapport|resume|r[eé]sume/.test(q)) intents.push('rapport de synthèse');
-  if (!intents.length) intents.push('analyse Parcoursup générale');
-  return [...new Set(intents)];
-}
-
 
 /* ═══════════════════════ SYNTHÈSE DE TABLE COMPLÈTE ═══════════════════════
    Pour les questions générales du type "résume ce document", on ne doit pas
@@ -882,18 +701,6 @@ function executeLocalDataQuery(question, filterContextText = question) {
    Albert comprend et rédige ; le widget exécute les opérations mécaniques.
    Cette couche reste volontairement générique : elle ne connaît pas Parcoursup,
    sauf via les détecteurs de filtres déjà existants quand ils sont disponibles. */
-const LOCAL_TOOLS = [
-  { name: 'export_excel', description: 'Exporter des lignes filtrées dans un fichier .xlsx' },
-  { name: 'export_csv', description: 'Exporter des lignes filtrées dans un fichier .csv' }
-];
-
-function isLocalExportRequest(question) {
-  const q = normalizeText(question || '');
-  const wantsFile = /excel|xlsx|xls|csv|fichier|telecharg|t[eé]l[eé]charg|export|extraire|extrait|sors moi|sort moi|sortir|liste/.test(q);
-  const wantsData = /candidat|ligne|donnee|donn[eé]e|table|resultat|enregistrement|colonnes?|tout|tous|toutes/.test(q);
-  return wantsFile && (wantsData || /excel|xlsx|xls|csv|export/.test(q));
-}
-
 function sanitizeFilenamePart(s) {
   return normalizeText(s || '')
     .replace(/\s+/g, '_')
