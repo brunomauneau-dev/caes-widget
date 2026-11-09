@@ -161,5 +161,34 @@ await describe('Tableau par établissement : capacité de chaque formation', () 
   assert(run(ctx, '_placesEnClair')([1]) === '1 place' && run(ctx, '_placesEnClair')([1200]) === '1 200 places', 'singulier et milliers');
 });
 
+await describe('« PASS option droit » : c\'est « droit » qui manque, pas « PASS »', () => {
+  // Bug vu sur les données réelles : « « PASS » : 0 la précisent, 231 sans précision sur 691 »
+  // (le moteur cherchait « PASS » parmi les formations de droit)
+  const ctx = ctxOpenData(REEL);
+  const d = ask(ctx, 'combien de PASS option droit');
+  const p = d?.result?.precision || {};
+  assert(/droit/i.test(p.terme) && p.famille === 'PASS', `mot cherché « droit », famille « PASS » (obtenu : ${p.terme} / ${p.famille})`);
+  assert(p.nFamille === nPass && p.perimetre === nPass, `sur les ${nPass} PASS, pas sur les formations de droit`);
+  const m = ask(ctx, 'combien de PASS mention biologie');
+  assert(m?.kind === 'unresolved' && /biologie/i.test(m.result.precision.terme), '« mention » traité comme « option »');
+});
+
+await describe('0 dans la commune, mais des formations dans l\'académie du même nom', () => {
+  // Données réelles : aucun PASS dans la commune de Bordeaux (ceux de l'Université de Bordeaux sont à Talence)
+  const lignes = REEL.map(o => o.fili === 'PASS' && o.commune === 'Bordeaux' ? { ...o, commune: 'Talence', dep: 'Gironde' } : o);
+  const ctx = ctxOpenData(lignes);
+  const nAca = lignes.filter(o => o.fili === 'PASS' && o.aca === 'Bordeaux').length;
+  const e = ask(ctx, 'combien de PASS à Bordeaux');
+  assert(e?.kind === 'count' && e.result.count === 0, '0 PASS dans la commune de Bordeaux : chiffre exact');
+  assert(texte(e).includes(`mais ${nAca} dans l'académie de Bordeaux`), `note : « mais ${nAca} dans l'académie de Bordeaux »`);
+  assert(/dans l'académie de Bordeaux/.test(run(ctx, 'dataEngineResultToContext')(e)), 'Albert reçoit la note');
+  const b = ask(ctx, 'combien de PASS option biologie à Bordeaux');
+  assert(b?.kind === 'count' && b.result.count === 0 && /dans l'académie de Bordeaux/.test(texte(b)), 'option à Bordeaux : 0 exact (aucun PASS dans la commune), avec la note');
+  const bts = ask(ctx, 'combien de BTS à Bordeaux');
+  assert(bts?.kind === 'count' && bts.result.count > 0 && !/dans l'académie de/.test(texte(bts)), 'faux positif : des BTS dans la commune, pas de note');
+  const pau = ask(ctx, 'combien de PASS à Pau');
+  assert(pau?.kind === 'count' && !/dans l'académie de Pau/.test(texte(pau)), 'faux positif : pas d\'académie « Pau », pas de note');
+});
+
 console.log(`\nRésultat : ${passed} ✓  ${failed} ✗  (${passed + failed} tests)`);
 if (failed) process.exit(1);

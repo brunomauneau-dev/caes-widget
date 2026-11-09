@@ -1589,8 +1589,16 @@ function precisionPartielleIntitules(plan, termFilter) {
   if (!info.cols.length) return null;
   const labels = String(termFilter.label || '').split(' + ');
   const termes = termFilter.terms.map((t, i) => ({ t: Array.isArray(t) ? t : [t], label: labels[i] || String(t) }));
+  // mots qui suivent « option / mention / spécialité / parcours » : ce sont eux qu'on cherche d'abord
+  const qn = normalizeText(plan.question || '');
+  const forces = new Set();
+  const reOpt = /\b(?:option|options|mention|mentions|specialite|specialites|parcours)\s+(?:(?:de|d|en|du|des|la|le|l)\s+)?([a-z0-9]{3,})/g;
+  let m;
+  while ((m = reOpt.exec(qn))) forces.add(m[1]);
+  const estForce = x => x.t ? x.t.some(w => forces.has(w)) || forces.has(normalizeText(x.label)) : true;
   const candidats = [];
   if (termes.length >= 2) termes.forEach((x, i) => candidats.push({ ...x, autres: termes.filter((_, j) => j !== i) }));
+  candidats.sort((a, b) => Number(estForce(b)) - Number(estForce(a)));
   (plan.unresolvedTerms || []).forEach(m => candidats.push({ t: null, label: String(Array.isArray(m) ? m[0] : m), autres: termes }));
   const autresFiltres = (plan.filters || []).filter(f => f && f !== termFilter && f.op !== 'contains_all');
   for (const cand of candidats) {
@@ -1603,6 +1611,9 @@ function precisionPartielleIntitules(plan, termFilter) {
       const ou = info.cols.map(c => ({ c, n: famille.filter(r => rowContainsAllTerms(r, { cols: [c], terms: [cand.t] })).length })).filter(x => x.n > 0);
       if (ou.some(x => taux(x.c) >= SEUIL_COLONNE_REMPLIE)) continue; // le mot est dans une colonne bien remplie : chiffre fiable
       col = (ou.sort((a, b) => b.n - a.n)[0] || {}).c || null;
+      // mot absent de la famille : on ne l'explique par une précision manquante que s'il suit « option… »
+      // (« PASS option droit » : c'est « droit » qui manque aux PASS, pas « PASS » aux formations de droit)
+      if (!col && !estForce(cand)) continue;
     }
     if (!col) {
       const partielles = info.cols.filter(c => { const x = taux(c); return x > 0 && x < SEUIL_COLONNE_REMPLIE; });
@@ -2916,6 +2927,21 @@ function perimetreResultat(kind, plan, result) {
     if (vides > 0) notes.push(`${_nf(vides)} ${mot(vides)} sans valeur dans « ${plan.targetCol} »`);
     const affichees = Math.min((result.rows || []).length, 20);
     if ((result.distinct || 0) > affichees) notes.push(`seules les ${_nf(affichees)} valeurs les plus fréquentes sont affichées, sur ${_nf(result.distinct)}`);
+  }
+  // v27.17 — 0 dans la commune de Bordeaux, mais des formations dans l'académie de Bordeaux (PASS à Talence) :
+  // le 0 est exact, mais l'agent pensait sans doute à l'académie ou au département → on le dit
+  if (['count', 'count_rows', 'sum'].includes(kind) && retenues === 0) {
+    const fc = filtres.find(f => f.op !== 'neq' && f.op !== 'contains_all' && !SYMBOLES_OPS[f.op] && /^(commune|ville)/.test(_hx(f.col)));
+    if (fc) {
+      const v = normalizeText(fc.value);
+      const autres = filtres.filter(f => f !== fc);
+      [['academie', "l'académie"], ['departement', 'le département']].forEach(([cle, nom]) => {
+        const col = (table.headers || []).find(h => new RegExp(`^${cle}`).test(_hx(h)) && !/code|origine/.test(_hx(h)));
+        if (!col || !(table.objects || []).some(r => normalizeText(r?.[col]) === v)) return;
+        const n = applyLocalActionFilters(table.objects || [], [...autres, { col, op: 'eq', value: (table.objects || []).find(r => normalizeText(r?.[col]) === v)[col] }]).length;
+        if (n > 0) notes.push(`aucune ${mot(1)} dans la commune de ${fc.value}, mais ${_nf(n)} dans ${nom} de ${fc.value} (demandez « … dans ${nom} de ${fc.value} »)`);
+      });
+    }
   }
   if (kind === 'group_by' && plan.listMode && result.sansPrecision) {
     const sans = (result.total || 0) - (result.filled || 0);
