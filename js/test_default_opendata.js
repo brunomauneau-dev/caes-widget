@@ -53,7 +53,10 @@ function fakeFetch(url) {
   }
   if (u.includes('/exports/csv')) {
     if (mode === 'export-error') return fail(503);
-    return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(CSV) });
+    // comme le vrai serveur : les lignes de la session demandée (refine=session:AAAA)
+    const ses = (decodeURIComponent(u).match(/refine=session:(\d{4})/) || [])[1];
+    const csv = ses ? CSV.replace(/^2026;/gm, `${ses};`) : CSV;
+    return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(csv) });
   }
   if (/fr-esr-parcoursup$/.test(u)) return json(SCHEMA);
   return fail(404);

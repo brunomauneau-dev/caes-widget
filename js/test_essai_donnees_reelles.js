@@ -75,7 +75,11 @@ function fakeFetch(url) {
   const json = body => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body), text: () => Promise.resolve(JSON.stringify(body)) });
   if (!u.includes('fr-esr-parcoursup')) return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}), text: () => Promise.resolve('') });
   if (u.includes('/facets')) return json({ facets: [{ name: 'session', facets: [{ name: '2025' }] }] });
-  if (u.includes('/exports/csv')) return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(CSV) });
+  if (u.includes('/exports/csv')) {
+    // comme le vrai serveur : les lignes de la session demandée (refine=session:AAAA)
+    const ses = (decodeURIComponent(u).match(/refine=session:(\d{4})/) || [])[1];
+    return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(ses ? CSV.replace(/^2025;/gm, `${ses};`) : CSV) });
+  }
   if (u.includes('/records?')) {
     // comme le vrai serveur : un champ inconnu → erreur 400
     const sel = new URL(u).searchParams.get('select');
@@ -316,6 +320,15 @@ await describe('v27.12 — Chiffres officiels : le widget retrouve à l\'unité 
   assert(V.ref_part_selectives.statut === 'indisponible', 'données simulées sans colonne sélectivité : part non vérifiée (pas un faux « identique »)');
   const vp = verifierOfficiels({ p: { valeur: { num: 20, den: 100 } } }, [{ id: 'p', kind: 'part', num: 20, den: 99, pct: 20.2, reponse: 'x' }], [{ id: 'p', q: 'p', type: 'part' }]);
   assert(vp[0].statut === 'ecart', 'dénominateur différent d\'une unité → écart');
+  // v27.16 — session précédente et évolution (l'API simulée sert les mêmes lignes pour chaque session)
+  assert(V.ref_n1_bts.statut === 'ok' && V.ref_n1_bts.question === 'combien de BTS en 2024' && V.ref_n1_bts.widget === 300, `« combien de BTS en {N-1} » → question posée pour 2024, identique au serveur (obtenu : ${V.ref_n1_bts.question} ${V.ref_n1_bts.statut} ${V.ref_n1_bts.widget})`);
+  assert(V.ref_evolution_pass.statut === 'ok' && V.ref_evolution_pass.officiel === '100 → 100', `évolution des PASS : chaque session identique au serveur (obtenu : ${V.ref_evolution_pass.officiel} / ${V.ref_evolution_pass.widget})`);
+  assert(/refine=session%3A2024/.test(requeteOfficielle(REFERENCES.find(r => r.id === 'ref_evolution_pass').base, 2024)), 'requête de la session précédente : refine session 2024');
+  const arch = requeteOfficielle(REFERENCES.find(r => r.id === 'ref_evolution_pass').base, 2024, 'fr-esr-parcoursup_2024');
+  assert(/catalog\/datasets\/fr-esr-parcoursup_2024\/records/.test(arch) && !/refine=session/.test(arch), 'session archivée : requête au jeu archivé, sans filtre de session');
+  assert(appels.some(u => /exports\/csv/.test(u) && /session%3A2024/.test(u)), 'la session précédente est chargée par le vrai code du widget');
+  const ve = verifierOfficiels({ e: { valeur: [10, 12] } }, [{ id: 'e', kind: 'evolution', valeurs: [10, 11], reponse: 'x' }], [{ id: 'e', q: 'e', type: 'evolution' }]);
+  assert(ve[0].statut === 'ecart', 'évolution différente sur une session → écart');
   const vt = verifierOfficiels({ t: { valeur: [9, 8, 7] } }, [{ id: 't', kind: 'classement', valeurs: [9, 7, 8], reponse: 'x' }], [{ id: 't', q: 't', type: 'top' }]);
   assert(vt[0].statut === 'ecart', 'classement dans un autre ordre → écart');
   assert(sectionOfficiels([]).length === 0 && sectionOfficiels(null).length === 0, 'aucune référence : pas de section');
@@ -337,6 +350,13 @@ await describe('v27.14 — Alerte de l\'essai hebdomadaire', async () => {
   const session = alerteEssai({ ...base, instantane: { session: 2026, formations: 14500 }, comparaison: { ...base.comparaison, donneesChangees: true } });
   assert(session && /données du ministère modifiées/.test(session.titre) && /session 2025.*session 2026/.test(session.texte), 'nouvelle session publiée → alerte « données modifiées »');
   assert(alerteEssai(null) === null, 'sans résultat : pas d\'erreur');
+});
+
+await describe('v27.16 — Contrôle « ne compte pas tout le fichier » : pas de fausse alerte sans critère', async () => {
+  const base = { kind: 'count', count: 600, total: 600, filtres: [], reponse: '600 sur 600' };
+  const c = controler([{ id: 'x', question: 'combien de formations en 2023', ...base }, { id: 'y', question: 'combien de BTS', ...base }]);
+  assert(!c.some(x => /combien de formations en 2023/.test(x.libelle)), '« combien de formations en 2023 » : tout le fichier de 2023, pas d\'alerte');
+  assert(c.some(x => /« combien de BTS » ne compte pas tout le fichier/.test(x.libelle) && !x.ok), 'faux positif évité, mais « combien de BTS » = tout le fichier reste une alerte');
 });
 
 console.log('\n──────────────────────────────────────────────────');

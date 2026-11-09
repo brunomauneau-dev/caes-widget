@@ -561,12 +561,13 @@ async function detectLatestOpenDataSession() {
   const years = ((facet && facet.facets) || [])
     .map(x => parseInt(String(x.value ?? x.name ?? '').slice(0, 4), 10))
     .filter(y => y > 2000 && y < 2100);
+  openDataSessionsDisponibles = [...new Set(years)].sort((a, b) => a - b);
   return years.length ? Math.max(...years) : OPENDATA_FALLBACK_SESSION;
 }
 
 // Liste des champs du jeu de données (nom technique, libellé, type)
-async function fetchOpenDataFields() {
-  const r = await fetch(PARCOURSUP_GOVAPI, { cache: 'no-store' });
+async function fetchOpenDataFields(jeu = PARCOURSUP_GOVAPI) {
+  const r = await fetch(jeu, { cache: 'no-store' });
   if (!r.ok) throw new Error(`schéma : HTTP ${r.status}`);
   const json = await r.json();
   return (json.fields || (json.dataset && json.dataset.fields) || []).filter(f => f && f.name);
@@ -578,6 +579,77 @@ function refreshDefaultTableUI() {
   });
 }
 
+// v27.16 — Une session de l'open data, n'importe laquelle (la plus récente au lancement ; l'année précédente
+// quand une question compare deux sessions). Chaque table garde la correspondance libellé ↔ nom technique de l'API
+// (table.champs / table.libelles) : d'une année à l'autre, le ministère peut changer un libellé, pas le nom technique.
+const openDataSessions = new Map(); // session → table chargée
+let openDataSessionsDisponibles = []; // sessions publiées (facette « session »)
+// Le jeu principal ne garde que la dernière session ; les précédentes sont publiées dans des jeux archivés
+// (« fr-esr-parcoursup_2024 »…). On essaie le jeu principal, puis les noms d'archive connus.
+const jeuxPourSession = session => [PARCOURSUP_GOVAPI, `${PARCOURSUP_GOVAPI}_${session}`, `${PARCOURSUP_GOVAPI}-${session}`];
+async function _lignesSession(jeu, session) {
+  const fields = await fetchOpenDataFields(jeu);
+  const byName = new Map(fields.map(f => [f.name, f]));
+  const select = OPENDATA_DEFAULT_FIELDS.filter(n => byName.has(n));
+  if (select.length < 5) throw new Error('champs attendus introuvables dans le jeu de données');
+  const params = new URLSearchParams({ select: select.join(','), limit: '-1', delimiter: ';' });
+  if (byName.has('session')) params.append('refine', `session:${session}`);
+  const r = await fetch(`${jeu}/exports/csv?${params}`, { cache: 'no-store' });
+  if (!r.ok) throw new Error(`export : HTTP ${r.status}`);
+  return { byName, select, raw: parseCSVSimple(await r.text(), ';') };
+}
+async function chargerSessionOpenData(session) {
+  if (openDataSessions.has(session)) return openDataSessions.get(session);
+  let trouve = null, derniereErreur = null;
+  for (const jeu of jeuxPourSession(session)) {
+    try {
+      const x = await _lignesSession(jeu, session);
+      // un jeu sans colonne session (archive d'une seule année) : toutes ses lignes sont de cette session
+      if (x.raw.length && (!x.byName.has('session') || x.raw.some(l => String(l.session || '').slice(0, 4) === String(session)))) { trouve = { ...x, jeu }; break; }
+    } catch (e) { derniereErreur = e; }
+  }
+  if (!trouve) throw new Error(`aucune formation pour la session ${session}${derniereErreur ? ` (${derniereErreur.message})` : ''}`);
+  const { byName, select, raw, jeu } = trouve;
+
+  // En-têtes lisibles (libellés officiels) → la détection de colonnes et
+  // Albert comprennent directement « Académie de l'établissement », etc.
+  const label = n => String((byName.get(n) || {}).label || n).replace(/’/g, "'").trim();
+  const numeric = n => /^(int|double|float|decimal)/i.test((byName.get(n) || {}).type || '');
+  // v27.8 — deux champs de l'API peuvent porter le même libellé (« Filière de formation ») :
+  // sans distinction, le second écrasait le premier et une colonne était perdue
+  const vus = new Map();
+  const headers = select.map(n => {
+    const l = label(n);
+    const k = (vus.get(l) || 0) + 1;
+    vus.set(l, k);
+    return k > 1 ? `${l} (${k})` : l;
+  });
+  const objects = raw.map(row => {
+    const o = {};
+    select.forEach((n, i) => {
+      let v = row[n] ?? '';
+      if (numeric(n) && v !== '') { const x = Number(String(v).replace(',', '.')); if (isFinite(x)) v = x; }
+      o[headers[i]] = v;
+    });
+    return o;
+  });
+  const table = {
+    source: 'Open data',
+    name: `Parcoursup ${session} — France entière (open data)`,
+    headers, objects,
+    session,
+    rowUnit: 'formation',
+    jeu: jeu.split('/').pop(), // jeu de données d'où vient la session (principal ou archive)
+    champs: Object.fromEntries(headers.map((h, i) => [h, select[i]])),
+    libelles: Object.fromEntries(headers.map((h, i) => [select[i], h])),
+  };
+  openDataSessions.set(session, table);
+  return table;
+}
+function getOpenDataSessionTable(session) {
+  return openDataSessions.get(session) || null;
+}
+
 async function loadDefaultOpenDataTable() {
   if (defaultOpenDataState === 'loading' || defaultOpenDataState === 'ready') return getDefaultOpenDataTable();
   defaultOpenDataState = 'loading';
@@ -586,49 +658,8 @@ async function loadDefaultOpenDataTable() {
   try {
     let session = OPENDATA_FALLBACK_SESSION;
     try { session = await detectLatestOpenDataSession(); } catch (e) { console.warn('[Open data] session non détectée, repli sur', session, ':', e.message); }
-    const fields = await fetchOpenDataFields();
-    const byName = new Map(fields.map(f => [f.name, f]));
-    const select = OPENDATA_DEFAULT_FIELDS.filter(n => byName.has(n));
-    if (select.length < 5) throw new Error('champs attendus introuvables dans le jeu de données');
-
-    const params = new URLSearchParams({ select: select.join(','), limit: '-1', delimiter: ';' });
-    params.append('refine', `session:${session}`);
-    const r = await fetch(`${PARCOURSUP_GOVAPI}/exports/csv?${params}`, { cache: 'no-store' });
-    if (!r.ok) throw new Error(`export : HTTP ${r.status}`);
-    const raw = parseCSVSimple(await r.text(), ';');
-    if (!raw.length) throw new Error(`aucune formation pour la session ${session}`);
-
-    // En-têtes lisibles (libellés officiels) → la détection de colonnes et
-    // Albert comprennent directement « Académie de l'établissement », etc.
-    const label = n => String((byName.get(n) || {}).label || n).replace(/’/g, "'").trim();
-    const numeric = n => /^(int|double|float|decimal)/i.test((byName.get(n) || {}).type || '');
-    // v27.8 — deux champs de l'API peuvent porter le même libellé (« Filière de formation ») :
-    // sans distinction, le second écrasait le premier et une colonne était perdue
-    const vus = new Map();
-    const headers = select.map(n => {
-      const l = label(n);
-      const k = (vus.get(l) || 0) + 1;
-      vus.set(l, k);
-      return k > 1 ? `${l} (${k})` : l;
-    });
-    const objects = raw.map(row => {
-      const o = {};
-      select.forEach((n, i) => {
-        let v = row[n] ?? '';
-        if (numeric(n) && v !== '') { const x = Number(String(v).replace(',', '.')); if (isFinite(x)) v = x; }
-        o[headers[i]] = v;
-      });
-      return o;
-    });
-
-    defaultOpenDataTable = {
-      source: 'Open data',
-      name: `Parcoursup ${session} — France entière (open data)`,
-      headers, objects,
-      session,
-      rowUnit: 'formation',
-      isDefault: true
-    };
+    defaultOpenDataTable = { ...(await chargerSessionOpenData(session)), isDefault: true };
+    openDataSessions.set(session, defaultOpenDataTable);
     defaultOpenDataState = 'ready';
   } catch (e) {
     console.warn('[Open data] table par défaut non chargée :', e.message);

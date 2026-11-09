@@ -66,7 +66,7 @@ export const QUESTIONS = [
 ];
 
 // ─── Moteur du widget dans un contexte isolé ─────────────────────────────────
-export function creerMoteur({ fetchImpl, table = null } = {}) {
+export function creerMoteur({ fetchImpl, table = null, autresSessions = [] } = {}) {
   const noopEl = () => null;
   const ctx = {
     console: { ...console, log() {}, warn() {}, info() {} },
@@ -86,7 +86,13 @@ export function creerMoteur({ fetchImpl, table = null } = {}) {
   vm.createContext(ctx);
   for (const f of MODULES) vm.runInContext(fs.readFileSync(path.join(JS_DIR, f), 'utf8'), ctx, { filename: f });
   if (table) { ctx.__table = table; vm.runInContext(`defaultOpenDataTable = __table; defaultOpenDataState = 'ready';`, ctx); }
+  // v27.16 — sessions déjà chargées (comparaison entre sessions)
+  autresSessions.filter(Boolean).forEach(t => { ctx.__autre = t; vm.runInContext('openDataSessions.set(__autre.session, __autre)', ctx); });
   return ctx;
+}
+// Session précédente, chargée comme le widget le fait à la demande
+export async function chargerSessionPrecedente(fetchImpl, session) {
+  try { return await vm.runInContext(`chargerSessionOpenData(${Number(session)})`, creerMoteur({ fetchImpl })); } catch (e) { return null; }
 }
 
 // Charge l'open data comme le widget (session la plus récente, en-têtes lisibles)
@@ -108,7 +114,10 @@ function resumer(ctx, question) {
     : `${f.col} ${f.op === 'neq' ? '≠' : '='} ${f.label || f.value}`);
   const r = { question, routee: !!routee, outil: plan?.tool || null, liste: !!plan?.listMode, kind: exec?.kind || null, filtres, termes: (plan?.filters || []).some(f => f.op === 'contains_all') };
   // v27.10 — périmètre en clair, tel que l'agent le voit sous le résultat
-  if (exec && exec.kind !== 'unresolved' && exec.kind !== 'export' && typeof ctx.perimetreResultat === 'function') r.perimetre = ctx.perimetreResultat(exec.kind, exec.plan, exec.result).texte.replace(/^Périmètre : /, '') || undefined;
+  if (exec && exec.kind === 'evolution' && typeof ctx.perimetreResultat === 'function') {
+    const der = exec.result.lignes[exec.result.lignes.length - 1].exec;
+    r.perimetre = `chaque session (${exec.result.lignes.map(l => l.session).join(', ')}) · ${ctx.perimetreResultat(der.kind, der.plan, der.result).texte.replace(/^Périmètre : /, '')}`;
+  } else if (exec && exec.kind !== 'unresolved' && exec.kind !== 'export' && typeof ctx.perimetreResultat === 'function') r.perimetre = ctx.perimetreResultat(exec.kind, exec.plan, exec.result).texte.replace(/^Périmètre : /, '') || undefined;
   if (!exec) { r.reponse = routee ? 'Le moteur n\'a rien calculé' : 'Non traitée par le moteur : la question part vers Albert (connaissances)'; return r; }
   if (exec.kind === 'count') {
     r.count = exec.result.count; r.total = exec.result.total;
@@ -124,6 +133,9 @@ function resumer(ctx, question) {
   } else if (exec.kind === 'stats') {
     r.moyenne = exec.result.avg; r.colonne = exec.plan?.targetCol;
     r.reponse = `moyenne ${Number(r.moyenne).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} (colonne « ${r.colonne} »)`;
+  } else if (exec.kind === 'evolution') {
+    r.valeurs = exec.result.lignes.map(l => l.valeur); r.sessions = exec.result.lignes.map(l => l.session);
+    r.reponse = r.sessions.map((s, i) => `${s} : ${Number(r.valeurs[i]).toLocaleString('fr-FR', { maximumFractionDigits: 2 })}`).join(' → ');
   } else if (exec.kind === 'part') {
     r.num = exec.result.num; r.den = exec.result.den; r.pct = exec.result.pct;
     r.reponse = `${(Math.round(r.pct * 10) / 10).toLocaleString('fr-FR')} % (${r.num.toLocaleString('fr-FR')} sur ${r.den.toLocaleString('fr-FR')})`;
@@ -157,9 +169,9 @@ export function diagnosticColonnes(table, filiere = 'PASS') {
   }) };
 }
 
-export function poserQuestions(table, questions = QUESTIONS) {
+export function poserQuestions(table, questions = QUESTIONS, autresSessions = []) {
   return questions.map(item => {
-    const ctx = creerMoteur({ table });
+    const ctx = creerMoteur({ table, autresSessions });
     if (item.conversation) return { id: item.id, conversation: item.conversation.map(q => resumer(ctx, q)) };
     return { id: item.id, ...(item.groupe ? { groupe: item.groupe } : {}), ...resumer(ctx, item.q) };
   });
@@ -243,11 +255,12 @@ export function controler(resultats) {
     ctl(`reformulations « ${g} » : même chiffre pour les ${rs.length} tournures`, ok, rs.map(r => `« ${r.question} » → ${valeurReponse(r)}`).join(' · '));
   });
   // Chaque résultat chiffré porte son périmètre
-  const chiffres = resultats.flatMap(r => r.conversation || [r]).filter(r => ['count', 'sum', 'group_by', 'top', 'stats', 'classement', 'part'].includes(r.kind));
+  const chiffres = resultats.flatMap(r => r.conversation || [r]).filter(r => ['count', 'sum', 'group_by', 'top', 'stats', 'classement', 'part', 'evolution'].includes(r.kind));
   if (chiffres.length) ctl('chaque résultat chiffré dit sur quoi il porte (périmètre)', chiffres.every(r => r.perimetre && /retenues? sur/.test(r.perimetre)), `${chiffres.filter(r => r.perimetre).length} / ${chiffres.length}`);
 
   // Contrôle général : une question qui cite une formation ne doit jamais compter tout le fichier
-  resultats.filter(r => r.kind === 'count' && r.id !== 'toutes').forEach(r => {
+  // (sauf « combien de formations [en AAAA] » : sans critère, tout le fichier de la session est la bonne réponse)
+  resultats.filter(r => r.kind === 'count' && r.id !== 'toutes' && !/^combien (de|d) formations(\s+en\s+20\d\d)?\s*\??$/i.test(String(r.question).trim())).forEach(r => {
     if (r.count === r.total) ctl(`« ${r.question} » ne compte pas tout le fichier`, false, r.reponse);
   });
   return out;
@@ -266,6 +279,7 @@ function valeurReponse(r) {
   if (r.kind === 'group_by' || r.kind === 'top') return `${r.distinct ?? (r.lignes || []).length} valeurs / ${r.total}`;
   if (r.kind === 'classement') return (r.valeurs || []).join(' · ');
   if (r.kind === 'part') return `${r.num} / ${r.den}`;
+  if (r.kind === 'evolution') return (r.valeurs || []).join(' → ');
   if (r.kind === 'unresolved') return 'non reconnu';
   return r.kind;
 }
@@ -392,10 +406,16 @@ export const REFERENCES = [
   { id: 'ref_part_filles_admises', q: 'part des filles parmi les admis', type: 'part', num: 'acc_tot_f', den: 'acc_tot' },
   { id: 'ref_remplissage_bts', q: 'taux de remplissage des BTS', type: 'part', num: 'acc_tot', den: 'capa_fin', egal: { fili: 'BTS' } },
   { id: 'ref_part_selectives', q: 'quelle part des formations sont sélectives', type: 'part', condition: { select_form: 'formation sélective' } },
+  // v27.16 — session précédente et évolution : le serveur calcule chaque session
+  { id: 'ref_n1_bts', q: 'combien de BTS en {N-1}', type: 'count', egal: { fili: 'BTS' }, session: -1 },
+  { id: 'ref_n1_places', q: 'combien de places au total en {N-1}', type: 'sum', champ: 'capa_fin', session: -1 },
+  { id: 'ref_evolution_places_bts', q: 'les places en BTS ont-elles augmenté depuis {N-1} ?', type: 'evolution', base: { type: 'sum', champ: 'capa_fin', egal: { fili: 'BTS' } } },
+  { id: 'ref_evolution_pass', q: 'évolution du nombre de PASS depuis {N-1}', type: 'evolution', base: { type: 'count', egal: { fili: 'PASS' } } },
+  { id: 'ref_n1_part_boursiers_bts', q: 'part des boursiers parmi les admis en BTS en {N-1}', type: 'part', num: 'acc_brs', den: 'acc_neobac', egal: { fili: 'BTS' }, session: -1 },
   { id: 'ref_top_places_bdx', q: 'les 5 formations avec le plus de places à Bordeaux', type: 'top', champ: 'capa_fin', ordre: 'desc', n: 5, egal: { ville_etab: 'Bordeaux' } },
 ];
 const _odsql = v => `"${String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
-export function requeteOfficielle(ref, session) {
+export function requeteOfficielle(ref, session, jeu = null) {
   const conds = [...Object.entries(ref.egal || {}).map(([k, v]) => `${k}=${typeof v === 'number' ? v : _odsql(v)}`), ...Object.entries(ref.superieur || {}).map(([k, v]) => `${k}>${v}`), ...(ref.type === 'top' ? [`${ref.champ} is not null`] : []),
     ...Object.entries(ref.different || {}).map(([k, v]) => `(${k} is null or ${k}!=${_odsql(v)})`)];
   const p = new URLSearchParams();
@@ -404,24 +424,33 @@ export function requeteOfficielle(ref, session) {
   else if (ref.type === 'top') { p.set('order_by', `${ref.champ} ${ref.ordre === 'asc' ? 'asc' : 'desc'}`); p.set('limit', String(ref.n || 10)); }
   else p.set('limit', '1');
   if (conds.length) p.set('where', conds.join(' and '));
-  p.append('refine', `session:${session}`);
-  return `${API_PARCOURSUP}/records?${p}`;
+  // jeu archivé d'une session (« fr-esr-parcoursup_2024 ») : il ne contient que cette session
+  if (!jeu || jeu === 'fr-esr-parcoursup') p.append('refine', `session:${session}`);
+  return `${jeu ? API_PARCOURSUP.replace(/fr-esr-parcoursup$/, jeu) : API_PARCOURSUP}/records?${p}`;
 }
-export async function chiffresOfficiels(fetchImpl, session, refs = REFERENCES) {
+export async function chiffresOfficiels(fetchImpl, session, refs = REFERENCES, { jeuPrecedent = null } = {}) {
   const out = {};
-  const unChiffre = async r => { const x = await fetchImpl(requeteOfficielle(r, session), { cache: 'no-store' }); if (!x.ok) throw new Error(`HTTP ${x.status}`); const res = (await x.json()).results; if (!Array.isArray(res)) throw new Error('réponse sans résultats'); return Number(res[0]?.n ?? 0); };
+  const jeuDe = s => (s === session - 1 ? jeuPrecedent : null);
+  const unChiffre = async r => { const ses = session + (r.session || 0); const x = await fetchImpl(requeteOfficielle(r, ses, jeuDe(ses)), { cache: 'no-store' }); if (!x.ok) throw new Error(`HTTP ${x.status}`); const res = (await x.json()).results; if (!Array.isArray(res)) throw new Error('réponse sans résultats'); return Number(res[0]?.n ?? 0); };
   for (const ref of refs) {
+    if (ref.type === 'evolution') {
+      try {
+        const avant = await (async () => { const x = await fetchImpl(requeteOfficielle(ref.base, session - 1, jeuDe(session - 1)), { cache: 'no-store' }); if (!x.ok) throw new Error(`HTTP ${x.status}`); return Number((await x.json()).results?.[0]?.n ?? 0); })();
+        out[ref.id] = { valeur: [avant, await unChiffre(ref.base)] };
+      } catch (e) { out[ref.id] = { erreur: e.message }; }
+      continue;
+    }
     if (ref.type === 'part') {
       // part = deux chiffres du serveur : numérateur (somme ou comptage avec condition) et dénominateur
       try {
-        const num = ref.num ? await unChiffre({ type: 'sum', champ: ref.num, egal: ref.egal }) : await unChiffre({ type: 'count', egal: { ...(ref.egal || {}), ...ref.condition } });
-        const den = ref.den ? await unChiffre({ type: 'sum', champ: ref.den, egal: ref.egal }) : await unChiffre({ type: 'count', egal: ref.egal });
+        const num = ref.num ? await unChiffre({ type: 'sum', champ: ref.num, egal: ref.egal, session: ref.session }) : await unChiffre({ type: 'count', egal: { ...(ref.egal || {}), ...ref.condition }, session: ref.session });
+        const den = ref.den ? await unChiffre({ type: 'sum', champ: ref.den, egal: ref.egal, session: ref.session }) : await unChiffre({ type: 'count', egal: ref.egal, session: ref.session });
         out[ref.id] = { valeur: { num, den } };
       } catch (e) { out[ref.id] = { erreur: e.message }; }
       continue;
     }
     try {
-      const r = await fetchImpl(requeteOfficielle(ref, session), { cache: 'no-store' });
+      const r = await fetchImpl(requeteOfficielle(ref, session + (ref.session || 0), jeuDe(session + (ref.session || 0))), { cache: 'no-store' });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const res = (await r.json()).results;
       if (!Array.isArray(res)) throw new Error('réponse sans résultats');
@@ -451,6 +480,11 @@ export function verifierOfficiels(officiels, resultats, refs = REFERENCES) {
       if ((w.sansValeur || 0) !== vides) ecarts.push(`sans valeur : officiel ${vides}, widget ${w.sansValeur || 0}`);
       const nb = Object.keys(off.valeur).filter(k => k !== '(vide)').length;
       return { ...base, statut: ecarts.length ? 'ecart' : 'ok', officiel: `${nb} valeurs`, widget: w.reponse, detail: ecarts.length ? ecarts.slice(0, 5).join(' · ') : `${nb} valeurs identiques à l'unité` };
+    }
+    if (ref.type === 'evolution') {
+      const obtenu = w.kind === 'evolution' ? w.valeurs : null;
+      const ok = !!obtenu && JSON.stringify(obtenu) === JSON.stringify(off.valeur);
+      return { ...base, statut: ok ? 'ok' : 'ecart', officiel: off.valeur.join(' → '), widget: obtenu ? obtenu.join(' → ') : w.reponse, detail: ok ? 'les deux sessions identiques' : 'évolution différente' };
     }
     if (ref.type === 'part') {
       const { num, den } = off.valeur;
@@ -484,9 +518,20 @@ export function sectionOfficiels(verifs) {
 
 export async function essai({ fetchImpl = globalThis.fetch, questions = QUESTIONS, precedent = undefined, contexte = {}, references = REFERENCES } = {}) {
   const table = await chargerOpenData(fetchImpl);
-  const resultats = poserQuestions(table, questions);
-  const resRefs = poserQuestions(table, references.map(r => ({ id: r.id, q: r.q })));
-  const officiels = references.length ? await chiffresOfficiels(fetchImpl, table.session, references) : {};
+  // v27.16 — session précédente (comparaisons) ; « {N-1} » dans une question = l'année de cette session
+  const n1 = Number(table.session) - 1;
+  const precedente = await chargerSessionPrecedente(fetchImpl, n1);
+  const annee = q => String(q).replace(/\{N-1\}/g, n1);
+  const questionsAnnee = questions.map(x => ({ ...x, ...(x.q ? { q: annee(x.q) } : {}), ...(x.conversation ? { conversation: x.conversation.map(annee) } : {}) }));
+  references = references.map(r => ({ ...r, q: annee(r.q) }));
+  // toute autre session citée dans une question (« en 2023 ») est chargée comme le widget le fait à la demande
+  const cites = new Set();
+  [...questionsAnnee.flatMap(x => x.conversation || [x.q]), ...references.map(r => r.q)].forEach(q => (String(q).match(/\b20[12]\d\b/g) || []).forEach(y => { y = Number(y); if (y < table.session && y !== n1) cites.add(y); }));
+  const autres = [precedente];
+  for (const y of cites) autres.push(await chargerSessionPrecedente(fetchImpl, y));
+  const resultats = poserQuestions(table, questionsAnnee, autres);
+  const resRefs = poserQuestions(table, references.map(r => ({ id: r.id, q: r.q })), autres);
+  const officiels = references.length ? await chiffresOfficiels(fetchImpl, table.session, references, { jeuPrecedent: precedente?.jeu || null }) : {};
   const verifs = verifierOfficiels(officiels, resRefs, references);
   const controles = [...controler(resultats), ...verifs.filter(v => v.statut !== 'indisponible').map(v => ({ libelle: `chiffre officiel : « ${v.question} »`, ok: v.statut === 'ok', detail: `officiel ${v.officiel} · widget ${v.widget} · ${v.detail}` }))];
   const diag = diagnosticColonnes(table);

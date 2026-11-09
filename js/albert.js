@@ -950,6 +950,8 @@ async function sendMessage() {
   addLoadingMessage(loadingId, question);
 
   const filterContextText = [...chatHistory.slice(-4).map(m => m.content), question].join('\n');
+  // v27.16 — comparaison entre sessions : charger la session demandée (ex. 2024) avant le calcul
+  if (typeof preparerSessionsDemandees === 'function') { try { await preparerSessionsDemandees(question); } catch (e) { console.warn('[Sessions]', e.message); } }
   let dataPlan = detectDataEnginePlan(question, filterContextText);
   const dataBlockId = dataPlan ? ('blk_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7)) : null;
   if (dataPlan && dataBlockId) dataPlan.blockId = dataBlockId;

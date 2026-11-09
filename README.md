@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-30 fichiers, 1 445 tests. Depuis la racine du repo :
+31 fichiers, 1 496 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -102,6 +102,18 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 - colonnes d'**état** écrites Oui/Non, **1/0** ou **VRAI/FAUX** : filtrées, jamais additionnées ni moyennées ;
 - classeur dont le 1er onglet est une **notice** ;
 - **open data** de 14 000 formations : statut public/privé, académie, département, ville, région, sélectivité, sommes (places, candidats, admis), moyennes (capacité, taux d'accès), en moins de 3 secondes par question.
+
+### Comparaison entre sessions
+
+`js/test_sessions_comparees.js` vérifie les questions qui comparent deux sessions, par exemple « les places en BTS ont-elles augmenté depuis 2024 ? », « évolution du nombre de PASS », « part des boursiers en BTS par rapport à l'an dernier » ou « combien de BTS en 2024 ? ».
+
+- **Chargement :** la session demandée est téléchargée au moment de la question, puis gardée en mémoire. Le jeu principal du ministère ne contient que la dernière session ; les précédentes (2018 à 2024) viennent des jeux archivés (`fr-esr-parcoursup_2024`…).
+- **Calcul :** le même calcul (comptage, somme, moyenne ou part) est fait sur chaque session. L'écart est donné en valeur et en %, ou en points pour une part.
+- **Colonnes :** elles sont rapprochées par leur nom technique dans l'API, car le ministère peut changer un libellé d'une année à l'autre.
+- **Avertissement :** le widget signale quand l'offre de formations a changé entre les deux sessions.
+- **Arrêt :** une année non publiée, ou une session non chargée, arrête le calcul au lieu de répondre avec la mauvaise session.
+
+L'essai sur données réelles fait calculer les deux sessions par le serveur du ministère.
 
 ### Taux et parts
 
