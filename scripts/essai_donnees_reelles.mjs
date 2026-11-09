@@ -259,7 +259,8 @@ export function controler(resultats) {
   if (chiffres.length) ctl('chaque résultat chiffré dit sur quoi il porte (périmètre)', chiffres.every(r => r.perimetre && /retenues? sur/.test(r.perimetre)), `${chiffres.filter(r => r.perimetre).length} / ${chiffres.length}`);
 
   // Contrôle général : une question qui cite une formation ne doit jamais compter tout le fichier
-  resultats.filter(r => r.kind === 'count' && r.id !== 'toutes').forEach(r => {
+  // (sauf « combien de formations [en AAAA] » : sans critère, tout le fichier de la session est la bonne réponse)
+  resultats.filter(r => r.kind === 'count' && r.id !== 'toutes' && !/^combien (de|d) formations(\s+en\s+20\d\d)?\s*\??$/i.test(String(r.question).trim())).forEach(r => {
     if (r.count === r.total) ctl(`« ${r.question} » ne compte pas tout le fichier`, false, r.reponse);
   });
   return out;

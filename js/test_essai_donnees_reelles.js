@@ -352,6 +352,13 @@ await describe('v27.14 — Alerte de l\'essai hebdomadaire', async () => {
   assert(alerteEssai(null) === null, 'sans résultat : pas d\'erreur');
 });
 
+await describe('v27.16 — Contrôle « ne compte pas tout le fichier » : pas de fausse alerte sans critère', async () => {
+  const base = { kind: 'count', count: 600, total: 600, filtres: [], reponse: '600 sur 600' };
+  const c = controler([{ id: 'x', question: 'combien de formations en 2023', ...base }, { id: 'y', question: 'combien de BTS', ...base }]);
+  assert(!c.some(x => /combien de formations en 2023/.test(x.libelle)), '« combien de formations en 2023 » : tout le fichier de 2023, pas d\'alerte');
+  assert(c.some(x => /« combien de BTS » ne compte pas tout le fichier/.test(x.libelle) && !x.ok), 'faux positif évité, mais « combien de BTS » = tout le fichier reste une alerte');
+});
+
 console.log('\n──────────────────────────────────────────────────');
 console.log(`Résultat : ${passed} ✓  ${failed} ✗  (${passed + failed} tests)`);
 if (failed) process.exit(1);

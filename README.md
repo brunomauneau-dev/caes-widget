@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-31 fichiers, 1 488 tests. Depuis la racine du repo :
+31 fichiers, 1 496 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -107,7 +107,7 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 
 `js/test_sessions_comparees.js` vérifie les questions qui comparent deux sessions, par exemple « les places en BTS ont-elles augmenté depuis 2024 ? », « évolution du nombre de PASS », « part des boursiers en BTS par rapport à l'an dernier » ou « combien de BTS en 2024 ? ».
 
-- **Chargement :** la session demandée est téléchargée au moment de la question, puis gardée en mémoire.
+- **Chargement :** la session demandée est téléchargée au moment de la question, puis gardée en mémoire. Le jeu principal du ministère ne contient que la dernière session ; les précédentes (2018 à 2024) viennent des jeux archivés (`fr-esr-parcoursup_2024`…).
 - **Calcul :** le même calcul (comptage, somme, moyenne ou part) est fait sur chaque session. L'écart est donné en valeur et en %, ou en points pour une part.
 - **Colonnes :** elles sont rapprochées par leur nom technique dans l'API, car le ministère peut changer un libellé d'une année à l'autre.
 - **Avertissement :** le widget signale quand l'offre de formations a changé entre les deux sessions.
