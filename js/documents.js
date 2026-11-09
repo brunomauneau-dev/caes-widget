@@ -754,8 +754,18 @@ function rowContainsAllTerms(row, filter) {
   return (filter.terms || []).every(t => (Array.isArray(t) ? t : [t]).some(w => words.has(w)));
 }
 
+// v27.14 — conditions chiffrées (« plus de 100 places », « taux d'accès inférieur à 20 ») ; une case vide ne satisfait aucune condition
+const OPS_CHIFFRES = { gt: (a, b) => a > b, gte: (a, b) => a >= b, lt: (a, b) => a < b, lte: (a, b) => a <= b, eqn: (a, b) => a === b };
+function _chiffreCellule(v) {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  const t = String(v ?? '').replace(/[\s\u00a0\u202f]/g, '').replace(',', '.').replace(/%$/, '');
+  if (t === '') return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
 function rowMatchesFilter(row, filter) {
   if (filter && filter.op === 'contains_all') return rowContainsAllTerms(row, filter);
+  if (filter && OPS_CHIFFRES[filter.op]) { const x = _chiffreCellule(row[filter.col]); return x !== null && OPS_CHIFFRES[filter.op](x, Number(filter.value)); }
   const rowValue = normalizeText(row[filter.col]);
   const filterValue = normalizeText(filter.value);
   if (filter.op === 'neq') return rowValue !== '' && rowValue !== filterValue;
@@ -965,7 +975,7 @@ function triggerBlobDownload(blob, filename) {
 
 function formatActionFilters(filters) {
   if (!filters || !filters.length) return 'Filtres appliqués : aucun — export de toute la table active.';
-  return 'Filtres appliqués : ' + filters.map(f => `${f.col} ${f.op === 'neq' ? '≠' : '='} "${f.value}"`).join(' ; ');
+  return 'Filtres appliqués : ' + filters.map(f => `${f.col} ${({ neq: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤' })[f.op] || '='} "${f.value}"`).join(' ; ');
 }
 
 

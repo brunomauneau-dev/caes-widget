@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-28 fichiers, 1 319 tests. Depuis la racine du repo :
+29 fichiers, 1 395 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -102,6 +102,23 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 - colonnes d'**état** écrites Oui/Non, **1/0** ou **VRAI/FAUX** : filtrées, jamais additionnées ni moyennées ;
 - classeur dont le 1er onglet est une **notice** ;
 - **open data** de 14 000 formations : statut public/privé, académie, département, ville, région, sélectivité, sommes (places, candidats, admis), moyennes (capacité, taux d'accès), en moins de 3 secondes par question.
+
+### Classements
+
+`js/test_classement.js` vérifie les questions de classement, par exemple « quelles sont les formations les plus demandées », « les 10 BTS les plus sélectifs », « les formations avec le plus de places à Bordeaux » ou « les académies avec le plus de places ». Les formations, ou les regroupements, sont triées selon une colonne chiffrée, et le test vérifie l'ordre et les valeurs.
+
+Règles vérifiées :
+- « plus sélectif » signifie un taux d'accès plus bas ;
+- les formations sans valeur sont écartées et comptées ;
+- les ex æquo sont signalés ;
+- un taux n'est jamais additionné par académie : le widget s'arrête ;
+- une question comme « les critères les plus importants » reste à Albert.
+
+**Conditions chiffrées** : « les formations de plus de 100 places », « au moins 30 admis », « un taux d'accès inférieur à 20 % ». Une condition que le widget ne comprend pas (« dont la capacité dépasse 100 ») l'arrête au lieu d'être ignorée.
+
+« Les plus sélectifs » écarte les formations au taux d'accès de 0 : aucune proposition n'y a été faite par Parcoursup. Elles sont signalées à part.
+
+L'essai sur données réelles compare trois classements et deux conditions chiffrées aux calculs du serveur du ministère.
 
 ### Fiches métiers
 
@@ -134,6 +151,18 @@ Les tests ci-dessus utilisent des données simulées. Pour vérifier le moteur s
 3. Après une minute environ, cliquer sur l'exécution : le **résumé** affiche les contrôles de cohérence (✅ / ❌) puis les réponses du moteur à chaque question. Le rapport est aussi téléchargeable (*essai-resultats*).
 
 Le script (`scripts/essai_donnees_reelles.mjs`) charge les vrais fichiers `js/` du widget, comme le navigateur, sans Albert ni Grist : il montre ce que le moteur de calcul répond. Lecture seule. Le rapport compare aussi chaque réponse avec le **lancement précédent** (section « Évolution ») : « aucune réponse n'a changé », ou le tableau avant / maintenant avec l'écart, et un avertissement si les données du ministère ont changé. Une croix rouge signifie qu'au moins un contrôle de cohérence a échoué (ex. une question sur une formation qui compte tout le fichier).
+
+### Essai automatique chaque lundi
+
+L'essai se lance aussi tout seul **chaque lundi matin**. S'il y a quelque chose à signaler, un **ticket GitHub** (onglet *Issues*) est ouvert, ou complété s'il en existe déjà un ouvert. GitHub vous prévient alors par e-mail et dans l'application. Cela concerne :
+- un contrôle en échec ;
+- un écart avec un chiffre officiel ;
+- une réponse qui change ;
+- de nouvelles données publiées par le ministère, par exemple la session 2026.
+
+Si tout va bien, aucun ticket n'est créé. Pour essayer le circuit : *Run workflow* → cocher « Tester l'alerte ».
+
+À savoir : GitHub suspend les lancements programmés d'un dépôt resté **60 jours sans aucune modification**. Il prévient alors par e-mail ; un clic sur *Enable workflow* (onglet Actions) les relance.
 
 ### Chiffres officiels
 

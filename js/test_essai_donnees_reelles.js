@@ -45,9 +45,18 @@ function agregatOfficiel(p) {
   let rows = LIGNES_API;
   const where = p.get('where') || '';
   for (const [, k, v] of where.matchAll(/(?:^|and )(\w+)="([^"]*)"/g)) rows = rows.filter(r => r[k] === v);
+  for (const [, k, v] of where.matchAll(/(?:^|and )(\w+)=(\d+(?:\.\d+)?)(?:\b|$)/g)) rows = rows.filter(r => Number(r[k]) === Number(v));
+  for (const [, k, v] of where.matchAll(/(?:^|and )(\w+)>(\d+(?:\.\d+)?)/g)) rows = rows.filter(r => r[k] !== '' && Number(r[k]) > Number(v));
   for (const [, k, v] of where.matchAll(/\((\w+) is null or \w+!="([^"]*)"\)/g)) rows = rows.filter(r => r[k] !== v);
   const sel = p.get('select');
   const num = (r, c) => Number(r[c]);
+  for (const [, k] of where.matchAll(/(\w+) is not null/g)) rows = rows.filter(r => r[k] !== '' && r[k] !== undefined);
+  // classement : valeurs triées par le serveur
+  if (p.get('order_by')) {
+    const [c, sens] = p.get('order_by').split(' ');
+    const vals = rows.map(r => num(r, c)).filter(Number.isFinite).sort((a, b) => sens === 'asc' ? a - b : b - a).slice(0, Number(p.get('limit')));
+    return { results: vals.map(n => ({ n })) };
+  }
   let n;
   if (p.get('group_by')) {
     const c = p.get('group_by'); const m = new Map();
@@ -69,7 +78,10 @@ function fakeFetch(url) {
   if (u.includes('/exports/csv')) return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(CSV) });
   if (u.includes('/records?')) {
     // comme le vrai serveur : un champ inconnu → erreur 400
-    const champ = (new URL(u).searchParams.get('select').match(/\((\w+)\)/) || [])[1];
+    const sel = new URL(u).searchParams.get('select');
+    const champ = (sel.match(/\((\w+)\)/) || sel.match(/^(\w+) as n$/) || [])[1];
+    const champsWhere = [...(new URL(u).searchParams.get('where') || '').matchAll(/(\w+)(?:=|>|!=| is )/g)].map(m => m[1]).filter(k => !['and', 'or', 'null', 'not'].includes(k));
+    if (champsWhere.some(k => !FIELDS.some(([n]) => n === k))) return Promise.resolve({ ok: false, status: 400, json: () => Promise.resolve({}) });
     if (champ && champ !== '*' && !FIELDS.some(([n]) => n === champ)) return Promise.resolve({ ok: false, status: 400, json: () => Promise.resolve({}) });
     return json(agregatOfficiel(new URL(u).searchParams));
   }
@@ -203,11 +215,17 @@ await describe('Comparaison avec le lancement précédent', async () => {
 
 await describe('Workflow GitHub', async () => {
   const yml = fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'essai-donnees-reelles.yml'), 'utf8');
-  assert(/workflow_dispatch:/.test(yml) && !/\n\s*push:|\n\s*schedule:/.test(yml), 'lancement manuel uniquement');
+  // v27.14 — règle changée : lancement manuel ET automatique chaque lundi (alerte si quelque chose change) ; toujours jamais à chaque push
+  assert(/workflow_dispatch:/.test(yml) && /\n\s*schedule:\s*\n\s*- cron: '\d+ \d+ \* \* 1'/.test(yml) && !/\n\s*push:/.test(yml), 'lancement manuel + automatique le lundi, jamais à chaque push');
   assert(/node scripts\/essai_donnees_reelles\.mjs/.test(yml), 'lance le script');
   assert(/QUESTIONS_EN_PLUS: \$\{\{ inputs\.questions \}\}/.test(yml) && !/run:.*inputs\./.test(yml), 'questions en plus passées par variable, jamais insérées dans la commande');
   assert(/contents: read/.test(yml) && !/secrets\./.test(yml), 'lecture seule, aucun secret');
-  assert(/actions: read/.test(yml) && !/actions: write|contents: write/.test(yml), 'droit de lire les lancements précédents, aucun droit d\'écriture');
+  // v27.14 — seul droit d'écriture : ouvrir / commenter un ticket d'alerte, et seulement lors du lancement automatique
+  assert(/actions: read/.test(yml) && !/actions: write|contents: write|pull-requests: write/.test(yml), 'droit de lire les lancements précédents ; jamais d\'écriture sur le code ni les lancements');
+  assert(/issues: write/.test(yml) && /if: always\(\) && \(\(github\.event_name == 'schedule' && hashFiles\('essai_alerte\.json'\) != ''\) \|\| inputs\.tester_alerte\)/.test(yml), 'ticket d\'alerte : en lancement automatique s\'il y a quelque chose à signaler, ou sur demande (« tester l\'alerte »)');
+  assert(/tester_alerte:[\s\S]*?type: boolean[\s\S]*?default: false/.test(yml), 'option « tester l\'alerte » : désactivée par défaut');
+  assert(/gh issue list .*--state open .*Essai hebdomadaire/.test(yml) && /gh issue comment/.test(yml) && /gh issue create/.test(yml), 'un seul ticket ouvert à la fois : commentaire s\'il existe déjà');
+  assert(!/\$\{\{ *(steps|inputs)\.[^}]*\}\}[^\n]*gh issue/.test(yml) && /--body-file alerte\.md/.test(yml), 'texte du ticket passé par fichier, jamais inséré dans la commande');
   assert(/continue-on-error: true/.test(yml) && /GITHUB_RUN_ID/.test(yml), 'récupération du précédent : jamais bloquante, exclut le lancement en cours');
   assert(/essai_resultats\.json/.test(yml), 'les réponses (JSON) sont gardées pour le lancement suivant');
 });
@@ -283,7 +301,33 @@ await describe('v27.12 — Chiffres officiels : le widget retrouve à l\'unité 
   assert(faux[0].statut === 'ecart' && /PASS : officiel 100, widget absent/.test(faux[0].detail) && /sans valeur : officiel 4, widget 0/.test(faux[0].detail), 'répartition : valeur absente et cases vides → écarts détaillés');
   assert(V.ref_admis_bts.statut === 'indisponible' && /HTTP 400/.test(V.ref_admis_bts.detail), 'champ absent des données (admis) : non vérifié, pas un faux « identique »');
   assert(R.ref_admis_bts === undefined && res.verifs.length, 'questions de référence posées à part (pas mélangées aux questions de l\'essai)');
+  // v27.14 — classements : mêmes valeurs, même ordre que le tri du serveur
+  assert(V.ref_top_demandees.statut === 'ok' && /10 valeurs identiques, même ordre/.test(V.ref_top_demandees.detail), `classement « les plus demandées » identique au tri du serveur (obtenu : ${V.ref_top_demandees.statut} ${V.ref_top_demandees.detail} · officiel ${V.ref_top_demandees.officiel} · widget ${V.ref_top_demandees.widget})`);
+  assert(V.ref_top_places_bdx.statut === 'ok', `classement « le plus de places à Bordeaux » identique (obtenu : ${V.ref_top_places_bdx.officiel} / ${V.ref_top_places_bdx.widget})`);
+  assert(/order_by=voe_tot\+desc/.test(requeteOfficielle(REFERENCES.find(r => r.id === 'ref_top_demandees'), 2025)) && /voe_tot\+is\+not\+null/.test(requeteOfficielle(REFERENCES.find(r => r.id === 'ref_top_demandees'), 2025)), 'requête de classement : tri par le serveur, valeurs vides exclues (comme le widget)');
+  assert(V.ref_plus_100_places.statut === 'ok' && V.ref_plus_100_places.officiel === 200, `condition chiffrée « plus de 100 places » identique au serveur (obtenu : ${V.ref_plus_100_places.officiel} / ${V.ref_plus_100_places.widget})`);
+  assert(/where=capa_fin>100/.test(decodeURIComponent(requeteOfficielle(REFERENCES.find(r => r.id === 'ref_plus_100_places'), 2025)).replace(/\+/g, ' ')), 'requête : condition « > 100 » calculée par le serveur');
+  const vt = verifierOfficiels({ t: { valeur: [9, 8, 7] } }, [{ id: 't', kind: 'classement', valeurs: [9, 7, 8], reponse: 'x' }], [{ id: 't', q: 't', type: 'top' }]);
+  assert(vt[0].statut === 'ecart', 'classement dans un autre ordre → écart');
   assert(sectionOfficiels([]).length === 0 && sectionOfficiels(null).length === 0, 'aucune référence : pas de section');
+});
+
+await describe('v27.14 — Alerte de l\'essai hebdomadaire', async () => {
+  const { alerteEssai } = await import('../scripts/essai_donnees_reelles.mjs');
+  const base = { controles: [{ libelle: 'a', ok: true, detail: '' }], verifs: [{ statut: 'ok' }], instantane: { session: 2025, formations: 14252 },
+    comparaison: { precedent: { session: 2025, formations: 14252 }, donneesChangees: false, lignes: [{ question: 'q', avant: 1, apres: 1, change: false }] } };
+  assert(alerteEssai(base) === null, 'tout est normal : aucune alerte (pas de ticket chaque semaine pour rien)');
+  assert(alerteEssai({ ...base, comparaison: undefined }) === null, 'premier lancement (pas de précédent) : aucune alerte');
+  assert(alerteEssai({ ...base, verifs: [{ statut: 'indisponible' }] }) === null, 'API du ministère seulement indisponible : pas d\'alerte (non vérifié n\'est pas une anomalie)');
+  const echec = alerteEssai({ ...base, controles: [{ libelle: 'chiffre officiel : « combien de BTS »', ok: false, detail: 'officiel 5351 · widget 5350' }] });
+  assert(echec && /anomalie/.test(echec.titre) && /1 contrôle en échec/.test(echec.texte) && /combien de BTS/.test(echec.texte), 'contrôle en échec → alerte « anomalie détectée », avec le détail');
+  const ecart = alerteEssai({ ...base, verifs: [{ statut: 'ecart', question: 'combien de PASS', officiel: 287, widget: 286 }] });
+  assert(ecart && /officiel 287, widget 286/.test(ecart.texte), 'écart avec un chiffre officiel → alerte');
+  const change = alerteEssai({ ...base, comparaison: { ...base.comparaison, lignes: [{ question: 'combien de BTS', avant: 5351, apres: 5400, change: true, ecart: '+49 (+0,9 %)' }] } });
+  assert(change && /réponses modifiées/.test(change.titre) && /5351 → 5400 \(\+49/.test(change.texte), 'réponse qui change → alerte « réponses modifiées »');
+  const session = alerteEssai({ ...base, instantane: { session: 2026, formations: 14500 }, comparaison: { ...base.comparaison, donneesChangees: true } });
+  assert(session && /données du ministère modifiées/.test(session.titre) && /session 2025.*session 2026/.test(session.texte), 'nouvelle session publiée → alerte « données modifiées »');
+  assert(alerteEssai(null) === null, 'sans résultat : pas d\'erreur');
 });
 
 console.log('\n──────────────────────────────────────────────────');
