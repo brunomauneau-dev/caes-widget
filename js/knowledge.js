@@ -154,16 +154,18 @@ function etatSessionBase(aujourdHui = new Date()) {
   return { ...b, sessionCourante: cur, perimee: b.session < cur };
 }
 let derniersHitsKB = [];
-// Bandeau sous une réponse d'Albert qui cite des dates ou un calendrier venant de fiches d'une session passée
-const RE_DATES_CALENDRIER = new RegExp(`\\b\\d{1,2}(?:er)? (?:${Object.keys(MOIS_FR).join('|')})\\b|\\bcalendrier\\b|\\bdate limite\\b|\\bdates? (?:cles?|d ouverture|de cloture)\\b|\\bjusqu au \\d`);
+// Bandeau sous une réponse d'Albert qui cite des dates précises venant de fiches d'une session passée.
+// v27.20 — seulement les dates exactes (« 19 janvier ») : la procédure et l'enchaînement du calendrier
+// changent très peu d'une année à l'autre, un simple « calendrier » ne déclenche donc pas le bandeau.
+const RE_DATES_CALENDRIER = new RegExp(`\\b\\d{1,2}(?:er)? (?:${Object.keys(MOIS_FR).join('|')})\\b`);
 function bandeauCalendrierKB(reponse, aujourdHui = new Date()) {
   const etat = etatSessionBase(aujourdHui);
   if (!etat || !etat.perimee || !derniersHitsKB.length) return '';
   const texte = normalizeForSearch(String(reponse || '').replace(/<[^>]+>/g, ' '));
   if (!RE_DATES_CALENDRIER.test(texte)) return '';
   return `<p class="kb-calendrier" style="font-size:12px;line-height:1.5;background:#fff7ed;border-left:3px solid #c2410c;border-radius:4px;padding:6px 10px;margin:8px 0">`
-    + `📅 <strong>Dates de la session ${etat.session}</strong> : les règles et dates citées viennent du guide Parcoursup de la session ${etat.session}`
-    + `${etat.miseAJour ? ` (mis à jour le ${escapeHtml(etat.miseAJour)})` : ''}. Le calendrier de la session ${etat.sessionCourante} peut être différent : vérifiez-le sur parcoursup.fr avant de le communiquer.</p>`;
+    + `📅 <strong>Dates de la session ${etat.session}</strong> : les règles et la procédure restent valables, mais les dates exactes citées sont celles du guide Parcoursup de la session ${etat.session}`
+    + `${etat.miseAJour ? ` (mis à jour le ${escapeHtml(etat.miseAJour)})` : ''}. Celles de la session ${etat.sessionCourante} peuvent différer de quelques jours : vérifiez-les sur parcoursup.fr avant de les communiquer.</p>`;
 }
 
 async function loadParcoursupKBIndex() {
@@ -341,7 +343,7 @@ function buildParcoursupKnowledgeContext(question, localContext = '') {
   // v27.19 — session décrite par les fiches, et avertissement si elle est passée
   const etat = etatSessionBase();
   const sessionTxt = etat ? `SESSION DES FICHES : session Parcoursup ${etat.session}${etat.miseAJour ? ` (guide mis à jour le ${etat.miseAJour})` : ''}.`
-    + (etat.perimee ? ` ATTENTION : la session en préparation est ${etat.sessionCourante}. Les dates et le calendrier de ces fiches sont ceux de la session ${etat.session} : quand tu cites une date, écris « session ${etat.session} » et préviens que le calendrier ${etat.sessionCourante} peut être différent ; ne présente jamais ces dates comme celles de ${etat.sessionCourante}.` : '')
+    + (etat.perimee ? ` ATTENTION : la session en préparation est ${etat.sessionCourante}. Les règles et la procédure de ces fiches restent valables (elles changent très peu d'une année à l'autre) ; seules les dates exactes sont celles de la session ${etat.session} : quand tu cites une date précise, écris « (session ${etat.session}) » et indique que la date exacte de ${etat.sessionCourante} est à vérifier sur parcoursup.fr ; ne présente jamais une date de ${etat.session} comme celle de ${etat.sessionCourante}.` : '')
     + '\n' : '';
   return `RÉFÉRENCES MÉTIER PARCOURSUP SÉLECTIONNÉES AUTOMATIQUEMENT${caesWarning}\n${sessionTxt}` +
     hits.map((e, i) => {

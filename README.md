@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-37 fichiers, 1 734 tests. Depuis la racine du repo :
+37 fichiers, 1 735 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -105,7 +105,7 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 
 ### Réponses incorrectes et questions à revoir
 
-`js/test_session_kb.js` vérifie la **session décrite par la base de connaissances**. Les 561 fiches viennent du guide Parcoursup de la session 2026 (mis à jour jusqu'au 12 juin 2026). À partir de septembre 2026, la session en préparation est 2027 : Albert reçoit la session des fiches avec la consigne de ne jamais présenter ces dates comme celles de 2027, et un bandeau « 📅 Dates de la session 2026 » s'affiche sous une réponse qui cite des dates ou un calendrier. Le test vérifie aussi que `scripts/construire_index_kb.py` redonne exactement la base et son index.
+`js/test_session_kb.js` vérifie la **session décrite par la base de connaissances**. Les 561 fiches viennent du guide Parcoursup de la session 2026 (mis à jour jusqu'au 12 juin 2026). À partir de septembre 2026, la session en préparation est 2027 : Les règles et la procédure restent valables (elles changent très peu d'une année à l'autre) : seules les dates exactes sont celles de 2026. Albert reçoit la consigne de ne jamais présenter une date de 2026 comme celle de 2027, et un bandeau « 📅 Dates de la session 2026 » s'affiche sous une réponse qui cite une date précise. Le test vérifie aussi que `scripts/construire_index_kb.py` redonne exactement la base et son index.
 
 `js/test_code_mort.js` vérifie que le **code jamais appelé** retiré de `documents.js` (anciens tableaux croisés, ancienne classification des colonnes, ancienne détection des exports : 193 lignes) ne revient pas, que les modules se chargent toujours ensemble, et qu'aucune fonction de `documents.js` ne reste sans appel.
 
