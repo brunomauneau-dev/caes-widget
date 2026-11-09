@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-29 fichiers, 1 395 tests. Depuis la racine du repo :
+30 fichiers, 1 445 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -102,6 +102,15 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 - colonnes d'**état** écrites Oui/Non, **1/0** ou **VRAI/FAUX** : filtrées, jamais additionnées ni moyennées ;
 - classeur dont le 1er onglet est une **notice** ;
 - **open data** de 14 000 formations : statut public/privé, académie, département, ville, région, sélectivité, sommes (places, candidats, admis), moyennes (capacité, taux d'accès), en moins de 3 secondes par question.
+
+### Taux et parts
+
+`js/test_parts.js` vérifie les questions de taux et de parts. **C'est le widget qui fait la division, jamais Albert.** Deux cas :
+
+- **Open data** (une ligne = une formation). Exemples : « part des boursiers parmi les admis en BTS », « part des filles parmi les admis », « taux de remplissage », « taux de proposition ». Le calcul divise la somme du numérateur par la somme du dénominateur, et non la moyenne des pourcentages de chaque formation. Il suit les définitions du ministère : les boursiers sont comptés parmi les admis néo-bacheliers.
+- **Fichiers de candidats.** Exemples : « part des boursiers », « pourcentage de filles parmi les boursiers ». Le calcul divise le nombre de lignes qui remplissent la condition par le nombre de lignes du périmètre.
+
+Si une colonne manque, le widget s'arrête. L'essai sur données réelles fait calculer le numérateur et le dénominateur par le serveur du ministère.
 
 ### Classements
 

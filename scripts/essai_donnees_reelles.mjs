@@ -124,6 +124,9 @@ function resumer(ctx, question) {
   } else if (exec.kind === 'stats') {
     r.moyenne = exec.result.avg; r.colonne = exec.plan?.targetCol;
     r.reponse = `moyenne ${Number(r.moyenne).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} (colonne « ${r.colonne} »)`;
+  } else if (exec.kind === 'part') {
+    r.num = exec.result.num; r.den = exec.result.den; r.pct = exec.result.pct;
+    r.reponse = `${(Math.round(r.pct * 10) / 10).toLocaleString('fr-FR')} % (${r.num.toLocaleString('fr-FR')} sur ${r.den.toLocaleString('fr-FR')})`;
   } else if (exec.kind === 'classement') {
     r.colonne = exec.plan.classement.col; r.valeurs = exec.result.lignes.map(l => l.valeur); r.total = exec.result.total;
     r.lignes = exec.result.lignes.map(l => ({ value: `${l.rang}. ${l.libelles.join(' — ')}`, count: l.valeur }));
@@ -240,7 +243,7 @@ export function controler(resultats) {
     ctl(`reformulations « ${g} » : même chiffre pour les ${rs.length} tournures`, ok, rs.map(r => `« ${r.question} » → ${valeurReponse(r)}`).join(' · '));
   });
   // Chaque résultat chiffré porte son périmètre
-  const chiffres = resultats.flatMap(r => r.conversation || [r]).filter(r => ['count', 'sum', 'group_by', 'top', 'stats', 'classement'].includes(r.kind));
+  const chiffres = resultats.flatMap(r => r.conversation || [r]).filter(r => ['count', 'sum', 'group_by', 'top', 'stats', 'classement', 'part'].includes(r.kind));
   if (chiffres.length) ctl('chaque résultat chiffré dit sur quoi il porte (périmètre)', chiffres.every(r => r.perimetre && /retenues? sur/.test(r.perimetre)), `${chiffres.filter(r => r.perimetre).length} / ${chiffres.length}`);
 
   // Contrôle général : une question qui cite une formation ne doit jamais compter tout le fichier
@@ -262,6 +265,7 @@ function valeurReponse(r) {
   if (r.kind === 'stats') return Math.round(Number(r.moyenne) * 100) / 100;
   if (r.kind === 'group_by' || r.kind === 'top') return `${r.distinct ?? (r.lignes || []).length} valeurs / ${r.total}`;
   if (r.kind === 'classement') return (r.valeurs || []).join(' · ');
+  if (r.kind === 'part') return `${r.num} / ${r.den}`;
   if (r.kind === 'unresolved') return 'non reconnu';
   return r.kind;
 }
@@ -383,6 +387,11 @@ export const REFERENCES = [
   // conditions chiffrées
   { id: 'ref_plus_100_places', q: 'combien de formations de plus de 100 places', type: 'count', superieur: { capa_fin: 100 } },
   { id: 'ref_bts_taux_0', q: "combien de BTS avec un taux d'accès de 0", type: 'count', egal: { fili: 'BTS', taux_acces_ens: 0 } },
+  // v27.15 — parts : numérateur et dénominateur calculés séparément par le serveur
+  { id: 'ref_part_boursiers_bts', q: 'part des boursiers parmi les admis en BTS', type: 'part', num: 'acc_brs', den: 'acc_neobac', egal: { fili: 'BTS' } },
+  { id: 'ref_part_filles_admises', q: 'part des filles parmi les admis', type: 'part', num: 'acc_tot_f', den: 'acc_tot' },
+  { id: 'ref_remplissage_bts', q: 'taux de remplissage des BTS', type: 'part', num: 'acc_tot', den: 'capa_fin', egal: { fili: 'BTS' } },
+  { id: 'ref_part_selectives', q: 'quelle part des formations sont sélectives', type: 'part', condition: { select_form: 'formation sélective' } },
   { id: 'ref_top_places_bdx', q: 'les 5 formations avec le plus de places à Bordeaux', type: 'top', champ: 'capa_fin', ordre: 'desc', n: 5, egal: { ville_etab: 'Bordeaux' } },
 ];
 const _odsql = v => `"${String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
@@ -400,7 +409,17 @@ export function requeteOfficielle(ref, session) {
 }
 export async function chiffresOfficiels(fetchImpl, session, refs = REFERENCES) {
   const out = {};
+  const unChiffre = async r => { const x = await fetchImpl(requeteOfficielle(r, session), { cache: 'no-store' }); if (!x.ok) throw new Error(`HTTP ${x.status}`); const res = (await x.json()).results; if (!Array.isArray(res)) throw new Error('réponse sans résultats'); return Number(res[0]?.n ?? 0); };
   for (const ref of refs) {
+    if (ref.type === 'part') {
+      // part = deux chiffres du serveur : numérateur (somme ou comptage avec condition) et dénominateur
+      try {
+        const num = ref.num ? await unChiffre({ type: 'sum', champ: ref.num, egal: ref.egal }) : await unChiffre({ type: 'count', egal: { ...(ref.egal || {}), ...ref.condition } });
+        const den = ref.den ? await unChiffre({ type: 'sum', champ: ref.den, egal: ref.egal }) : await unChiffre({ type: 'count', egal: ref.egal });
+        out[ref.id] = { valeur: { num, den } };
+      } catch (e) { out[ref.id] = { erreur: e.message }; }
+      continue;
+    }
     try {
       const r = await fetchImpl(requeteOfficielle(ref, session), { cache: 'no-store' });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -432,6 +451,12 @@ export function verifierOfficiels(officiels, resultats, refs = REFERENCES) {
       if ((w.sansValeur || 0) !== vides) ecarts.push(`sans valeur : officiel ${vides}, widget ${w.sansValeur || 0}`);
       const nb = Object.keys(off.valeur).filter(k => k !== '(vide)').length;
       return { ...base, statut: ecarts.length ? 'ecart' : 'ok', officiel: `${nb} valeurs`, widget: w.reponse, detail: ecarts.length ? ecarts.slice(0, 5).join(' · ') : `${nb} valeurs identiques à l'unité` };
+    }
+    if (ref.type === 'part') {
+      const { num, den } = off.valeur;
+      const ok = w.kind === 'part' && w.num === num && w.den === den;
+      const pctOff = den ? Math.round(num / den * 1000) / 10 : null;
+      return { ...base, statut: ok ? 'ok' : 'ecart', officiel: `${pctOff} % (${num} / ${den})`, widget: w.kind === 'part' ? `${Math.round(w.pct * 10) / 10} % (${w.num} / ${w.den})` : w.reponse, detail: ok ? 'numérateur et dénominateur identiques' : 'part différente' };
     }
     if (ref.type === 'top') {
       const obtenu = w.kind === 'classement' ? (w.valeurs || []) : null;

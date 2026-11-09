@@ -426,6 +426,7 @@ function inheritConversationContext(plan, question) {
     } else if (filterFollowUp) {
       plan.tool = prev.tool || plan.tool;
       if (prev.tool === 'classement' && prev.classement && !plan.classement) plan.classement = prev.classement; // « et à Bordeaux ? »
+      if (prev.tool === 'part' && prev.part && !plan.part) plan.part = prev.part;
       if (prev.targetCol)  plan.targetCol  = prev.targetCol;
       if (prev.targetCol2) plan.targetCol2 = prev.targetCol2;
       if (prev.limit)      plan.limit      = prev.limit;
@@ -1141,6 +1142,151 @@ function applyConditionsChiffrees(plan) {
   return plan;
 }
 
+/* ═══════════════ v27.15 — Taux et parts calculés par le widget ═══════════════
+   « part des boursiers parmi les admis en BTS », « pourcentage de filles parmi les boursiers », « taux de remplissage ».
+   Deux modes :
+   - effectifs (open data, une ligne = une formation) : somme du numérateur / somme du dénominateur, avec les
+     définitions du ministère (boursiers parmi les admis NÉO-BACHELIERS, comme « % d'admis néo bacheliers boursiers ») ;
+     jamais la moyenne des pourcentages de chaque formation ;
+   - lignes (fichier de candidats, ou part de formations) : lignes qui remplissent la condition / lignes du périmètre.
+   Le widget fait la division ; Albert ne calcule rien. */
+const PART_CUE = /\b(part|parts|pourcentage|proportion|ratio|pour ?cent|taux de (?!acces)[a-z]+|taux d (?!acces)[a-z]+)\b/;
+const PARTS_EFFECTIFS = [
+  { re: /\bboursi/, num: /admis boursier/, den: /^effectif des admis neo bacheliers$/, quoi: 'admis boursiers', sur: 'admis néo-bacheliers', note: "même définition que la colonne officielle « % d'admis néo bacheliers boursiers »" },
+  { re: /\b(filles?|femmes?|candidates)\b/, si: /\badmis(es)?\b/, num: /candidates admises|admises$/, den: /ayant accepte.*admis/, quoi: 'admises', sur: 'admis' },
+  { re: /\b(filles?|femmes?|candidates)\b/, num: /effectif des candidates pour une formation/, den: /effectif total des candidats pour une formation/, quoi: 'candidates', sur: 'candidats' },
+  { re: /\bbac(heliers?)? generaux|\bbac general|\bgeneraux\b/, num: /admis neo bacheliers generaux/, den: /^effectif des admis neo bacheliers$/, quoi: 'admis néo-bacheliers généraux', sur: 'admis néo-bacheliers' },
+  { re: /\bneo ?bacheliers?\b/, num: /^effectif des admis neo bacheliers$/, den: /ayant accepte.*admis/, quoi: 'admis néo-bacheliers', sur: 'admis' },
+  { re: /\bmeme academie\b/, num: /admis issus de la meme academie/, den: /ayant accepte.*admis/, quoi: 'admis issus de la même académie', sur: 'admis' },
+  { re: /\btaux de remplissage\b|\bremplissage\b/, num: /ayant accepte.*admis/, den: /capacit/, quoi: 'admis', sur: 'places' },
+  { re: /\btaux de proposition\b|\b(recu|reçu) une proposition\b|\bpropositions?\b/, num: /recu une proposition/, den: /effectif total des candidats pour une formation/, quoi: 'candidats ayant reçu une proposition', sur: 'candidats' },
+  { re: /\btaux d ?admission\b|\badmission\b|\b(candidats )?admis\b/, num: /ayant accepte.*admis/, den: /effectif total des candidats pour une formation/, quoi: 'admis', sur: 'candidats' },
+];
+function _phrasePart(q) {
+  // « part des boursiers parmi les admis en BTS » → « boursiers » ; « quelle part des formations sont sélectives » → « formations sont selectives »
+  const m = q.match(/\b(?:part|parts|pourcentage|proportion|ratio|pour ?cent|taux)\s+(?:de |d |des |du |de la |de l )?(.+?)(?=\s+(?:parmi|chez|au sein|sur l ensemble|par rapport)\b|$)/);
+  return m ? m[1].trim() : '';
+}
+function detecterPart(table, question) {
+  if (!table || !Array.isArray(table.objects) || !table.objects.length) return null;
+  const brut = String(question || '');
+  const q = normalizeText(brut.replace(/%/g, ' pourcentage '));
+  if (!PART_CUE.test(q) || /\btaux d ?acces\b/.test(q)) return null;
+  if (/\b(repartition|ventilation|moyen|moyenne|median|mediane)\b|\bpar (?!rapport)\w/.test(q)) return null; // répartition en %, moyenne d'une colonne de %
+  const headers = (table.headers || Object.keys(table.objects[0] || {})).filter(Boolean);
+  const phrase = _phrasePart(q);
+  if (!phrase) return null;
+  // effectifs : seulement si une ligne = une formation et que les deux colonnes existent
+  if (table.rowUnit === 'formation' || headers.some(h => /ayant accepte.*admis/.test(_hx(h)))) {
+    // le sujet de la part est le début de la phrase (« boursiers », « filles », « candidats admis ») :
+    // « la part de l'oral dans l'admission » ne devient pas un taux d'admission
+    const sujet = phrase.split(/\s+(?:en|a|au|aux|dans|sur|chez|pour|de l academie|du departement)\s+/)[0];
+    for (const sp of PARTS_EFFECTIFS) {
+      const cible = /\btaux d(e)? ?(remplissage|proposition|admission)\b/.test(q) ? q : sujet;
+      if (!sp.re.test(cible)) continue;
+      if (sp.si && !sp.si.test(q)) continue;
+      // nom tel quel (_hx y ajoute la forme développée, ce qui casse les ^…$)
+      const num = headers.find(h => sp.num.test(normalizeText(h)) && _estNumerique(table, h));
+      const den = headers.find(h => sp.den.test(normalizeText(h)) && _estNumerique(table, h));
+      if (num && den) return { mode: 'effectifs', num, den, quoi: sp.quoi, sur: sp.sur, note: sp.note || '', phrase, mot: sp.re };
+      if (table.rowUnit === 'formation') return { mode: 'effectifs', manque: `${sp.quoi} / ${sp.sur}`, phrase, mot: sp.re };
+    }
+  }
+  // lignes : seulement si la phrase donne un vrai critère dans les données (sinon : question pour Albert)
+  const courte = phrase.split(/\s+(?:en|a|au|aux|dans|sur|chez|pour|de l academie|du departement)\s+/)[0];
+  // … sauf si la phrase cite un critère connu (apprentis, boursiers, filles…) absent des données : le garde-fou arrêtera le calcul
+  if (!_filtresDePhrase(table, courte).length && !_filtresDePhrase(table, phrase).length && !CONCEPTS_A_FILTRER.some(c => c.re.test(phrase))) return null;
+  return { mode: 'lignes', phrase, mot: new RegExp(`\\b(${phrase.split(' ').filter(w => w.length >= 3).map(w => w.replace(/[^a-z0-9]/g, '')).filter(Boolean).join('|') || 'zzz'})\\b`) };
+}
+// Filtres que produit la seule phrase de la part (« boursiers », « filles boursières », « formations sélectives »)
+function _filtresDePhrase(table, phrase) {
+  const p = { tool: 'count_rows', table, filters: [], question: `combien de ${phrase}` };
+  try { if (typeof buildPlannerPlan === 'function') { const pp = buildPlannerPlan(p.question, p.question, table, 'count_rows'); if (pp) p.filters = pp.filters || []; } } catch (e) { /* planner absent */ }
+  p.filters = mergeFiltersUnique(p.filters, strictFiltersFromQuestion(table, p.question));
+  applyFormationTerms(p); applyConditionsChiffrees(p);
+  // une colonne d'effectifs n'est pas une condition « = valeur » (« Dont effectif des candidates admises = 1 »)
+  return (p.filters || []).filter(f => f && (f.op === 'contains_all' || f.source === 'condition_chiffree' || _isEtatCol(table, f.col) || !_estNumerique(table, f.col)));
+}
+function applyPart(plan) {
+  if (!plan || !plan.table || ['compare', 'chart_current', 'export_current_excel', 'export_current_csv', 'export_excel', 'export_csv', 'classement'].includes(plan.tool)) return plan;
+  const d = detecterPart(plan.table, plan.question);
+  if (!d) return plan;
+  plan.tool = 'part';
+  plan.part = d;
+  plan.targetCol = null;
+  if (d.mode === 'lignes') {
+    // « proportion de formations privées en Gironde » : la condition est « formations privées », « en Gironde » est le périmètre ;
+    // si la partie avant « en / à / dans… » ne donne aucun critère (« part des formations en apprentissage »), on garde toute la phrase
+    const courte = d.phrase.split(/\s+(?:en|a|au|aux|dans|sur|chez|pour|de l academie|du departement)\s+/)[0];
+    let fx = courte !== d.phrase ? _filtresDePhrase(plan.table, courte) : [];
+    if (fx.length) d.phrase = courte; else fx = _filtresDePhrase(plan.table, d.phrase);
+    const cle = f => f.op === 'contains_all' ? `T::${(f.terms || []).map(t => [].concat(t)[0]).join('+')}` : `${f.col}`;
+    const clesX = new Set(fx.map(cle));
+    const tous = mergeFiltersUnique(plan.filters || [], fx.filter(f => !(plan.filters || []).some(g => cle(g) === cle(f))));
+    d.condition = tous.filter(f => clesX.has(cle(f)));
+    plan.filters = tous.filter(f => !clesX.has(cle(f)));
+  } else {
+    // les mots de la part (« boursiers », « admis ») ne sont pas des filtres du périmètre
+    plan.filters = (plan.filters || []).filter(f => !(f && f.op === 'contains_all' && (f.terms || []).every(t => [].concat(t).some(w => d.mot.test(normalizeText(w))))));
+  }
+  return plan;
+}
+// Le contrôle final du moteur peut rajouter au périmètre les critères de la part (« sélectives », « boursiers ») :
+// on les retire juste avant le calcul, sinon la part vaut 100 %. En mode effectifs, aucun filtre sur une colonne chiffrée
+// (« Dont effectif des candidates admises = 1 », lu dans « parmi les admises »).
+function nettoyerPerimetrePart(plan) {
+  const d = plan.part;
+  if (!d) return plan;
+  if (d.mode === 'lignes' && d.condition) {
+    const cle = f => f.op === 'contains_all' ? `T::${(f.terms || []).map(t => [].concat(t)[0]).join('+')}` : `${f.col}`;
+    const cles = new Set(d.condition.map(cle));
+    plan.filters = (plan.filters || []).filter(f => f && !cles.has(cle(f)));
+  } else if (d.mode === 'effectifs') {
+    plan.filters = (plan.filters || []).filter(f => f && (f.op === 'contains_all' || f.source === 'condition_chiffree' || f.source === 'commune_a' || !_estNumerique(plan.table, f.col)));
+  }
+  return plan;
+}
+function executerPart(plan) {
+  const d = plan.part;
+  nettoyerPerimetrePart(plan);
+  if (d.manque) return unresolvedConceptExecution(plan, [], `les colonnes nécessaires pour calculer la part de ${d.manque} ne sont pas dans les données`);
+  const base = applyLocalActionFilters(plan.table.objects || [], plan.filters || []);
+  let result;
+  if (d.mode === 'effectifs') {
+    let num = 0, den = 0, ignorees = 0;
+    base.forEach(r => { const a = _nombreCellule(r?.[d.num]), b = _nombreCellule(r?.[d.den]); if (a === null || b === null) { ignorees++; return; } num += a; den += b; });
+    result = { mode: 'effectifs', num, den, pct: den ? num / den * 100 : null, total: base.length, ignorees };
+  } else {
+    if (!d.condition || !d.condition.length) return unresolvedConceptExecution(plan, [d.phrase], `je n'ai pas reconnu de quoi calculer la part (« ${d.phrase} »)`);
+    const num = applyLocalActionFilters(base, d.condition).length;
+    result = { mode: 'lignes', num, den: base.length, pct: base.length ? num / base.length * 100 : null, total: base.length, ignorees: 0 };
+  }
+  if (!result.den) return unresolvedConceptExecution(plan, [], 'aucune ligne (ou un total nul) dans le périmètre : la part ne peut pas être calculée');
+  const exec = { kind: 'part', plan, result, text: `PART = ${result.num} / ${result.den} = ${result.pct}` };
+  exec.html = renderPartHtml(plan, result);
+  return exec;
+}
+const _pctFr = v => (Math.round(v * 10) / 10).toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+function _libellePart(plan) {
+  const d = plan.part;
+  if (d.mode === 'effectifs') return { quoi: d.quoi, sur: d.sur };
+  const unite = plan.table?.rowUnit === 'formation' ? 'formations' : 'lignes';
+  return { quoi: `${unite} « ${d.condition.map(f => _filtreEnClair(f).replace(/^« [^»]+» = /, '')).join(' et ')} »`, sur: unite };
+}
+function renderPartHtml(plan, result) {
+  const d = plan.part;
+  const { quoi, sur } = _libellePart(plan);
+  const titre = `Part — ${_pctFr(result.pct)} % (${quoi})`;
+  const methode = d.mode === 'effectifs'
+    ? `<p style="font-size:12px;color:var(--gris3)">Calcul : somme de « ${escapeHtml(d.num)} » ÷ somme de « ${escapeHtml(d.den)} », sur les ${_nf(result.total - result.ignorees)} formations du périmètre — et non la moyenne des pourcentages de chaque formation${d.note ? ` ; ${escapeHtml(d.note)}` : ''}.</p>`
+    : `<p style="font-size:12px;color:var(--gris3)">Calcul : lignes qui remplissent la condition (${escapeHtml(d.condition.map(_filtreEnClair).join(' ; '))}) ÷ lignes du périmètre.</p>`;
+  const de = /^[aeiouyéèêàâîôûh]/i.test(quoi) ? 'd’' : 'de ';
+  const phrase = `<p>Il y a <strong>${_pctFr(result.pct)} %</strong> ${de}${escapeHtml(quoi)} : <strong>${_nf(result.num)}</strong> sur <strong>${_nf(result.den)}</strong> ${escapeHtml(sur)}.</p>`;
+  const perim = perimetreResultat('part', plan, result).html;
+  const debug = `<details class="msg-sources"><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : part (${d.mode}) · ${escapeHtml(String(result.num))} / ${escapeHtml(String(result.den))}</div></details>`;
+  return `${deTitleHtml(titre, plan.blockId, plan.originalTitle || titre)}${perim}${phrase}${methode}${debug}`;
+}
+
 // Colonnes qui décrivent une formation dans le classement : intitulé, établissement, commune
 function _colonnesDescription(table) {
   const headers = (table.headers || []).filter(Boolean);
@@ -1228,9 +1374,11 @@ function conceptsNonFiltres(plan) {
   let q = normalizeText(plan.question || '');
   // v27.14 — le critère d'un classement (« les plus sélectives », « le plus de boursiers ») n'est pas un filtre manquant
   if (plan.tool === 'classement' && plan.classement) q = q.replace(new RegExp(plan.classement.mot.source, 'g'), ' ');
-  const filtres = (plan.filters || []).filter(Boolean);
+  // v27.15 — part : en mode effectifs, le sujet (« boursiers », « filles ») est une colonne du calcul, pas un filtre manquant
+  if (plan.tool === 'part' && plan.part && plan.part.mode === 'effectifs' && !plan.part.manque) q = q.replace(new RegExp(plan.part.mot.source, 'g'), ' ').replace(/\badmis(es)?\b|\bcandidats?\b|\bcandidates\b|\bneo ?bacheliers?\b/g, ' ');
+  const filtres = [...(plan.filters || []), ...((plan.tool === 'part' && plan.part?.condition) || [])].filter(Boolean);
   // la colonne analysée ou additionnée compte aussi (« admis boursiers » → colonne « admis boursiers »)
-  const cibles = [plan.targetCol, plan.targetCol2, plan.sumCol, plan.classement?.col].filter(Boolean).map(c => ({ col: c, value: '' }));
+  const cibles = [plan.targetCol, plan.targetCol2, plan.sumCol, plan.classement?.col, plan.part?.num, plan.part?.den].filter(Boolean).map(c => ({ col: c, value: '' }));
   const texte = f => `${_hx(f.col)} ${normalizeText(f.value)} ${normalizeText(f.label || '')}`;
   const manque = [];
   CONCEPTS_A_FILTRER.forEach(c => {
@@ -1316,6 +1464,8 @@ function isDataEngineQuestion(question) {
   if (/^(fais |donne|produis |r[eé]dige )?(une? )?(synth[eè]se|r[eé]sum[eé]|bilan|vue d'ensemble|portrait|analyse globale)/.test(q)) return false;
   // v27.14 — classement selon un chiffre (« les formations les plus demandées »)
   try { if (CLASSEMENT_CUE.test(q) && detecterClassement((getActiveQueryTables() || [])[0], question)) return true; } catch (e) { /* source absente */ }
+  // v27.15 — taux et parts (« part des boursiers parmi les admis »)
+  try { if (detecterPart((getActiveQueryTables() || [])[0], question)) return true; } catch (e) { /* source absente */ }
   return /compare|comparaison|comparer|versus| vs |combien|nombre|\btotale?\b|effectif|compte|compter|repartition|r[eé]partition|ventilation|par |groupe|group[eé]|top|classement|principa|plus frequen|plus fréquent|croise|crois[eé]|tableau crois[eé]|pivot|moyen|moyenne|median|m[eé]diane|minimum|maximum|min|max|export|excel|csv|liste|filtre|graphique|graphe|diagramme|histogramme|camembert|barres?|boursier|basque|hors|sauf|seulement|uniquement|visualis|repr[eé]sent|montre-?moi|dessine|trace|issus?\s+d[ue]|originaires?|venant\s+d[ue]|provenant|scolaris|scolarit/.test(q) || isListValuesRequest(question) || isFollowUpQuestion(question);
 }
 
@@ -1438,6 +1588,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
   let tool = inferMeasureIntent(question);
   // v27.14 — « quelle formation a le plus de candidats » : classement, même sans mot d'analyse reconnu
   if ((!tool || tool === 'stats' || tool === 'count_rows') && detecterClassement(table, question)) tool = 'top';
+  if ((!tool || tool === 'group_by') && detecterPart(table, question)) tool = 'count_rows';
   if (!tool) return null;
 
   if (tool === 'compare') {
@@ -1466,7 +1617,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
     // à partir de filtres structurés validés, jamais depuis les résultats calculés
     // (moyenne, médiane, valeur de tableau, etc.).
     const plannerPlan = buildPlannerPlan(question, question, table, tool);
-    if (plannerPlan) return inheritConversationContext(applyConditionsChiffrees(applyClassement(applyMeasureSum(applyListMode(applyFormationTerms(plannerPlan))))), question);
+    if (plannerPlan) return inheritConversationContext(applyPart(applyConditionsChiffrees(applyClassement(applyMeasureSum(applyListMode(applyFormationTerms(plannerPlan)))))), question);
   }
 
   // Fallback V16 si planner indisponible.
@@ -1476,7 +1627,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
   // V25.1 — idem : le fallback ne doit pas analyser le contexte textuel
   // précédent comme s'il s'agissait de la question utilisateur.
   const filters = detectFilters(table, normalizeText(question || ''), targetCol);
-  return inheritConversationContext(applyConditionsChiffrees(applyClassement(applyMeasureSum(applyListMode(applyFormationTerms({
+  return inheritConversationContext(applyPart(applyConditionsChiffrees(applyClassement(applyMeasureSum(applyListMode(applyFormationTerms({
     tool,
     table,
     filters,
@@ -1484,13 +1635,17 @@ function detectDataEnginePlan(question, filterContextText = question) {
     mentionedCols,
     question,
     createdAt: new Date().toISOString()
-  }))))), question);
+  })))))), question);
 }
 
 
 function currentExecutionToRows(exec) {
   if (!exec) return [];
   const p = exec.plan || {};
+  if (exec.kind === 'part') {
+    const lp = _libellePart(p);
+    return [{ 'Part (%)': Math.round(exec.result.pct * 10) / 10, [`Effectif (${lp.quoi})`]: exec.result.num, [`Total (${lp.sur})`]: exec.result.den }];
+  }
   if (exec.kind === 'classement') {
     const cols = p.classement?.entite ? [p.classement.entite.col] : (p.colonnesDescription || []);
     return (exec.result?.lignes || []).map(l => Object.fromEntries([['Rang', l.rang], ...cols.map((c, i) => [c, l.libelles[i] ?? '']), [p.classement?.col || 'Valeur', l.valeur]]));
@@ -1592,6 +1747,14 @@ function renderCurrentChartExecution(plan) {
     const clonedPlan = { ...(prev.plan || {}), renderChart: true, chartType: isPieChartRequest(plan.question || '') ? 'pie' : (prev.plan?.chartType || 'bar') };
     const html = renderDataEngineResultHtml(prev.plan?.tool || prev.kind, clonedPlan, prev.result);
     return { kind: prev.kind, plan: clonedPlan, result: prev.result, text: prev.text, html };
+  }
+  // v27.15 — part : camembert « dans la part » / « reste »
+  if (prev.kind === 'part') {
+    const lp = _libellePart(prev.plan);
+    const rows = [{ value: lp.quoi, count: prev.result.num, pct: prev.result.pct }, { value: `autres ${lp.sur}`, count: prev.result.den - prev.result.num, pct: 100 - prev.result.pct }];
+    const titre = `Graphique — part de ${lp.quoi}`;
+    const html = `${deTitleHtml(titre, prev.plan?.blockId, prev.plan?.originalTitle || titre)}${perimetreResultat('part', prev.plan, prev.result).html}${renderMiniPieChart(rows, prev.result.den)}`;
+    return { kind: 'part', plan: prev.plan, result: prev.result, text: prev.text, html };
   }
   // v27.14 — classement : barres des valeurs classées (pas une répartition de repli)
   if (prev.kind === 'classement') {
@@ -2197,6 +2360,11 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     rememberDataEngineExecution(exec);
     return exec;
   }
+  if (plan.tool === 'part' && plan.part) {
+    const exec = executerPart(plan);
+    if (exec && exec.kind === 'part') rememberDataEngineExecution(exec);
+    return exec;
+  }
   if (plan.tool === 'classement' && plan.classement) {
     const exec = executerClassement(plan);
     if (exec && exec.kind === 'classement') rememberDataEngineExecution(exec);
@@ -2332,6 +2500,11 @@ function inferNumericStatsColumn(table, question) {
     if (/voeu|voeux/.test(q) && /voeu|voeux/.test(hn)) score += 120;
     if (/confirm/.test(q) && /confirm/.test(hn)) score += 80;
     if (/class/.test(q) && /class/.test(hn)) score += 50;
+    // v27.15 — « pourcentage moyen de boursiers » : la colonne des pourcentages, pas celle des effectifs
+    const veutPct = /\b(pourcentage|part|proportion|taux)\b/.test(q) || /%/.test(String(question || ''));
+    const estPct = /^%|^(pourcentage|part|taux|proportion)\b/.test(normalizeText(h).trim()) || /^%/.test(String(h).trim());
+    if (veutPct && estPct) score += 90;
+    if (veutPct && !estPct && /effectif|nombre|\bnb\b/.test(hn)) score -= 40;
     const motsH = hn.split(' ').filter(w => w.length >= 4);
     motsQ.forEach(w => { if (motsH.some(m => proche(m, w))) score += 60; });
     return { col: h, score, stats };
@@ -2350,6 +2523,7 @@ function dataEngineResultToContext(exec) {
   if (_perim) out += `${_perim}\n`;
   if (exec.kind === 'count') out += `Résultat : ${exec.result.count} ligne(s) sur ${exec.result.total}.\n`;
   if (exec.kind === 'sum') out += `Résultat : ${exec.result.sum} ${exec.result.unite} (somme de « ${exec.result.col} ») sur ${exec.result.count} formation(s).\n`;
+  if (exec.kind === 'part') { const lp = _libellePart(exec.plan); out += `Part calculée par le widget : ${_pctFr(exec.result.pct)} % (${exec.result.num} ${lp.quoi} sur ${exec.result.den} ${lp.sur}).\n`; }
   if (exec.kind === 'classement') out += `Classement selon « ${exec.plan.classement.col} » (${exec.plan.classement.ordre === 'asc' ? 'croissant' : 'décroissant'})${exec.plan.classement.entite ? `, somme par ${exec.plan.classement.entite.col}` : ''} :\n${exec.result.lignes.map(l => `${l.rang}. ${l.libelles.join(' — ')} : ${l.valeur}`).join('\n')}\n`;
   if (exec.kind === 'unresolved') out += `Résultat : aucun calcul. ${exec.text}\nIntitulés proches : ${(exec.result?.suggestions || []).map(s => s.value).join(' ; ')}\n`;
   if (exec.kind === 'group_by' || exec.kind === 'top') {
@@ -2437,7 +2611,7 @@ function perimetreResultat(kind, plan, result) {
   const totalTable = (table.objects || []).length;
   const mot = n => `${table.rowUnit === 'formation' ? 'formation' : 'ligne'}${n > 1 ? 's' : ''}`;
   const retenues = ['count', 'count_rows', 'sum'].includes(kind) ? result.count
-    : kind === 'classement' ? result.total
+    : kind === 'classement' || kind === 'part' ? result.total
     : kind === 'compare' ? result.baseTotal : result.total;
   const parties = [];
   parties.push(retenues !== undefined && totalTable
@@ -2468,6 +2642,7 @@ function perimetreResultat(kind, plan, result) {
     const ign = result.count - result.renseignees;
     notes.push(`${_nf(ign)} ${mot(ign)} sans valeur dans « ${result.col} », non comptée${ign > 1 ? 's' : ''}`);
   }
+  if (kind === 'part' && result.ignorees > 0) notes.push(`${_nf(result.ignorees)} ${mot(result.ignorees)} sans valeur dans l'une des deux colonnes, écartée${result.ignorees > 1 ? 's' : ''} du calcul`);
   if (kind === 'classement' && result.tauxNuls > 0) notes.push(`${_nf(result.tauxNuls)} ${mot(result.tauxNuls)} au taux d'accès de 0 (aucune proposition d'admission par Parcoursup) écartée${result.tauxNuls > 1 ? 's' : ''} : ce ne sont pas des formations sélectives`);
   if (kind === 'classement' && result.sansValeur > 0) notes.push(`${_nf(result.sansValeur)} ${mot(result.sansValeur)} sans valeur dans « ${plan.classement.col} », écartée${result.sansValeur > 1 ? 's' : ''} du classement`);
   if (kind === 'pivot') {
@@ -2564,7 +2739,7 @@ function shouldAnswerLocallyWithoutAlbert(exec) {
   // Les requêtes de comptage/répartition simples doivent être résolues par le moteur,
   // sinon Albert risque de répondre à partir d'un résumé incomplet.
   // v27.7 — « unresolved » : terme introuvable, on le dit plutôt que de laisser Albert inventer
-  return ['count','group_by','top','pivot','stats','export','compare','unresolved','sum','classement'].includes(exec.kind);
+  return ['count','group_by','top','pivot','stats','export','compare','unresolved','sum','classement','part'].includes(exec.kind);
 }
 /* ═══════════════ v27.9 — Chiffres écrits par Albert : vérifiés contre les données fournies ═══════════════
    Albert rédige ; il ne doit pas produire de chiffres. Chaque nombre de sa réponse est comparé aux nombres

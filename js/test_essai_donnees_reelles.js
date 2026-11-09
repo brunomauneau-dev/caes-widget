@@ -307,6 +307,15 @@ await describe('v27.12 — Chiffres officiels : le widget retrouve à l\'unité 
   assert(/order_by=voe_tot\+desc/.test(requeteOfficielle(REFERENCES.find(r => r.id === 'ref_top_demandees'), 2025)) && /voe_tot\+is\+not\+null/.test(requeteOfficielle(REFERENCES.find(r => r.id === 'ref_top_demandees'), 2025)), 'requête de classement : tri par le serveur, valeurs vides exclues (comme le widget)');
   assert(V.ref_plus_100_places.statut === 'ok' && V.ref_plus_100_places.officiel === 200, `condition chiffrée « plus de 100 places » identique au serveur (obtenu : ${V.ref_plus_100_places.officiel} / ${V.ref_plus_100_places.widget})`);
   assert(/where=capa_fin>100/.test(decodeURIComponent(requeteOfficielle(REFERENCES.find(r => r.id === 'ref_plus_100_places'), 2025)).replace(/\+/g, ' ')), 'requête : condition « > 100 » calculée par le serveur');
+  // v27.15 — parts : numérateur et dénominateur demandés séparément au serveur
+  const { chiffresOfficiels } = await import('../scripts/essai_donnees_reelles.mjs');
+  const offPart = await chiffresOfficiels(fakeFetch, 2025, [{ id: 'x', type: 'part', num: 'capa_fin', den: 'voe_tot', egal: { fili: 'BTS' } }, { id: 'y', type: 'part', condition: { fili: 'PASS' } }]);
+  assert(offPart.x.valeur.num === 9000 && offPart.x.valeur.den === 120000, `part : somme du numérateur et du dénominateur demandées au serveur (obtenu : ${JSON.stringify(offPart.x)})`);
+  assert(offPart.y.valeur.num === 100 && offPart.y.valeur.den === 600, `part de lignes : comptage avec et sans condition (obtenu : ${JSON.stringify(offPart.y)})`);
+  assert(V.ref_remplissage_bts.statut === 'indisponible', 'données simulées sans colonne admis : part non vérifiée (pas un faux « identique »)');
+  assert(V.ref_part_selectives.statut === 'indisponible', 'données simulées sans colonne sélectivité : part non vérifiée (pas un faux « identique »)');
+  const vp = verifierOfficiels({ p: { valeur: { num: 20, den: 100 } } }, [{ id: 'p', kind: 'part', num: 20, den: 99, pct: 20.2, reponse: 'x' }], [{ id: 'p', q: 'p', type: 'part' }]);
+  assert(vp[0].statut === 'ecart', 'dénominateur différent d\'une unité → écart');
   const vt = verifierOfficiels({ t: { valeur: [9, 8, 7] } }, [{ id: 't', kind: 'classement', valeurs: [9, 7, 8], reponse: 'x' }], [{ id: 't', q: 't', type: 'top' }]);
   assert(vt[0].statut === 'ecart', 'classement dans un autre ordre → écart');
   assert(sectionOfficiels([]).length === 0 && sectionOfficiels(null).length === 0, 'aucune référence : pas de section');
