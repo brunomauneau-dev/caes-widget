@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-28 fichiers, 1 319 tests. Depuis la racine du repo :
+28 fichiers, 1 325 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -134,6 +134,18 @@ Les tests ci-dessus utilisent des données simulées. Pour vérifier le moteur s
 3. Après une minute environ, cliquer sur l'exécution : le **résumé** affiche les contrôles de cohérence (✅ / ❌) puis les réponses du moteur à chaque question. Le rapport est aussi téléchargeable (*essai-resultats*).
 
 Le script (`scripts/essai_donnees_reelles.mjs`) charge les vrais fichiers `js/` du widget, comme le navigateur, sans Albert ni Grist : il montre ce que le moteur de calcul répond. Lecture seule. Le rapport compare aussi chaque réponse avec le **lancement précédent** (section « Évolution ») : « aucune réponse n'a changé », ou le tableau avant / maintenant avec l'écart, et un avertissement si les données du ministère ont changé. Une croix rouge signifie qu'au moins un contrôle de cohérence a échoué (ex. une question sur une formation qui compte tout le fichier).
+
+### Essai automatique chaque lundi
+
+L'essai se lance aussi tout seul **chaque lundi matin**. S'il y a quelque chose à signaler, un **ticket GitHub** (onglet *Issues*) est ouvert, ou complété s'il en existe déjà un ouvert. GitHub vous prévient alors par e-mail et dans l'application. Cela concerne :
+- un contrôle en échec ;
+- un écart avec un chiffre officiel ;
+- une réponse qui change ;
+- de nouvelles données publiées par le ministère, par exemple la session 2026.
+
+Si tout va bien, aucun ticket n'est créé. Pour essayer le circuit : *Run workflow* → cocher « Tester l'alerte ».
+
+À savoir : GitHub suspend les lancements programmés d'un dépôt resté **60 jours sans aucune modification**. Il prévient alors par e-mail ; un clic sur *Enable workflow* (onglet Actions) les relance.
 
 ### Chiffres officiels
 

@@ -1,20 +1,31 @@
 name: Essai sur données réelles
 
 # Lancement manuel : onglet Actions → « Essai sur données réelles » → Run workflow.
+# Lancement automatique : chaque lundi matin. S'il y a quelque chose à signaler (contrôle en échec,
+# écart avec un chiffre officiel, réponse qui change, nouvelle session publiée), un ticket GitHub
+# (onglet Issues) est ouvert ou complété : GitHub vous prévient par e-mail et dans l'application.
 # Pose des questions types au moteur du widget sur l'open data Parcoursup réel
 # et vérifie la cohérence des réponses. Lecture seule : rien n'est écrit dans Grist.
 
 on:
+  schedule:
+    - cron: '41 5 * * 1'   # lundi 5 h 41 UTC (6 h 41 ou 7 h 41 à Paris)
   workflow_dispatch:
     inputs:
       questions:
         description: 'Questions en plus, séparées par « ; » (facultatif)'
         required: false
         default: ''
+      tester_alerte:
+        description: "Tester l'alerte : ouvrir un ticket même si tout va bien"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
   actions: read   # lire le rapport du lancement précédent (comparaison)
+  issues: write   # ouvrir un ticket d'alerte (lancement automatique seulement)
 
 jobs:
   essai:
@@ -37,6 +48,7 @@ jobs:
             fi
           done
       - name: Poser les questions sur l'open data Parcoursup
+        id: essai
         run: node scripts/essai_donnees_reelles.mjs
         env:
           QUESTIONS_EN_PLUS: ${{ inputs.questions }}
@@ -49,3 +61,18 @@ jobs:
             essai_resultats.md
             essai_resultats.json
           if-no-files-found: ignore
+      - name: Alerte (lancement automatique)
+        if: always() && ((github.event_name == 'schedule' && hashFiles('essai_alerte.json') != '') || inputs.tester_alerte)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RAPPORT: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ ! -f essai_alerte.json ]; then
+            echo '{"titre":"Essai hebdomadaire : test de l alerte","texte":"✅ Ceci est un test du circuit d alerte : tout va bien. Vous pouvez fermer ce ticket."}' > essai_alerte.json
+          fi
+          titre=$(node -e "console.log(JSON.parse(require('fs').readFileSync('essai_alerte.json','utf8')).titre)")
+          node -e "const a=JSON.parse(require('fs').readFileSync('essai_alerte.json','utf8')); console.log(a.texte + '\n\n📄 Rapport complet : ' + process.env.RAPPORT)" > alerte.md
+          # un seul ticket ouvert à la fois : s'il existe, on ajoute un commentaire
+          num=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "Essai hebdomadaire in:title" --json number --jq '.[0].number')
+          if [ -n "$num" ]; then gh issue comment "$num" --repo "$GITHUB_REPOSITORY" --body-file alerte.md
+          else gh issue create --repo "$GITHUB_REPOSITORY" --title "$titre" --body-file alerte.md; fi

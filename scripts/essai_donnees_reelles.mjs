@@ -459,6 +459,28 @@ export function questionsEnPlus(texte) {
   return String(texte || '').split(';').map(s => s.trim()).filter(Boolean).map((q, i) => ({ id: `plus${i + 1}`, q }));
 }
 
+// ─── Alerte (lancement automatique hebdomadaire) ────────────────────────────
+// Ce qui mérite l'attention de l'utilisateur : contrôle en échec, écart avec un chiffre officiel,
+// réponse qui a changé, données du ministère modifiées (nouvelle session…). Rien à signaler → null.
+export function alerteEssai(res) {
+  if (!res) return null;
+  const echecs = (res.controles || []).filter(c => !c.ok);
+  const ecarts = (res.verifs || []).filter(v => v.statut === 'ecart');
+  const indispo = (res.verifs || []).filter(v => v.statut === 'indisponible');
+  const cmp = res.comparaison;
+  const changees = cmp ? cmp.lignes.filter(l => l.change) : [];
+  const donnees = !!(cmp && cmp.donneesChangees);
+  if (!echecs.length && !ecarts.length && !changees.length && !donnees) return null;
+  const l = [];
+  if (donnees) l.push(`📅 **Les données du ministère ont changé** : avant session ${cmp.precedent.session ?? '?'} (${(cmp.precedent.formations || 0).toLocaleString('fr-FR')} formations), maintenant session ${res.instantane?.session ?? '?'} (${(res.instantane?.formations || 0).toLocaleString('fr-FR')} formations). C'est normal à la publication d'une nouvelle session ; vérifiez le rapport.`, '');
+  if (echecs.length) { l.push(`❌ **${echecs.length} contrôle${echecs.length > 1 ? 's' : ''} en échec :**`, ''); echecs.slice(0, 15).forEach(c => l.push(`- ${c.libelle} — ${c.detail}`)); l.push(''); }
+  if (ecarts.length) { l.push(`❌ **${ecarts.length} écart${ecarts.length > 1 ? 's' : ''} avec les chiffres officiels :**`, ''); ecarts.forEach(v => l.push(`- « ${v.question} » : officiel ${v.officiel}, widget ${v.widget}`)); l.push(''); }
+  if (changees.length) { l.push(`🔄 **${changees.length} réponse${changees.length > 1 ? 's ont' : ' a'} changé :**`, ''); changees.slice(0, 15).forEach(c => l.push(`- « ${c.question} » : ${c.avant} → ${c.apres}${c.ecart ? ` (${c.ecart})` : ''}`)); l.push(''); }
+  if (indispo.length) l.push(`⚠️ ${indispo.length} chiffre(s) officiel(s) non vérifié(s) : API du ministère indisponible.`, '');
+  const titre = echecs.length || ecarts.length ? 'Essai hebdomadaire : anomalie détectée' : donnees ? 'Essai hebdomadaire : données du ministère modifiées' : 'Essai hebdomadaire : réponses modifiées';
+  return { titre, texte: l.join('\n') };
+}
+
 async function main() {
   let res;
   try {
@@ -472,12 +494,15 @@ async function main() {
     console.error(msg);
     if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, msg);
     fs.writeFileSync('essai_resultats.md', msg);
+    fs.writeFileSync('essai_alerte.json', JSON.stringify({ titre: 'Essai hebdomadaire : open data non chargé', texte: `❌ L'open data Parcoursup n'a pas pu être chargé : ${e.message}\n\nLe site du ministère était peut-être indisponible. Si l'erreur se répète la semaine suivante, le format des données a peut-être changé.` }));
     process.exit(1);
   }
   console.log(res.texte);
   fs.writeFileSync('essai_resultats.md', res.texte);
   fs.writeFileSync('essai_resultats.json', JSON.stringify(res.instantane, null, 1));
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, res.texte);
+  const alerte = alerteEssai(res);
+  if (alerte) fs.writeFileSync('essai_alerte.json', JSON.stringify(alerte));
   if (res.controles.some(c => !c.ok)) process.exit(1);
 }
 
