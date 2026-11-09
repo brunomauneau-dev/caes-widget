@@ -441,7 +441,12 @@
     const windowAround = idx >= 0 ? q.slice(Math.max(0, idx - 35), Math.min(q.length, idx + a.length + 20)) : q;
     // v27.17 — mots entiers : « PASS » contient « pas » (« PASS dans l'académie de Bordeaux » devenait « ≠ Bordeaux »)
     if (/(^|\s)(hors|sauf|exclu|excluant|exclure|different|differente|diff[eé]rent|pas|non)\s*$/.test(windowBefore)) return 'neq';
-    if (/(^|\s)(hors|sauf|exclu|excluant|exclure|different|differente|pas|non)(\s|$)/.test(windowAround) && entry.kind === 'academie') return 'neq';
+    // v27.25 — « non / pas » qui porte sur un autre mot (« formations non sélectives dans l'académie de Bordeaux »,
+    // « qui ne sont pas sélectives dans l'académie ») ne nie pas l'académie : seulement « non / pas » suivi d'un mot de lieu
+    const _negAcad = windowAround.match(/(?:^|\s)(hors|sauf|exclu|excluant|exclure|different|differente|pas|non)(?=\s|$)(?:\s+(\S+))?/);
+    const _vise = _negAcad ? _negAcad[2] || '' : '';
+    const _surAutreMot = _negAcad && /^(pas|non)$/.test(_negAcad[1]) && _vise && !/^(dans|de|du|des|en|a|au|aux|situe|situee|situes|situees|localise|localisee|localises|localisees|issu|issue|issus|issues|l|la|le|les|academie|implante|implantee|implantes|implantees)$/.test(_vise);
+    if (_negAcad && !_surAutreMot && entry.kind === 'academie') return 'neq';
     return 'eq';
   }
 

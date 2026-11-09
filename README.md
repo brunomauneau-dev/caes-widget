@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-41 fichiers, 1 888 tests. Depuis la racine du repo :
+42 fichiers, 1 930 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -104,6 +104,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 - **open data** de 14 000 formations : statut public/privé, académie, département, ville, région, sélectivité, sommes (places, candidats, admis), moyennes (capacité, taux d'accès), en moins de 3 secondes par question.
 
 ### Réponses incorrectes et questions à revoir
+
+`js/test_tournures_libres.js` vérifie les **tournures libres** : formules de politesse et verbes d'intention (« Bonjour, pourriez-vous me dire… », « j'aimerais savoir… » ; avant, « savoir » était cherché dans les intitulés et donnait 0), fautes de frappe (« conbien »), « y a-t-il des… », numéros de département (« dans le 33 » = Gironde ; avant : tous les BTS), portée de la négation (« non sélectives dans l'académie de Bordeaux » ; avant : hors Bordeaux), et relances : « et par académie ? » / « et pour les CPGE ? » après une moyenne gardent la mesure, « et par académie ? » après des places donne des places, « lesquelles sont à Bordeaux ? » détaille par établissement, « et l'an dernier ? » reprend la question sur la session précédente.
 
 `js/test_taux_acces.js` vérifie les **questions sur le taux d'accès**. « Taux d'accès moyen par académie / par filière » donne une statistique par groupe (formations, moyenne, médiane, min, max ; avant : une seule moyenne nationale) ; la statistique demandée (médiane, minimum, maximum) est en titre ; « taux d'accès des PASS », « … au lycée Montaigne » sont calculés par le moteur (une seule formation : sa valeur et son nom). Les formations au taux d'accès de 0 (aucune proposition Parcoursup) sont écartées des moyennes comme des classements, et c'est écrit. La moyenne est simple (non pondérée), et c'est écrit aussi.
 

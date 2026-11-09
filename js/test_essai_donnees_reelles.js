@@ -183,6 +183,8 @@ await describe('Questions en plus (champ du formulaire GitHub)', async () => {
   const q = questionsEnPlus(' combien de BUT ; ;liste des options de LAS ');
   assert(q.length === 2 && q[0].q === 'combien de BUT' && q[1].id === 'plus2', 'séparées par « ; », vides ignorées');
   assert(questionsEnPlus('').length === 0, 'champ vide → aucune question en plus');
+  const cv = questionsEnPlus('combien de BTS >> et en licence ? ; combien de PASS');
+  assert(cv.length === 2 && cv[0].conversation?.join('|') === 'combien de BTS|et en licence ?' && cv[1].q === 'combien de PASS', '« >> » : relances dans une même conversation');
   const r = await essai({ fetchImpl: fakeFetch, questions: [...QUESTIONS, ...q] });
   assert(r.resultats.length === QUESTIONS.length + 2, 'questions en plus posées après les questions types');
   // v27.18 — bug vu sur l'essai réel : une évolution par groupe n'avait pas de périmètre dans le rapport

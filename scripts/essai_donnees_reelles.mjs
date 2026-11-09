@@ -680,8 +680,12 @@ export function lirePrecedent(chemin) {
   try { return JSON.parse(fs.readFileSync(chemin, 'utf8')); } catch (e) { return null; }
 }
 
+// « ; » sépare les questions ; « >> » enchaîne des relances dans une même conversation (« combien de BTS >> et en licence ? »)
 export function questionsEnPlus(texte) {
-  return String(texte || '').split(';').map(s => s.trim()).filter(Boolean).map((q, i) => ({ id: `plus${i + 1}`, q }));
+  return String(texte || '').split(';').map(s => s.trim()).filter(Boolean).map((q, i) => {
+    const etapes = q.split('>>').map(x => x.trim()).filter(Boolean);
+    return etapes.length > 1 ? { id: `plus${i + 1}`, conversation: etapes } : { id: `plus${i + 1}`, q: etapes[0] };
+  });
 }
 
 // ─── Alerte (lancement automatique hebdomadaire) ────────────────────────────

@@ -85,7 +85,7 @@ await describe('Un établissement nommé', () => {
   const cj = ask(ctx, 'combien de formations au lycée Camille Jullian de Bordeaux');
   assert(valeur(cj) === n(o => o.etab === 'Lycée Camille Jullian' && o.aca === 'Bordeaux') && cj.plan.filters.some(f => /Académie/.test(f.col)), '« lycée Camille Jullian de Bordeaux » : « Bordeaux » est le lieu (le nom ne le contient pas), filtre de lieu gardé');
   const lm = ask(ctx, 'combien de formations au lycée Michel De Montaigne dans l\'académie de Toulouse');
-  assert(valeur(lm) === 0 && /l'établissement existe ailleurs : Lycée Michel De Montaigne \(Mont-de-Marsan\)/.test(perim(ctx, lm)), '0 avec un autre lieu : le périmètre dit où se trouve l\'établissement');
+  assert(valeur(lm) === 0 && /l'établissement figure dans les données avec d'autres formations ou ailleurs : Lycée Michel De Montaigne \(Mont-de-Marsan\)/.test(perim(ctx, lm)), '0 avec un autre lieu : le périmètre dit où se trouve l\'établissement');
   const u = ask(ctx, 'combien de formations à l\'université de Bordeaux');
   assert(!u.plan.filters.some(f => /Académie|Commune/.test(f.col) && /Bordeaux/.test(f.value)), '« Bordeaux » fait partie du nom : pas un filtre de lieu en plus');
   assert(/« Établissement » : « Université de Bordeaux - Bordeaux Métropole »/.test(perim(ctx, u)), 'le périmètre nomme l\'établissement retenu');
