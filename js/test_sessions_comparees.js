@@ -128,7 +128,9 @@ await describe('Une seule autre session ; années hors limites', () => {
   e = ask(ctx, 'combien de BTS en 2021');
   assert(e.kind === 'unresolved' && /n'a pas pu être chargée/.test(e.text), 'session non chargée : arrêt explicite, pas le chiffre de 2025');
   e = ask(ctx, 'évolution des formations les plus demandées depuis 2024');
-  assert(e.kind === 'unresolved' && /comptages, sommes, moyennes et parts/.test(e.text), 'évolution d\'un classement : pas encore disponible, dit clairement');
+  // v27.18 — les classements de groupes (académies…) se comparent désormais (test_evolution_groupes.js) ;
+  // un classement de formations reste impossible : elles ne peuvent pas être suivies une à une
+  assert(e.kind === 'unresolved' && /suivies une à une/.test(e.text), 'évolution d\'un classement de formations : arrêt, dit clairement');
 });
 
 await describe('Colonne renommée par le ministère entre deux sessions : rapprochée par le nom technique', () => {

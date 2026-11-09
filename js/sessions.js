@@ -520,6 +520,11 @@ function extractBlockTitle(exec, question) {
   if (tool === 'pivot') {
     return `${_shortColName(col)} × ${_shortColName(col2)}${fPart}`;
   }
+  // v27.18 — somme par groupe : le titre donne l'unité (« Places par Académie (12 345 places) »)
+  if (col && exec.result?.somme) {
+    const so = exec.result.somme;
+    return `${so.unite.replace(/^./, c => c.toUpperCase())} par ${_shortColName(col)} (${Number(so.total).toLocaleString('fr-FR')} ${so.unite})${fPart}`;
+  }
   if (col) {
     const total = exec.result?.total;
     const n = total ? ` (${Number(total).toLocaleString('fr-FR')})` : '';

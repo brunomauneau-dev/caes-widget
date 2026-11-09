@@ -28,6 +28,10 @@ export const QUESTIONS = [
   { id: 'zoologie', q: 'combien de PASS option Zoologie' },
   // v27.17 — option précisée pour une partie des PASS seulement (70 sur 287 en 2025)
   { id: 'bio_bdx', q: 'combien de PASS option biologie à Bordeaux' },
+  // v27.18 — mesure par groupe et évolution par groupe
+  { id: 'places_par_aca', q: 'nombre de places en BTS par académie' },
+  { id: 'formations_par_aca', q: 'nombre de BTS par académie' },
+  { id: 'evo_formations_demandees', q: 'évolution des formations les plus demandées depuis {N-1}' },
   { id: 'bio_aca', q: "combien de PASS option biologie dans l'académie de Bordeaux" },
   { id: 'pass_droit', q: 'combien de PASS option droit' },
   { id: 'bts', q: 'combien de BTS' },
@@ -121,6 +125,9 @@ function resumer(ctx, question) {
   if (exec && exec.kind === 'evolution' && typeof ctx.perimetreResultat === 'function') {
     const der = exec.result.lignes[exec.result.lignes.length - 1].exec;
     r.perimetre = `chaque session (${exec.result.lignes.map(l => l.session).join(', ')}) · ${ctx.perimetreResultat(der.kind, der.plan, der.result).texte.replace(/^Périmètre : /, '')}`;
+  } else if (exec && exec.kind === 'evolution_groupes') {
+    // v27.18 — périmètre de la dernière session, calculé par le moteur (même texte que sous le résultat)
+    r.perimetre = `chaque session (${exec.result.sessions.join(', ')}) · ${String(exec.result.perimetre || '').replace(/^Périmètre : /, '')}`;
   } else if (exec && exec.kind !== 'unresolved' && exec.kind !== 'export' && typeof ctx.perimetreResultat === 'function') r.perimetre = ctx.perimetreResultat(exec.kind, exec.plan, exec.result).texte.replace(/^Périmètre : /, '') || undefined;
   if (!exec) { r.reponse = routee ? 'Le moteur n\'a rien calculé' : 'Non traitée par le moteur : la question part vers Albert (connaissances)'; return r; }
   if (exec.kind === 'count') {
@@ -131,6 +138,8 @@ function resumer(ctx, question) {
     r.sansValeur = exec.result.filled !== undefined ? exec.result.total - exec.result.filled : 0;
     r.lignes = (exec.result.rows || []).map(x => ({ value: x.value, count: x.count }));
     r.reponse = `${r.distinct ?? r.lignes.length} valeur(s) de « ${r.colonne} » pour ${r.total.toLocaleString('fr-FR')} formations`;
+    // v27.18 — somme par groupe (places, candidats, admis par académie…)
+    if (exec.result.somme) { r.somme = { col: exec.result.somme.col, unite: exec.result.somme.unite, total: exec.result.somme.total }; r.reponse += ` — ${exec.result.somme.unite} (somme, total ${exec.result.somme.total.toLocaleString('fr-FR')})`; }
     if (exec.result.memeIntitule) {
       r.parEtablissement = exec.result.memeIntitule.groupes.map(g => `${g.etablissement}${g.commune ? ` (${g.commune})` : ''} : ${g.n}${g.places.length ? ` — ${g.places.join(' / ')} places` : ''}`);
       r.reponse += ` (même intitulé : ${exec.result.memeIntitule.formations} formations dans ${exec.result.memeIntitule.total} établissement(s) — ${r.parEtablissement.join(' ; ')})`;
@@ -142,6 +151,11 @@ function resumer(ctx, question) {
   } else if (exec.kind === 'stats') {
     r.moyenne = exec.result.avg; r.colonne = exec.plan?.targetCol;
     r.reponse = `moyenne ${Number(r.moyenne).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} (colonne « ${r.colonne} »)`;
+  } else if (exec.kind === 'evolution_groupes') {
+    const x = exec.result;
+    r.sessions = x.sessions; r.colonne = x.col; r.type = x.type; r.totaux = x.totaux; r.nbGroupes = x.nbGroupes;
+    r.lignesEvo = x.lignes.map(l => ({ valeur: l.valeur, v1: l.v1, v2: l.v2, rang1: l.rang1 ?? null, rang2: l.rang2 ?? null }));
+    r.reponse = `${x.unite} par « ${x.col} », ${x.sessions.join(' → ')} : total ${x.totaux.map(t => Number(t).toLocaleString('fr-FR')).join(' → ')} · ${x.lignes.slice(0, 3).map(l => `${l.valeur} ${l.v1 ?? '—'} → ${l.v2 ?? '—'}`).join(' · ')}…`;
   } else if (exec.kind === 'evolution') {
     r.valeurs = exec.result.lignes.map(l => l.valeur); r.sessions = exec.result.lignes.map(l => l.session);
     r.reponse = r.sessions.map((s, i) => `${s} : ${Number(r.valeurs[i]).toLocaleString('fr-FR', { maximumFractionDigits: 2 })}`).join(' → ');
@@ -227,6 +241,11 @@ export function controler(resultats) {
     ctl('liste des PASS peu remplie : signalée « incomplète », formations sans précision par établissement',
       !peuRemplie || (R.liste1.incomplete && R.liste1.sansPrecisionEtab === R.liste1.sansValeur), `${R.liste1.sansValeur || 0} sans précision sur ${R.liste1.total ?? '?'} · ${R.liste1.incomplete ? 'signalée incomplète' : 'non signalée'}`);
   }
+  if (R.places_par_aca && R.formations_par_aca) {
+    const bdx = r => (r.lignes || []).find(x => x.value === 'Bordeaux')?.count;
+    ctl('« places en BTS par académie » : somme des places, pas le nombre de BTS', R.places_par_aca.kind === 'group_by' && !!R.places_par_aca.somme && bdx(R.places_par_aca) > bdx(R.formations_par_aca), `Bordeaux : ${bdx(R.places_par_aca) ?? '?'} places · ${bdx(R.formations_par_aca) ?? '?'} BTS`);
+  }
+  if (R.evo_formations_demandees) ctl('évolution d\'un classement de formations : arrêt expliqué (pas suivies une à une)', R.evo_formations_demandees.kind === 'unresolved', R.evo_formations_demandees.reponse);
   if (R.zoologie) ctl('« PASS option Zoologie » : non trouvée, pas de chiffre', R.zoologie.kind === 'unresolved', R.zoologie.reponse);
   if (R.bts) ctl('« combien de BTS » : un nombre, ni zéro ni tout le fichier', R.bts.kind === 'count' && R.bts.count > 0 && R.bts.count < R.bts.total, R.bts.reponse);
   if (R.licence_droit && R.droit) ctl('« licences de droit » ne se confond pas avec PASS option Droit', R.licence_droit.kind === 'count' && R.licence_droit.count > 0 && R.licence_droit.count !== R.droit.count, `${R.licence_droit.reponse} · PASS option Droit : ${R.droit.count ?? '?'}`);
@@ -282,7 +301,7 @@ export function controler(resultats) {
     ctl(`reformulations « ${g} » : même chiffre pour les ${rs.length} tournures`, ok, rs.map(r => `« ${r.question} » → ${valeurReponse(r)}`).join(' · '));
   });
   // Chaque résultat chiffré porte son périmètre
-  const chiffres = resultats.flatMap(r => r.conversation || [r]).filter(r => ['count', 'sum', 'group_by', 'top', 'stats', 'classement', 'part', 'evolution'].includes(r.kind));
+  const chiffres = resultats.flatMap(r => r.conversation || [r]).filter(r => ['count', 'sum', 'group_by', 'top', 'stats', 'classement', 'part', 'evolution', 'evolution_groupes'].includes(r.kind));
   if (chiffres.length) ctl('chaque résultat chiffré dit sur quoi il porte (périmètre)', chiffres.every(r => r.perimetre && /retenues? sur/.test(r.perimetre)), `${chiffres.filter(r => r.perimetre).length} / ${chiffres.length}`);
 
   // Contrôle général : une question qui cite une formation ne doit jamais compter tout le fichier
@@ -439,6 +458,10 @@ export const REFERENCES = [
   { id: 'ref_evolution_places_bts', q: 'les places en BTS ont-elles augmenté depuis {N-1} ?', type: 'evolution', base: { type: 'sum', champ: 'capa_fin', egal: { fili: 'BTS' } } },
   { id: 'ref_evolution_pass', q: 'évolution du nombre de PASS depuis {N-1}', type: 'evolution', base: { type: 'count', egal: { fili: 'PASS' } } },
   { id: 'ref_n1_part_boursiers_bts', q: 'part des boursiers parmi les admis en BTS en {N-1}', type: 'part', num: 'acc_brs', den: 'acc_neobac', egal: { fili: 'BTS' }, session: -1 },
+  // v27.18 — somme par groupe, et évolution par groupe entre deux sessions (chaque session calculée par le serveur)
+  { id: 'ref_places_bts_par_aca', q: 'nombre de places en BTS par académie', type: 'group', champ: 'acad_mies', somme: 'capa_fin', egal: { fili: 'BTS' } },
+  { id: 'ref_evolution_bts_par_aca', q: 'évolution du nombre de BTS par académie depuis {N-1}', type: 'evolution_groupe', base: { type: 'group', champ: 'acad_mies', egal: { fili: 'BTS' } } },
+  { id: 'ref_evolution_places_aca', q: 'les académies avec le plus de places en BTS : évolution depuis {N-1}', type: 'evolution_groupe', base: { type: 'group', champ: 'acad_mies', somme: 'capa_fin', egal: { fili: 'BTS' } } },
   { id: 'ref_top_places_bdx', q: 'les 5 formations avec le plus de places à Bordeaux', type: 'top', champ: 'capa_fin', ordre: 'desc', n: 5, egal: { ville_etab: 'Bordeaux' } },
 ];
 const _odsql = v => `"${String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
@@ -446,7 +469,7 @@ export function requeteOfficielle(ref, session, jeu = null) {
   const conds = [...Object.entries(ref.egal || {}).map(([k, v]) => `${k}=${typeof v === 'number' ? v : _odsql(v)}`), ...Object.entries(ref.superieur || {}).map(([k, v]) => `${k}>${v}`), ...(ref.type === 'top' ? [`${ref.champ} is not null`] : []),
     ...Object.entries(ref.different || {}).map(([k, v]) => `(${k} is null or ${k}!=${_odsql(v)})`)];
   const p = new URLSearchParams();
-  p.set('select', ref.type === 'count' ? 'count(*) as n' : ref.type === 'sum' ? `sum(${ref.champ}) as n` : ref.type === 'avg' ? `avg(${ref.champ}) as n` : ref.type === 'top' ? `${ref.champ} as n` : `${ref.champ} as cle, count(*) as n`);
+  p.set('select', ref.type === 'count' ? 'count(*) as n' : ref.type === 'sum' ? `sum(${ref.champ}) as n` : ref.type === 'avg' ? `avg(${ref.champ}) as n` : ref.type === 'top' ? `${ref.champ} as n` : `${ref.champ} as cle, ${ref.somme ? `sum(${ref.somme})` : 'count(*)'} as n`);
   if (ref.type === 'group') { p.set('group_by', ref.champ); p.set('limit', '100'); }
   else if (ref.type === 'top') { p.set('order_by', `${ref.champ} ${ref.ordre === 'asc' ? 'asc' : 'desc'}`); p.set('limit', String(ref.n || 10)); }
   else p.set('limit', '1');
@@ -459,7 +482,19 @@ export async function chiffresOfficiels(fetchImpl, session, refs = REFERENCES, {
   const out = {};
   const jeuDe = s => (s === session - 1 ? jeuPrecedent : null);
   const unChiffre = async r => { const ses = session + (r.session || 0); const x = await fetchImpl(requeteOfficielle(r, ses, jeuDe(ses)), { cache: 'no-store' }); if (!x.ok) throw new Error(`HTTP ${x.status}`); const res = (await x.json()).results; if (!Array.isArray(res)) throw new Error('réponse sans résultats'); return Number(res[0]?.n ?? 0); };
+  const groupes = async (base, ses) => {
+    const x = await fetchImpl(requeteOfficielle(base, ses, jeuDe(ses)), { cache: 'no-store' });
+    if (!x.ok) throw new Error(`HTTP ${x.status}`);
+    const res = (await x.json()).results;
+    if (!Array.isArray(res)) throw new Error('réponse sans résultats');
+    return Object.fromEntries(res.map(y => [y.cle === null || y.cle === undefined || y.cle === '' ? '(vide)' : String(y.cle), Number(y.n)]));
+  };
   for (const ref of refs) {
+    if (ref.type === 'evolution_groupe') {
+      try { out[ref.id] = { valeur: [await groupes(ref.base, session - 1), await groupes(ref.base, session)] }; }
+      catch (e) { out[ref.id] = { erreur: e.message }; }
+      continue;
+    }
     if (ref.type === 'evolution') {
       try {
         const avant = await (async () => { const x = await fetchImpl(requeteOfficielle(ref.base, session - 1, jeuDe(session - 1)), { cache: 'no-store' }); if (!x.ok) throw new Error(`HTTP ${x.status}`); return Number((await x.json()).results?.[0]?.n ?? 0); })();
@@ -499,14 +534,30 @@ export function verifierOfficiels(officiels, resultats, refs = REFERENCES) {
     if (!w) return { ...base, statut: 'ecart', detail: 'question non posée au widget' };
     if (ref.type === 'group') {
       if (!['group_by', 'top'].includes(w.kind)) return { ...base, statut: 'ecart', officiel: '—', widget: w.reponse, detail: 'pas de répartition calculée' };
+      // répartition tronquée à l'affichage (plus de 30 groupes) : un groupe officiel non affiché n'est pas un écart
+      const tronquee = (w.distinct || 0) > (w.lignes || []).length;
       const ecarts = Object.entries(off.valeur).filter(([k]) => k !== '(vide)').map(([k, n]) => {
         const l = (w.lignes || []).find(x => x.value === k);
+        if (!l && tronquee) return null;
         return l && l.count === n ? null : `${k} : officiel ${n}, widget ${l ? l.count : 'absent'}`;
       }).filter(Boolean);
+      const nbOff = Object.keys(off.valeur).filter(k => k !== '(vide)').length;
+      if (w.distinct !== undefined && w.distinct !== nbOff) ecarts.push(`nombre de groupes : officiel ${nbOff}, widget ${w.distinct}`);
+      if (ref.somme && !w.somme) ecarts.push('le widget a compté des formations au lieu de sommer');
       const vides = off.valeur['(vide)'] || 0;
-      if ((w.sansValeur || 0) !== vides) ecarts.push(`sans valeur : officiel ${vides}, widget ${w.sansValeur || 0}`);
+      if (!ref.somme && (w.sansValeur || 0) !== vides) ecarts.push(`sans valeur : officiel ${vides}, widget ${w.sansValeur || 0}`);
       const nb = Object.keys(off.valeur).filter(k => k !== '(vide)').length;
       return { ...base, statut: ecarts.length ? 'ecart' : 'ok', officiel: `${nb} valeurs`, widget: w.reponse, detail: ecarts.length ? ecarts.slice(0, 5).join(' · ') : `${nb} valeurs identiques à l'unité` };
+    }
+    if (ref.type === 'evolution_groupe') {
+      if (w.kind !== 'evolution_groupes') return { ...base, statut: 'ecart', officiel: '—', widget: w.reponse, detail: 'pas d\'évolution par groupe calculée' };
+      const [o1, o2] = off.valeur;
+      const val = (o, k) => (k in o ? o[k] : null);
+      const ecarts = (w.lignesEvo || []).map(l => (val(o1, l.valeur) === l.v1 && val(o2, l.valeur) === l.v2) ? null : `${l.valeur} : officiel ${val(o1, l.valeur) ?? '—'} → ${val(o2, l.valeur) ?? '—'}, widget ${l.v1 ?? '—'} → ${l.v2 ?? '—'}`).filter(Boolean);
+      const tot = o => Object.entries(o).filter(([k]) => k !== '(vide)').reduce((t, [, n]) => t + n, 0);
+      const totaux = [tot(o1), tot(o2)].map(t => Math.round(t * 100) / 100);
+      if (JSON.stringify(totaux) !== JSON.stringify(w.totaux)) ecarts.push(`totaux : officiel ${totaux.join(' → ')}, widget ${(w.totaux || []).join(' → ')}`);
+      return { ...base, statut: ecarts.length ? 'ecart' : 'ok', officiel: `total ${totaux.join(' → ')}`, widget: `total ${(w.totaux || []).join(' → ')}`, detail: ecarts.length ? ecarts.slice(0, 4).join(' · ') : `${(w.lignesEvo || []).length} groupes et totaux identiques (deux sessions)` };
     }
     if (ref.type === 'evolution') {
       const obtenu = w.kind === 'evolution' ? w.valeurs : null;

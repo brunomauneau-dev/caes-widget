@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-34 fichiers, 1 608 tests. Depuis la racine du repo :
+35 fichiers, 1 665 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -104,6 +104,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 - **open data** de 14 000 formations : statut public/privé, académie, département, ville, région, sélectivité, sommes (places, candidats, admis), moyennes (capacité, taux d'accès), en moins de 3 secondes par question.
 
 ### Réponses incorrectes et questions à revoir
+
+`js/test_evolution_groupes.js` vérifie les **répartitions d'une mesure** et leur **évolution entre deux sessions**. « Nombre de places en BTS par académie » donne la somme des places de chaque académie (avant : le nombre de BTS, présenté comme des places) ; de même pour les candidats et les admis. « Évolution du nombre de BTS (ou des places) par académie depuis 2024 » et « les académies avec le plus de places : évolution » donnent, groupe par groupe, la valeur de chaque session, l'écart, l'évolution en %, les rangs et le total ; un groupe absent d'une session est signalé. Les formations ne peuvent pas être suivies une à une d'une année à l'autre, ni les tableaux croisés comparés : le widget le dit.
 
 `js/test_options_pass.js` vérifie les **options des PASS**. Dans l'open data 2025, l'option d'un PASS n'est écrite que pour 70 PASS sur 287. Le widget ne donne donc pas de chiffre pour « combien de PASS option Biologie à Bordeaux » (avant : 0, affiché comme « calcul exact ») : il écrit « Option non précisée dans les données », combien de formations précisent l'option, combien n'en disent rien, et liste ces dernières par établissement avec la capacité de chacune. « Liste des PASS » est signalée **incomplète**, avec le même tableau ; quand des formations ont toutes le même intitulé (les 8 PASS de l'académie de Bordeaux), elles sont listées par établissement avec leur capacité. Quand toutes les formations du périmètre précisent leur option, le chiffre est donné normalement. Enfin, un 0 pour une commune qui porte aussi le nom d'une académie est complété : « aucune formation dans la commune de Bordeaux, mais 12 dans l'académie de Bordeaux » (les PASS de l'Université de Bordeaux sont à Talence). Corrigé au passage : « PASS » contient « pas », et « PASS dans l'académie de Bordeaux » était compris « hors académie de Bordeaux » (279 PASS au lieu de 8 sur les données réelles) ; cas ajouté au banc `test_reformulations.js`.
 
