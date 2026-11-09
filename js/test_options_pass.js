@@ -194,5 +194,20 @@ await describe('0 dans la commune, mais des formations dans l\'académie du mêm
   assert(pau?.kind === 'count' && !/dans l'académie de Pau/.test(texte(pau)), 'faux positif : pas d\'académie « Pau », pas de note');
 });
 
+await describe('Formations au même intitulé : listées par établissement', () => {
+  // Données réelles : les 8 PASS de l'académie de Bordeaux n'ont aucune précision → la liste disait seulement « PASS : 8 »
+  const lignes = REEL.map(o => o.fili === 'PASS' && o.aca === 'Bordeaux' ? { ...o, detail: '' } : o);
+  const ctx = ctxOpenData(lignes);
+  const nAca = lignes.filter(o => o.fili === 'PASS' && o.aca === 'Bordeaux').length;
+  const e = ask(ctx, "liste des PASS dans l'académie de Bordeaux");
+  assert(e?.kind === 'group_by' && e.result.total === nAca, `${nAca} PASS dans l'académie`);
+  const g = e.result.memeIntitule;
+  assert(g && g.formations === nAca && /même intitulé/.test(e.html), 'même intitulé pour tous : tableau par établissement pour tous ces PASS');
+  assert(/Capacité de chacune/.test(e.html), 'avec la capacité de chacun');
+  assert(/par établissement/.test(e.text), 'Albert reçoit le détail');
+  const bts = ask(ctx, 'quelles sont les options de BTS');
+  assert(!bts.result.memeIntitule, 'faux positif : intitulés différents, pas de tableau en plus');
+});
+
 console.log(`\nRésultat : ${passed} ✓  ${failed} ✗  (${passed + failed} tests)`);
 if (failed) process.exit(1);

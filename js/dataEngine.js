@@ -2667,10 +2667,15 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     // la liste n'est pas celle de toutes les options ; formations sans précision montrées par établissement
     if (plan.listMode && rows.length && counts.filled < rows.length * SEUIL_COLONNE_REMPLIE) {
       _res.sansPrecision = formationsParEtablissement(plan.table, rows.filter(r => !_caseRemplie(r, col)));
+    } else if (plan.listMode && rows.length > 1 && counts.distinct <= 1) {
+      // aucun intitulé ne distingue ces formations (les 8 PASS de l'académie de Bordeaux) : on les montre par établissement
+      _res.memeIntitule = formationsParEtablissement(plan.table, rows);
     }
     const _txtSans = _res.sansPrecision
       ? `\n(sans précision dans cette colonne : ${rows.length - counts.filled} sur ${rows.length} ; la liste ne couvre que ${counts.filled} formations)`
-      : '';
+      : _res.memeIntitule
+        ? `\n(même intitulé, option non précisée ; par établissement : ${_res.memeIntitule.groupes.map(g => `${g.etablissement}${g.commune ? ` (${g.commune})` : ''} : ${g.n}${g.places.length ? `, ${_placesEnClair(g.places)}` : ''}`).join(' ; ')})`
+        : '';
     const exec = {
       kind: plan.tool,
       plan: { ...plan, targetCol: col, limit },
@@ -3021,6 +3026,7 @@ function renderDataEngineResultHtml(tool, plan, result) {
       // v27.8 — lignes sans valeur dans la colonne listée : affichées, pour que le total soit juste
       + (result.filled !== undefined && result.filled < result.total && !result.sansPrecision ? `<p style="font-size:12px;color:var(--gris3)">${(result.total - result.filled).toLocaleString('fr-FR')} ${unit(result.total - result.filled)} sans valeur dans cette colonne.</p>` : '')
       // v27.17 — colonne peu remplie : avertissement visible et formations sans précision par établissement
+      + (result.memeIntitule ? `<p style="margin:10px 0 6px">Ces ${result.total.toLocaleString('fr-FR')} ${unit(result.total)} ont le même intitulé : aucune colonne ne précise leur option. <strong>Par établissement</strong> :</p>${_tableauEtablissementsHtml(result.memeIntitule)}<p style="font-size:12px;color:var(--gris3);margin:6px 0 0">Pour connaître leur option, consultez la fiche de chaque formation sur Parcoursup ; la capacité distingue les formations au même intitulé.</p>` : '')
       + (result.sansPrecision ? `<div style="background:#fff7ed;border-left:3px solid #c2410c;border-radius:4px;padding:8px 12px;margin:10px 0"><p style="margin:0 0 6px"><strong>⚠️ Liste incomplète</strong> : seules <strong>${result.filled.toLocaleString('fr-FR')}</strong> ${unit(result.filled)} sur ${result.total.toLocaleString('fr-FR')} ont une précision dans « ${escapeHtml(plan.targetCol)} » (option, lieu d'enseignement…). Les <strong>${(result.total - result.filled).toLocaleString('fr-FR')}</strong> autres n'en ont aucune : cette liste n'est pas celle de toutes les options proposées.</p><p style="margin:0 0 6px"><strong>${unit(2).replace(/^./, c => c.toUpperCase())} sans précision, par établissement</strong> :</p>${_tableauEtablissementsHtml(result.sansPrecision)}<p style="font-size:12px;color:var(--gris3);margin:6px 0 0">Pour connaître leur option, consultez la fiche de chaque formation sur Parcoursup ; la capacité distingue les formations au même intitulé.</p></div>` : '');
     return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}${perim}<p><strong>${(result.distinct ?? rows.length).toLocaleString('fr-FR')}</strong> intitulé${(result.distinct ?? rows.length) > 1 ? 's' : ''} différent${(result.distinct ?? rows.length) > 1 ? 's' : ''} dans <strong>${escapeHtml(plan.targetCol)}</strong>, pour <strong>${result.total.toLocaleString('fr-FR')}</strong> ${unit(result.total)}.</p><ul>${rows.map(r => `<li>${escapeHtml(r.value)} : <strong>${r.count.toLocaleString('fr-FR')}</strong></li>`).join('')}</ul>${reste}<p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
   }
