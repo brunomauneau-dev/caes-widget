@@ -992,7 +992,8 @@ const MESURES_SOMME = [
 ];
 function applyMeasureSum(plan) {
   if (!plan || !plan.table || plan.tool !== 'count_rows' || plan.table.rowUnit !== 'formation') return plan;
-  const q = normalizeText(plan.question || '');
+  // v27.14 — le mot d'une condition chiffrée (« avec au plus 30 admis ») n'est pas la mesure demandée
+  const q = normalizeText(plan.question || '').replace(/\b(plus de|moins de|au moins|au plus)\s+\d+(?:[.,]\d+)?\s*%?\s*(places?|candidats?|admis|voeux|boursiers?)\b/g, ' ');
   if (/\b(combien|nombre) d(e|es)? ?(formations?|filieres?|offres?|etablissements?)\b/.test(q)) return plan;
   const headers = plan.table.headers || [];
   for (const m of MESURES_SOMME) {
@@ -1101,6 +1102,45 @@ function applyClassement(plan) {
   if (plan.unresolvedTerms) plan.unresolvedTerms = plan.unresolvedTerms.filter(t => !c.mot.test(normalizeText(Array.isArray(t) ? t[0] : t)));
   return plan;
 }
+/* v27.14 — Conditions chiffrées : « plus de 100 places », « au moins 30 admis », « un taux d'accès inférieur à 20 % »,
+   « avec un taux d'accès de 0 ». Avant : la condition était ignorée et le widget comptait toutes les lignes. */
+const COMPARATEURS = [
+  [/superieure? ou egale? a|au moins|minimum|\bmin\b|>=/, 'gte'], [/inferieure? ou egale? a|au plus|maximum|\bmax\b|<=/, 'lte'],
+  [/plus de|superieure? a|au dela de|depassant|>/, 'gt'], [/moins de|inferieure? a|en dessous de|<|sous les?/, 'lt'],
+  [/egale? a|de|=|a/, 'eqn'],
+];
+const _CMP = '(superieure? ou egale? a|inferieure? ou egale? a|au moins|au plus|plus de|moins de|superieure? a|inferieure? a|au dela de|en dessous de|depassant|egale? a|>=|<=|>|<|=|de|a)';
+const SYMBOLES_OPS = { gt: 'supérieur à', gte: 'au moins', lt: 'inférieur à', lte: 'au plus', eqn: 'égal à' };
+function conditionsChiffrees(table, question) {
+  if (!table || !Array.isArray(table.objects) || !table.objects.length) return [];
+  const q = normalizeText(question || '');
+  const headers = (table.headers || Object.keys(table.objects[0] || {})).filter(Boolean);
+  const colPour = mot => { for (const m of CLASSEMENT_MESURES) { if (!m.re.test(mot)) continue; const c = headers.find(h => m.col.test(_hx(h)) && _estNumerique(table, h)); if (c) return c; } return null; };
+  const opPour = txt => (COMPARATEURS.find(([re]) => re.test(txt)) || [])[1];
+  const out = [];
+  // 1. « plus de 100 places », « au moins 30 admis », « moins de 50 candidats »
+  for (const m of q.matchAll(new RegExp(`\\b(plus de|moins de|au moins|au plus)\\s+(\\d+(?:[.,]\\d+)?)\\s*(?:%\\s*)?(places?|candidats?|admis|voeux|boursiers?)\\b`, 'g'))) {
+    const col = colPour(m[3]); const op = opPour(m[1]);
+    if (col && op) out.push({ col, op, value: Number(m[2].replace(',', '.')) });
+  }
+  // 2. « taux d'accès inférieur à 20 % », « capacité supérieure à 50 », « un taux d'accès de 0 »
+  for (const m of q.matchAll(new RegExp(`\\b(taux d ?acces|capacites?|nombre de places|nombre de candidats|nombre d admis)\\s+(?:est\\s+|de la formation\\s+)?${_CMP}\\s+(\\d+(?:[.,]\\d+)?)\\s*(?:%|pour ?cent)?`, 'g'))) {
+    const col = colPour(/taux/.test(m[1]) ? "taux d acces" : /candidat/.test(m[1]) ? 'candidats' : /admis/.test(m[1]) ? 'admis' : 'places'); const op = opPour(m[2]);
+    if (col && op && !out.some(f => f.col === col)) out.push({ col, op, value: Number(m[3].replace(',', '.')) });
+  }
+  return out.map(f => ({ ...f, label: `${SYMBOLES_OPS[f.op]} ${String(f.value).replace('.', ',')}`, source: 'condition_chiffree' }));
+}
+function applyConditionsChiffrees(plan) {
+  if (!plan || !plan.table || ['compare', 'chart_current', 'export_current_excel', 'export_current_csv'].includes(plan.tool)) return plan;
+  const conds = conditionsChiffrees(plan.table, plan.question);
+  if (!conds.length) return plan;
+  // le nombre cité n'est pas une valeur de colonne à égaler ailleurs (« 0 », « 100 ») : on retire les filtres = nombre
+  const nombres = new Set(conds.map(c => String(c.value)));
+  plan.filters = [...(plan.filters || []).filter(f => !(f && f.op !== 'contains_all' && nombres.has(String(f.value).replace(',', '.')))), ...conds];
+  if (plan.tool === 'sum' && conds.some(c => c.col === plan.sumCol)) { /* « combien de places dans les formations de plus de 100 places » : somme filtrée, conservée */ }
+  return plan;
+}
+
 // Colonnes qui décrivent une formation dans le classement : intitulé, établissement, commune
 function _colonnesDescription(table) {
   const headers = (table.headers || []).filter(Boolean);
@@ -1118,8 +1158,15 @@ function _colonnesDescription(table) {
 function executerClassement(plan) {
   const c = plan.classement;
   const rows = applyLocalActionFilters(plan.table.objects || [], plan.filters || []);
-  const avecValeur = rows.map(r => ({ r, v: _nombreCellule(r?.[c.col]) })).filter(x => x.v !== null);
+  let avecValeur = rows.map(r => ({ r, v: _nombreCellule(r?.[c.col]) })).filter(x => x.v !== null);
   const sansValeur = rows.length - avecValeur.length;
+  // v27.14 — « les plus sélectives » : un taux d'accès de 0 veut dire qu'aucune proposition n'a été faite par Parcoursup
+  // (formation sans recrutement par cette voie), pas une formation très sélective → écartées et signalées
+  let tauxNuls = 0;
+  if (/taux d acces/.test(_hx(c.col)) && c.ordre === 'asc' && !c.entite) {
+    tauxNuls = avecValeur.filter(x => x.v === 0).length;
+    avecValeur = avecValeur.filter(x => x.v !== 0);
+  }
   let lignes, exAequo = 0;
   if (c.entite) {
     if (!c.additif) return unresolvedConceptExecution(plan, [], `un classement des ${c.entite.nom} selon le ${c.libelle} demanderait de combiner des taux, ce que le widget ne fait pas (un taux ne s'additionne pas). Classez plutôt les formations : « les formations les plus … »`);
@@ -1135,7 +1182,7 @@ function executerClassement(plan) {
     plan.colonnesDescription = desc;
     if (tri.length > c.limit) exAequo = tri.slice(c.limit).filter(x => x.v === tri[c.limit - 1].v).length;
   }
-  const result = { lignes, total: rows.length, avecValeur: avecValeur.length, sansValeur, exAequo, groupes: c.entite ? new Set(avecValeur.map(x => String(x.r?.[c.entite.col] ?? '').trim() || 'Non renseigné')).size : null };
+  const result = { lignes, total: rows.length, avecValeur: avecValeur.length, sansValeur, exAequo, tauxNuls, groupes: c.entite ? new Set(avecValeur.map(x => String(x.r?.[c.entite.col] ?? '').trim() || 'Non renseigné')).size : null };
   const exec = { kind: 'classement', plan, result, text: lignes.map(l => `${l.rang}. ${l.libelles.join(' — ')} : ${l.valeur}`).join('\n') };
   exec.html = renderClassementHtml(plan, result);
   return exec;
@@ -1167,6 +1214,8 @@ const CONCEPTS_A_FILTRER = [
   { re: /\bboursiers?\b|\bbourse\b/, mot: 'boursiers', ok: t => /bours/.test(t) },
   { re: /\b(filles?|femmes?|feminins?|garcons?|hommes?|masculins?|candidates)\b/, mot: 'filles / garçons', ok: (t, f) => /sexe|genre|candidates/.test(t) || /^(f|m|h|feminin|masculin|femmes?|hommes?|filles?|garcons?)$/.test(normalizeText(f.value)) || (typeof plannerColumnKind === 'function' && plannerColumnKind(f.col) === 'sexe') },
   { re: /\bapprenti(e|s|es)?\b|\bapprentissage\b|\balternance\b/, mot: 'apprentis', ok: t => /appr|altern/.test(t) },
+  // v27.14 — condition chiffrée non comprise (« dont la capacité dépasse 100 ») : arrêt, pas toutes les lignes
+  { re: /\b(plus de|moins de|au moins|au plus|superieure? a|inferieure? a|depasse\w*|au dela de|en dessous de)\s+\d/, mot: 'condition chiffrée', ok: (t, f) => f && f.source === 'condition_chiffree' },
   // v27.13 — « combien de refusés » sans colonne de statut comptait tout le fichier
   { re: /\brefus(e|es|ee|ees)?\b|\bliste d ?attente\b|\ben attente\b|\bdesist(e|es|ee|ees|ement)?\b/, mot: 'statut de candidature (refusé, liste d\'attente…)', ok: t => /refus|attente|desist|statut|admi|candidature/.test(t) },
   { re: /\bbasques?\b/, mot: 'Pays Basque', ok: t => /basque/.test(t) },
@@ -1417,7 +1466,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
     // à partir de filtres structurés validés, jamais depuis les résultats calculés
     // (moyenne, médiane, valeur de tableau, etc.).
     const plannerPlan = buildPlannerPlan(question, question, table, tool);
-    if (plannerPlan) return inheritConversationContext(applyClassement(applyMeasureSum(applyListMode(applyFormationTerms(plannerPlan)))), question);
+    if (plannerPlan) return inheritConversationContext(applyConditionsChiffrees(applyClassement(applyMeasureSum(applyListMode(applyFormationTerms(plannerPlan))))), question);
   }
 
   // Fallback V16 si planner indisponible.
@@ -1427,7 +1476,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
   // V25.1 — idem : le fallback ne doit pas analyser le contexte textuel
   // précédent comme s'il s'agissait de la question utilisateur.
   const filters = detectFilters(table, normalizeText(question || ''), targetCol);
-  return inheritConversationContext(applyClassement(applyMeasureSum(applyListMode(applyFormationTerms({
+  return inheritConversationContext(applyConditionsChiffrees(applyClassement(applyMeasureSum(applyListMode(applyFormationTerms({
     tool,
     table,
     filters,
@@ -1435,7 +1484,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
     mentionedCols,
     question,
     createdAt: new Date().toISOString()
-  })))), question);
+  }))))), question);
 }
 
 
@@ -2293,7 +2342,7 @@ function inferNumericStatsColumn(table, question) {
 function dataEngineResultToContext(exec) {
   if (!exec || !exec.plan) return '';
   const p = exec.plan;
-  const filters = (p.filters || []).map(f => `${f.col} ${f.op === 'neq' ? '≠' : '='} "${f.value}"`).join(' ; ') || 'aucun';
+  const filters = (p.filters || []).map(f => SYMBOLES_OPS[f.op] ? `${f.col} ${f.label}` : `${f.col} ${f.op === 'neq' ? '≠' : '='} "${f.value}"`).join(' ; ') || 'aucun';
   let out = `=== DATA ENGINE V22 — RÉSULTAT CALCULÉ SUR LIGNES BRUTES ===\n`;
   out += `Outil : ${p.tool}\nSource : ${p.table?.source || 'Données'} · ${p.table?.name || 'table'}\nFiltres : ${filters}\n`;
   // v27.10 — périmètre en clair : Albert doit le reprendre tel quel
@@ -2369,6 +2418,7 @@ function _filtreEnClair(f) {
   }
   // v27.11 — exclusion : la valeur exclue, pas le libellé (« ≠ Hors Pays Basque » était une double négation)
   const v = String((f.op === 'neq' ? f.value : (f.label || f.value)) ?? '').trim();
+  if (SYMBOLES_OPS[f.op]) return `« ${f.col} » ${SYMBOLES_OPS[f.op]} ${String(f.value).replace('.', ',')}`;
   const etat = _VALEURS_ETAT[v.toLowerCase()];
   if (etat) return `« ${f.col} » ${f.op === 'neq' ? (etat === 'oui' ? '= non' : '= oui') : `= ${etat}`}`;
   return `« ${f.col} » ${f.op === 'neq' ? 'différent de' : '='} ${v}`;
@@ -2418,6 +2468,7 @@ function perimetreResultat(kind, plan, result) {
     const ign = result.count - result.renseignees;
     notes.push(`${_nf(ign)} ${mot(ign)} sans valeur dans « ${result.col} », non comptée${ign > 1 ? 's' : ''}`);
   }
+  if (kind === 'classement' && result.tauxNuls > 0) notes.push(`${_nf(result.tauxNuls)} ${mot(result.tauxNuls)} au taux d'accès de 0 (aucune proposition d'admission par Parcoursup) écartée${result.tauxNuls > 1 ? 's' : ''} : ce ne sont pas des formations sélectives`);
   if (kind === 'classement' && result.sansValeur > 0) notes.push(`${_nf(result.sansValeur)} ${mot(result.sansValeur)} sans valeur dans « ${plan.classement.col} », écartée${result.sansValeur > 1 ? 's' : ''} du classement`);
   if (kind === 'pivot') {
     const nonAffiche = (result.total || 0) - (result.matrix || []).reduce((t, r) => t + (r.total || 0), 0);
@@ -2450,6 +2501,7 @@ function renderDataEngineResultHtml(tool, plan, result) {
   const filtersHtml = (plan.filters || []).length
     ? `<ul>${plan.filters.map(f => f.op === 'contains_all'
         ? `<li>${escapeHtml(f.col)} : <strong>${escapeHtml((f.label || f.value).split(' + ').map(t => `« ${t} »`).join(' et '))}</strong></li>`
+        : SYMBOLES_OPS[f.op] ? `<li>${escapeHtml(f.col)} : <strong>${escapeHtml(f.label)}</strong></li>`
         : `<li>${escapeHtml(f.col)} ${f.op === 'neq' ? '≠' : '='} <strong>${escapeHtml(f.op === 'neq' ? f.value : (f.label || f.value))}</strong></li>`).join('')}</ul>`
     : '<p>Aucun filtre appliqué.</p>';
   // Une ligne de l'open data = une formation

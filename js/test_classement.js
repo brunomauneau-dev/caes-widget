@@ -163,6 +163,48 @@ await describe('Relances « et à … / et en … / et dans … » (avant : non 
   assert(!run(ctx, 'isFilterOnlyFollowUp')('et alors ?') && !run(ctx, 'isFilterOnlyFollowUp')('expliquez la procédure'), 'faux positif : « et alors ? » n\'est pas une relance de filtre');
 });
 
+await describe('Conditions chiffrées (avant : ignorées, le widget comptait toutes les lignes)', () => {
+  const n = pred => OD.filter(pred).length;
+  const cas = [
+    ['combien de formations de plus de 100 places', n(o => o.capa > 100)],
+    ['combien de formations avec au moins 300 places', n(o => o.capa >= 300)],
+    ['combien de formations de moins de 20 places', n(o => o.capa < 20)],
+    ["combien de BTS avec un taux d'accès inférieur à 20 %", n(o => o.fili === 'BTS' && o.taux < 20)],
+    ["combien de formations avec un taux d'accès supérieur ou égal à 90", n(o => o.taux >= 90)],
+    ['combien de formations avec plus de 5000 candidats', n(o => o.voe > 5000)],
+    ["combien de CPGE avec au plus 30 admis", n(o => o.fili === 'CPGE' && o.acc <= 30)],
+  ];
+  for (const [q, attendu] of cas) {
+    const e = ask(od, q);
+    assert(e && e.kind === 'count' && e.result.count === attendu && e.result.count !== e.result.total, `« ${q} » → ${attendu} (obtenu : ${e?.kind} ${e?.result?.count ?? e?.text ?? ''})`);
+  }
+  const zero = ctxOpenData(OD.map((o, i) => i % 50 === 0 ? { ...o, taux: 0 } : o));
+  const z = ask(zero, "combien de formations avec un taux d'accès de 0");
+  assert(z.result.count === OD.filter((o, i) => i % 50 === 0).length, '« un taux d\'accès de 0 » : condition = 0');
+  const s = ask(od, 'combien de places dans les formations de plus de 100 places');
+  assert(s.kind === 'sum' && s.result.sum === OD.filter(o => o.capa > 100).reduce((t, o) => t + o.capa, 0), 'somme filtrée par une condition chiffrée');
+  const c = ask(od, 'les formations de moins de 50 places les plus demandées');
+  assert(c.kind === 'classement' && meme(valeurs(c), tri(OD.filter(o => o.capa < 50), o => o.voe)), 'classement + condition chiffrée');
+  assert(/« Capacité de l'établissement par formation » supérieur à 100/.test(ask(od, 'combien de formations de plus de 100 places').html), 'périmètre : condition écrite en clair');
+  const d = ask(od, 'combien de formations dont la capacité dépasse 100');
+  assert(d.kind === 'unresolved' && /condition chiffrée/.test(d.text), 'condition non comprise (« dépasse ») : arrêt, pas toutes les lignes');
+  assert(ask(od, 'combien de formations en 2025').result.count === OD.length && ask(od, 'combien de BTS').result.count === n(o => o.fili === 'BTS'), 'faux positifs : une année ou une question sans condition ne filtre rien de plus');
+  const g = ask(od, 'combien de formations à moins de 3 heures de Paris');
+  assert(!g || g.kind !== 'count' || g.result.count !== OD.length, '« à moins de 3 heures » : jamais compté comme toutes les lignes');
+});
+
+await describe('« Les plus sélectifs » : taux d\'accès de 0 écartés (aucune proposition, pas sélectif)', () => {
+  const lignes = OD.map((o, i) => o.fili === 'BTS' && i % 40 === 0 ? { ...o, taux: 0 } : o);
+  const nuls = lignes.filter(o => o.fili === 'BTS' && o.taux === 0).length;
+  const ctx = ctxOpenData(lignes);
+  const e = ask(ctx, 'les 10 BTS les plus sélectifs');
+  assert(nuls > 0 && e.result.tauxNuls === nuls && e.result.lignes.every(l => l.valeur > 0), `${nuls} BTS au taux de 0 écartés du classement`);
+  assert(meme(valeurs(e), tri(lignes.filter(o => o.fili === 'BTS' && o.taux > 0), o => o.taux, 'asc')), 'classement sur les taux > 0');
+  assert(/au taux d'accès de 0 \(aucune proposition d'admission par Parcoursup\) écartées : ce ne sont pas des formations sélectives/.test(e.html), 'signalé en clair dans « À noter »');
+  const m = ask(ctx, 'les 10 BTS les moins sélectifs');
+  assert(m.result.tauxNuls === 0, 'faux positif : « les moins sélectifs » ne retire rien');
+});
+
 await describe('Faux positifs : ce qui ne devient pas un classement', () => {
   const routee = q => run(od, 'isDataEngineQuestion')(q);
   assert(!routee('quelles formations sont les plus adaptées pour un bac pro'), '« les plus adaptées » : question de conseil → Albert');

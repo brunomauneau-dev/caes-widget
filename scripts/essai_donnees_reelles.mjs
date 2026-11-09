@@ -379,12 +379,15 @@ export const REFERENCES = [
   { id: 'ref_par_filiere', q: 'répartition des formations par filière de formation très agrégée', type: 'group', champ: 'fili' },
   // v27.14 — classements : le serveur trie lui-même ; mêmes valeurs, même ordre
   { id: 'ref_top_demandees', q: 'quelles sont les formations les plus demandées', type: 'top', champ: 'voe_tot', ordre: 'desc', n: 10 },
-  { id: 'ref_top_bts_selectifs', q: 'les 10 BTS les plus sélectifs', type: 'top', champ: 'taux_acces_ens', ordre: 'asc', n: 10, egal: { fili: 'BTS' } },
+  { id: 'ref_top_bts_selectifs', q: 'les 10 BTS les plus sélectifs', type: 'top', champ: 'taux_acces_ens', ordre: 'asc', n: 10, egal: { fili: 'BTS' }, superieur: { taux_acces_ens: 0 } },
+  // conditions chiffrées
+  { id: 'ref_plus_100_places', q: 'combien de formations de plus de 100 places', type: 'count', superieur: { capa_fin: 100 } },
+  { id: 'ref_bts_taux_0', q: "combien de BTS avec un taux d'accès de 0", type: 'count', egal: { fili: 'BTS', taux_acces_ens: 0 } },
   { id: 'ref_top_places_bdx', q: 'les 5 formations avec le plus de places à Bordeaux', type: 'top', champ: 'capa_fin', ordre: 'desc', n: 5, egal: { ville_etab: 'Bordeaux' } },
 ];
 const _odsql = v => `"${String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 export function requeteOfficielle(ref, session) {
-  const conds = [...Object.entries(ref.egal || {}).map(([k, v]) => `${k}=${_odsql(v)}`), ...(ref.type === 'top' ? [`${ref.champ} is not null`] : []),
+  const conds = [...Object.entries(ref.egal || {}).map(([k, v]) => `${k}=${typeof v === 'number' ? v : _odsql(v)}`), ...Object.entries(ref.superieur || {}).map(([k, v]) => `${k}>${v}`), ...(ref.type === 'top' ? [`${ref.champ} is not null`] : []),
     ...Object.entries(ref.different || {}).map(([k, v]) => `(${k} is null or ${k}!=${_odsql(v)})`)];
   const p = new URLSearchParams();
   p.set('select', ref.type === 'count' ? 'count(*) as n' : ref.type === 'sum' ? `sum(${ref.champ}) as n` : ref.type === 'avg' ? `avg(${ref.champ}) as n` : ref.type === 'top' ? `${ref.champ} as n` : `${ref.champ} as cle, count(*) as n`);

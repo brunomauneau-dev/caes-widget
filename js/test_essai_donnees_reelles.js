@@ -45,6 +45,8 @@ function agregatOfficiel(p) {
   let rows = LIGNES_API;
   const where = p.get('where') || '';
   for (const [, k, v] of where.matchAll(/(?:^|and )(\w+)="([^"]*)"/g)) rows = rows.filter(r => r[k] === v);
+  for (const [, k, v] of where.matchAll(/(?:^|and )(\w+)=(\d+(?:\.\d+)?)(?:\b|$)/g)) rows = rows.filter(r => Number(r[k]) === Number(v));
+  for (const [, k, v] of where.matchAll(/(?:^|and )(\w+)>(\d+(?:\.\d+)?)/g)) rows = rows.filter(r => r[k] !== '' && Number(r[k]) > Number(v));
   for (const [, k, v] of where.matchAll(/\((\w+) is null or \w+!="([^"]*)"\)/g)) rows = rows.filter(r => r[k] !== v);
   const sel = p.get('select');
   const num = (r, c) => Number(r[c]);
@@ -78,6 +80,8 @@ function fakeFetch(url) {
     // comme le vrai serveur : un champ inconnu → erreur 400
     const sel = new URL(u).searchParams.get('select');
     const champ = (sel.match(/\((\w+)\)/) || sel.match(/^(\w+) as n$/) || [])[1];
+    const champsWhere = [...(new URL(u).searchParams.get('where') || '').matchAll(/(\w+)(?:=|>|!=| is )/g)].map(m => m[1]).filter(k => !['and', 'or', 'null', 'not'].includes(k));
+    if (champsWhere.some(k => !FIELDS.some(([n]) => n === k))) return Promise.resolve({ ok: false, status: 400, json: () => Promise.resolve({}) });
     if (champ && champ !== '*' && !FIELDS.some(([n]) => n === champ)) return Promise.resolve({ ok: false, status: 400, json: () => Promise.resolve({}) });
     return json(agregatOfficiel(new URL(u).searchParams));
   }
@@ -301,6 +305,8 @@ await describe('v27.12 — Chiffres officiels : le widget retrouve à l\'unité 
   assert(V.ref_top_demandees.statut === 'ok' && /10 valeurs identiques, même ordre/.test(V.ref_top_demandees.detail), `classement « les plus demandées » identique au tri du serveur (obtenu : ${V.ref_top_demandees.statut} ${V.ref_top_demandees.detail} · officiel ${V.ref_top_demandees.officiel} · widget ${V.ref_top_demandees.widget})`);
   assert(V.ref_top_places_bdx.statut === 'ok', `classement « le plus de places à Bordeaux » identique (obtenu : ${V.ref_top_places_bdx.officiel} / ${V.ref_top_places_bdx.widget})`);
   assert(/order_by=voe_tot\+desc/.test(requeteOfficielle(REFERENCES.find(r => r.id === 'ref_top_demandees'), 2025)) && /voe_tot\+is\+not\+null/.test(requeteOfficielle(REFERENCES.find(r => r.id === 'ref_top_demandees'), 2025)), 'requête de classement : tri par le serveur, valeurs vides exclues (comme le widget)');
+  assert(V.ref_plus_100_places.statut === 'ok' && V.ref_plus_100_places.officiel === 200, `condition chiffrée « plus de 100 places » identique au serveur (obtenu : ${V.ref_plus_100_places.officiel} / ${V.ref_plus_100_places.widget})`);
+  assert(/where=capa_fin>100/.test(decodeURIComponent(requeteOfficielle(REFERENCES.find(r => r.id === 'ref_plus_100_places'), 2025)).replace(/\+/g, ' ')), 'requête : condition « > 100 » calculée par le serveur');
   const vt = verifierOfficiels({ t: { valeur: [9, 8, 7] } }, [{ id: 't', kind: 'classement', valeurs: [9, 7, 8], reponse: 'x' }], [{ id: 't', q: 't', type: 'top' }]);
   assert(vt[0].statut === 'ecart', 'classement dans un autre ordre → écart');
   assert(sectionOfficiels([]).length === 0 && sectionOfficiels(null).length === 0, 'aucune référence : pas de section');

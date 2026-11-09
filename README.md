@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-29 fichiers  1 375 tests. Depuis la racine du repo :
+29 fichiers  1 395 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -114,7 +114,11 @@ Règles vérifiées :
 - un taux n'est jamais additionné par académie : le widget s'arrête ;
 - une question comme « les critères les plus importants » reste à Albert.
 
-L'essai sur données réelles compare trois classements au tri fait par le serveur du ministère.
+**Conditions chiffrées** : « les formations de plus de 100 places », « au moins 30 admis », « un taux d'accès inférieur à 20 % ». Une condition que le widget ne comprend pas (« dont la capacité dépasse 100 ») l'arrête au lieu d'être ignorée.
+
+« Les plus sélectifs » écarte les formations au taux d'accès de 0 : aucune proposition n'y a été faite par Parcoursup. Elles sont signalées à part.
+
+L'essai sur données réelles compare trois classements et deux conditions chiffrées aux calculs du serveur du ministère.
 
 ### Fiches métiers
 

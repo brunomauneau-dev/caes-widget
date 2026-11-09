@@ -66,6 +66,7 @@ parcoursup-opendata-reference-v1.json
 | METIERS | Fiches métiers reprises de la branche `friendly-brahmagupta` (PR 8, non fusionnée : conflits avec la conception actuelle) : 5 fichiers fictifs SAIO / proviseur / CIO / BTS / chargé d'études, 131 tests ; statut de candidature en clair reconnu ; « combien de refusés » (150 → 48), « liste d'attente » (export → 59), « non admis » (admis → 107) ; information absente → « critère non reconnu » | ✅ |
 | HEBDO | Essai sur données réelles lancé automatiquement chaque lundi ; ticket GitHub d'alerte (contrôle en échec, écart officiel, réponse changée, nouvelle session) ; option « tester l'alerte » | ✅ |
 | CLASSEMENT | Classer selon un chiffre : formations (ou académies, régions, communes, établissements) les plus demandées / sélectives / avec le plus de places, d'admis, de boursiers ; somme par groupe, jamais de taux additionné ; sans valeur écartées, ex æquo signalés ; export, graphique, relance « et à Bordeaux ? » ; 3 classements vérifiés contre le tri du serveur du ministère. Corrigé au passage : relances « et à / en / dans … » non reconnues ; en-têtes des tableaux croisés illisibles (bleu vif) | ✅ |
+| CHIFFRES-COND | Conditions chiffrées (plus de / moins de / au moins / au plus N places, candidats, admis ; taux d'accès inférieur / supérieur / égal à N) ; condition non comprise → arrêt (avant : ignorée, toutes les lignes comptées, ex. « BTS avec un taux d'accès de 0 » → 5 351) ; « les plus sélectifs » écarte les taux de 0 (aucune proposition Parcoursup) | ✅ |
 
 ---
 
