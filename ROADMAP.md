@@ -80,6 +80,6 @@ parcoursup-opendata-reference-v1.json
 
 ## Prochaines pistes (non planifiées)
 
-- **Base de connaissances, session 2027** : quand le guide Parcoursup 2027 sera disponible, le découper en fiches au format du widget, puis `python3 scripts/construire_index_kb.py fiches-2027.json` (le découpage du guide 2026 a été fait hors du dépôt : l'outil n'existe pas ici)
+- **Dates exactes de la session 2027** (facultatif) : le guide 2027 n'est pas disponible, et il change très peu d'une année à l'autre (seules les dates bougent) : la base 2026 reste la référence. Quand le calendrier 2027 sera publié, en ajouter les dates clés dans une fiche « Calendrier 2027 », puis `python3 scripts/construire_index_kb.py` ; le bandeau « Dates de la session 2026 » disparaîtra pour les questions de calendrier
 - Export PDF multi-blocs
 - **Options des PASS — suite** : relever l'option et la capacité sur la fiche Parcoursup de chaque PASS sans précision (site indisponible le 06/11), pour faire correspondre par établissement + capacité ; vérifier si la « cartographie des formations Parcoursup » du ministère donne l'option.

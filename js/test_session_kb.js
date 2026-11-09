@@ -78,7 +78,8 @@ await describe('Albert reçoit la session des fiches et la consigne', async () =
   ctx.__q = Q_CAL;
   const c = run(ctx, 'buildParcoursupKnowledgeContext(__q, "")');
   assert(/SESSION DES FICHES : session Parcoursup 2026 \(guide mis à jour le 12 juin 2026\)/.test(c), 'session des fiches dans le contexte');
-  assert(/la session en préparation est 2027/.test(c) && /ne présente jamais ces dates comme celles de 2027/.test(c), 'consigne : dire « session 2026 », ne pas présenter ces dates comme celles de 2027');
+  assert(/la session en préparation est 2027/.test(c) && /ne présente jamais une date de 2026 comme celle de 2027/.test(c), 'consigne : dire « session 2026 », ne pas présenter ces dates comme celles de 2027');
+  assert(/Les règles et la procédure de ces fiches restent valables/.test(c), 'consigne : les règles restent valables (seules les dates exactes changent)');
   const ajour = await makeCtx({ jour: '2026-05-04T10:00:00' });
   ajour.__q = Q_CAL;
   const c2 = run(ajour, 'buildParcoursupKnowledgeContext(__q, "")');
@@ -90,9 +91,10 @@ await describe('Bandeau sous la réponse d\'Albert', async () => {
   ctx.__q = Q_CAL;
   run(ctx, 'buildParcoursupKnowledgeContext(__q, "")');
   const b = run(ctx, 'bandeauCalendrierKB')('<p>La saisie des vœux est possible à partir du 19 janvier ; ajout jusqu’au 12 mars.</p>');
-  assert(/Dates de la session 2026/.test(b) && /mis à jour le 12 juin 2026/.test(b) && /session 2027 peut être différent/.test(b), 'réponse avec dates : bandeau « dates de la session 2026, calendrier 2027 peut différer »');
+  assert(/Dates de la session 2026/.test(b) && /mis à jour le 12 juin 2026/.test(b) && /les règles et la procédure restent valables/.test(b) && /session 2027 peuvent différer de quelques jours/.test(b), 'réponse avec dates : bandeau « règles valables, dates exactes de la session 2026 »');
   assert(run(ctx, 'bandeauCalendrierKB')('<p>Confirmation jusqu’au 1er avril.</p>') !== '', '« 1er avril » reconnu');
-  assert(run(ctx, 'bandeauCalendrierKB')('<p>Voici le calendrier de la phase principale.</p>') !== '', '« calendrier » reconnu');
+  // v27.20 — l'enchaînement du calendrier change très peu d'une année à l'autre : seules les dates précises comptent
+  assert(run(ctx, 'bandeauCalendrierKB')('<p>Le calendrier : saisie des vœux, puis confirmation, puis phase d’admission.</p>') === '', 'faux positif : le calendrier sans date précise, pas de bandeau');
   assert(run(ctx, 'bandeauCalendrierKB')('<p>Un candidat peut formuler jusqu’à 10 vœux.</p>') === '', 'faux positif : pas de date, pas de bandeau');
   assert(run(ctx, 'bandeauCalendrierKB')('<p>Il y a 5 351 BTS (12 académies).</p>') === '', 'faux positif : des nombres ne sont pas des dates');
   ctx.__q2 = 'combien de BTS dans le fichier ?';
