@@ -156,6 +156,11 @@ const GROUPES_OD = [
     "dans l'académie de Bordeaux, combien de PASS ?", "combien de PASS académie de Bordeaux"] },
   { nom: 'PASS hors académie de Bordeaux', type: 'count', v: m(o => o.fili === 'PASS' && o.aca !== 'Bordeaux'), variantes: [
     "combien de PASS hors académie de Bordeaux", "combien de PASS en dehors de l'académie de Bordeaux", "combien de PASS qui ne sont pas dans l'académie de Bordeaux"] },
+  // v27.22 — sigles absents des intitulés (open data réel : « BTS MCO » comptait tous les BTS)
+  { nom: 'BTS MCO', type: 'count', v: m(o => o.detail.startsWith('Management Commercial Opérationnel')), variantes: [
+    'combien de BTS MCO', 'nombre de BTS MCO', 'combien de BTS mco ?', 'combien de BTS management commercial opérationnel', 'combien de BTS Management Commercial Opérationnel'] },
+  { nom: 'BUT GEA', type: 'count', v: m(o => o.fili === 'BUT' && o.detail.startsWith('Gestion des entreprises et des administrations')), variantes: [
+    'combien de BUT GEA', 'nombre de BUT GEA', 'combien de BUT gestion des entreprises et des administrations'] },
   { nom: 'formations non sélectives', type: 'count', v: m(o => o.selectivite === 'formation non sélective'), variantes: [
     'combien de formations non sélectives', 'nombre de formations non sélectives', 'combien de formations qui ne sont pas sélectives', 'combien de formations sans sélection'] },
   { nom: 'BTS privés de l\'académie de Toulouse', type: 'count', v: m(o => o.fili === 'BTS' && o.statut !== 'Public' && o.aca === 'Toulouse'), variantes: [

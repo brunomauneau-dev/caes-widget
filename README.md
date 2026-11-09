@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-38 fichiers, 1 763 tests. Depuis la racine du repo :
+39 fichiers, 1 820 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -104,6 +104,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 - **open data** de 14 000 formations : statut public/privé, académie, département, ville, région, sélectivité, sommes (places, candidats, admis), moyennes (capacité, taux d'accès), en moins de 3 secondes par question.
 
 ### Réponses incorrectes et questions à revoir
+
+`js/test_sigles_formations.js` vérifie les **sigles et surnoms de formations**. Dans l'open data, « MCO », « NDRC », « SIO », « GEA », « TC », « khâgne » ou « Sciences Po » n'apparaissent dans aucun intitulé : le mot était ignoré sans prévenir, et le widget comptait tous les BTS, tous les BUT ou tout le fichier. Les sigles courants sont traduits vers les intitulés officiels (« BTS MCO » → Management Commercial Opérationnel), seulement s'ils sont absents de la source active (un fichier qui écrit « BTS MCO » reste lu tel quel). Et **un mot de la question qui ne correspond à rien arrête le calcul** (« combien de formations de pilote de ligne » → « pilote » non reconnu), au lieu de compter un ensemble plus large. Enfin, « licences de … » suit la catégorie officielle « Licence », comme « combien de licences » : les LAS (licences accès santé) ne sont plus comptées avec elles, et le périmètre dit combien sont laissées de côté (licences STAPS : 93, comme le ministère ; licences de droit : 273 = 264 « Droit » + 9 doubles licences avec droit).
 
 `js/test_rapport_pdf.js` vérifie le **rapport PDF**. « 🖨 PDF » sous une réponse imprime cette réponse seule (avant : toute la page) ; « 📑 Rapport PDF » (en-tête) réunit les réponses cochées, dans l'ordre de la conversation, avec un titre, la date, la source, un sommaire et la question avant chaque bloc. Titres, « Sur quoi porte ce calcul » et avertissements sont gardés ; boutons et détails techniques retirés. Le PDF s'obtient par « Enregistrer au format PDF » dans la fenêtre d'impression ; rien ne sort du navigateur.
 

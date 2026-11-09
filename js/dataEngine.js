@@ -801,7 +801,7 @@ const FORMATION_TERM_STOP = new Set(`
   public publics publique publiques prive prives privee privees statut etablissement etablissements session sessions
   annee annees france entiere national nationale nationaux academie academies region regions departement departements
   ville villes commune communes graphique tableau camembert histogramme top classement principales principaux
-  moyenne mediane minimum maximum existe existent propose proposes proposee proposees disponible disponibles
+  moyen moyens moyenne moyennes mediane minimum maximum existe existent propose proposes proposee proposees disponible disponibles
   ouvert ouverte ouvertes ouverts parcoursup open data donnees base jeu fichier table colonne colonnes ligne lignes
   non pas ne ni aucun aucune selective selectives selectif selectifs selection selectivite apprenti apprentis apprentie apprenties
   apprentissage alternance candidate candidates boursiere boursieres
@@ -905,7 +905,7 @@ function applyFormationTerms(plan) {
   const info = formationTermsInfo(plan.table);
   if (!info.cols.length) return plan;
   const formCols = new Set(info.cols);
-  const isFormationFilter = f => f && (f.source === 'termes_formation' || (formCols.has(f.col) && f.op !== 'neq'));
+  const isFormationFilter = f => f && f.source !== 'categorie_formation' && (f.source === 'termes_formation' || (formCols.has(f.col) && f.op !== 'neq'));
   const others = (plan.filters || []).filter(f => !isFormationFilter(f));
   const found = formationTermsFromQuestion(plan.table, plan.question, others);
   if (found.missing.length) plan.unresolvedTerms = found.missing;
@@ -913,25 +913,68 @@ function applyFormationTerms(plan) {
   const formFilters = (plan.filters || []).filter(f => isFormationFilter(f) && f.source !== 'termes_formation');
   const coveredByPlanner = formFilters.length && found.terms.every(t => formFilters.some(f => normalizeText(f.value).split(' ').some(w => t.includes(w))));
   if (coveredByPlanner) return plan;
+  // v27.22 — « licences de droit / STAPS » : « licence » est une catégorie officielle (Filière très agrégée = Licence),
+  // distincte de « Licence_Las » (LAS, licences accès santé). Par l'intitulé, les LAS étaient comptées aussi
+  // (licences STAPS : 134 au lieu de 93), alors que « combien de licences » les exclut. Quand plusieurs valeurs de la
+  // catégorie contiennent le mot, on filtre sur la valeur exacte, et la note du périmètre dit ce qui est laissé de côté.
+  // second passage (relance, nettoyage) : la catégorie déjà choisie est gardée, son mot n'est plus un mot d'intitulé
+  let catFilter = (plan.filters || []).find(f => f && f.source === 'categorie_formation') || null;
+  if (catFilter) {
+    const cv = normalizeText(catFilter.value);
+    const i = found.terms.findIndex(t => t.some(w => w === cv || w.replace(/s$/, '') === cv));
+    if (i >= 0) { found.terms.splice(i, 1); found.labels.splice(i, 1); }
+  } else if (found.terms.length > 1) {
+    const cat = _colonneCategories(plan.table, info);
+    // un filtre du planner sur cette colonne (« Licence ») n'empêche pas : il sera remplacé par le filtre de catégorie
+    const surCat = (plan.filters || []).filter(f => f && f.col === cat);
+    if (cat && surCat.every(f => f.op === 'eq')) {
+      const valeurs = new Map();
+      (plan.table.objects || []).forEach(r => { const v = r?.[cat]; if (v !== undefined && v !== null && String(v).trim()) valeurs.set(normalizeText(v), String(v).trim()); });
+      for (let i = 0; i < found.terms.length; i++) {
+        const formes = found.terms[i].flatMap(w => [w, w.replace(/s$/, '')]);
+        const exacte = formes.find(w => valeurs.has(w));
+        if (!exacte) continue;
+        // « Licence_Las » : le tiret bas sépare aussi les mots
+        const autres = [...valeurs.entries()].filter(([k]) => k !== exacte && formes.some(w => k.split(/[^a-z0-9]+/).includes(w))).map(([, v]) => v);
+        if (!autres.length) continue; // une seule valeur porte ce mot (BTS, PASS) : rien d'ambigu, on garde l'intitulé
+        if (surCat.some(f => normalizeText(f.value) !== exacte)) break; // le planner a choisi une autre catégorie : on n'y touche pas
+        catFilter = { col: cat, op: 'eq', value: valeurs.get(exacte), label: valeurs.get(exacte), source: 'categorie_formation' };
+        plan.filters = (plan.filters || []).filter(f => !surCat.includes(f));
+        plan.categorieExclue = { col: cat, valeur: valeurs.get(exacte), mot: found.labels[i], autres };
+        found.terms.splice(i, 1); found.labels.splice(i, 1);
+        break;
+      }
+    }
+  }
+  if (catFilter && !found.terms.length) { plan.filters = [...others.filter(f => f !== catFilter), catFilter]; return plan; }
   const filtre = makeFormationTermsFilter(plan.table, found.terms, found.labels);
   // v27.8 — si une seule colonne contient tous les mots, on prend la plus précise (le moins de lignes) :
   // « licences de droit » = « Licence - Droit », pas toute la famille « Licence - Droit, économie, gestion ».
   // Sinon (« CPGE » + « MPSI » dans deux colonnes différentes), on cherche sur toutes les colonnes ensemble.
-  if (found.terms.length > 1) {
+  // (v27.22 — aussi quand la catégorie a remplacé l'un des mots : « licences de droit » = Licence + « droit » dans la colonne précise)
+  if (found.terms.length > 1 || catFilter) {
     let meilleure = null;
-    const objets = plan.table.objects || [];
+    const objets = catFilter ? applyLocalActionFilters(plan.table.objects || [], [catFilter]) : (plan.table.objects || []);
     // seulement les colonnes remplies (≥ 80 % des lignes) : une colonne presque vide (« très détaillée »)
     // ne contient les deux mots que pour quelques lignes et donnerait un compte trop petit
     const remplie = c => objets.filter(r => String(r?.[c] ?? '').trim() !== '').length >= objets.length * 0.8;
     info.cols.filter(remplie).forEach(c => {
-      const n = applyLocalActionFilters(plan.table.objects || [], [{ ...filtre, cols: [c] }]).length;
+      const n = applyLocalActionFilters(objets, [{ ...filtre, cols: [c] }]).length;
       if (n > 0 && (!meilleure || n < meilleure.n)) meilleure = { c, n };
     });
     if (meilleure) filtre.cols = [meilleure.c];
   }
-  plan.filters = [...others, filtre];
+  plan.filters = [...others.filter(f => f !== catFilter), ...(catFilter ? [catFilter] : []), filtre];
   plan.mentionedCols = Array.from(new Set([...(plan.mentionedCols || []), ...info.cols]));
   return plan;
+}
+// Colonne des grandes catégories de formation (BTS, BUT, Licence…) : remplie, le moins de valeurs différentes (≥ 2)
+function _colonneCategories(table, info) {
+  const objets = table.objects || [];
+  const remplie = c => objets.filter(r => String(r?.[c] ?? '').trim() !== '').length >= objets.length * 0.8;
+  const nb = c => new Set(objets.slice(0, 5000).map(r => normalizeText(r?.[c]))).size;
+  const cand = info.cols.filter(remplie).map(c => ({ c, n: nb(c) })).filter(x => x.n >= 2 && x.n <= 40).sort((a, b) => a.n - b.n);
+  return cand.length ? cand[0].c : null;
 }
 
 // « liste / toutes les filières / quelles sont les options… » : valeurs distinctes, pas un export de lignes
@@ -1633,6 +1676,71 @@ const CONCEPTS_A_FILTRER = [
   { re: /\bselecti(f|fs|ve|ves)\b/, mot: 'sélective', ok: t => /selecti/.test(t) },
 ];
 const LIEUX_AMBIGUS = new Set('somme manche nord lot var ain cher orne oise eure gers aube aude gard jura tarn indre doubs loire marne meuse vienne creuse rhone yonne'.split(' '));
+/* v27.22 — Mot de la question qui n'a servi à rien : arrêt, au lieu de compter plus large.
+   Open data réel : « combien de khâgnes » comptait tout le fichier (14 252), « BTS NDRC » tous les BTS. Pour une
+   source où une ligne = une formation, chaque mot porteur de sens doit correspondre à un filtre, à une colonne
+   utilisée ou à un mot connu (outils de la question, lieux, mesures). Sinon le moteur s'arrête et le nomme. */
+const MOTS_QUESTION = new Set(`
+  combien quel quelle quels quelles nombre nombres total totale totaux somme effectif effectifs compte compter
+  formation formations filiere filieres ligne lignes dont avec sans pour par dans sur des les une aux leur
+  est sont ont a y il elles ils ya existe existent propose proposent proposees proposes offert offerte offertes offerts
+  y-a-t-il peux pouvez peut donne donner donnez moi indique indiquer dis dire calcule calculer montre montrer affiche afficher
+  ensemble actuellement actuelle actuel aujourd hui cette annee session sessions parcoursup open data jeu fichier donnees
+  repartition repartitions ventilation ventile distribution groupe groupes graphique tableau liste lister
+  moyen moyenne moyens moyennes median mediane minimum maximum min max part parts pourcentage pourcentages taux proportion
+  places place capacite capacites candidats candidat candidates candidate admis admises voeux voeu demandes demande demandees
+  propositions proposition boursiers boursier inscrits accueil accueillis accepte acceptes ecole ecoles etablissement etablissements
+  academie academies region regions departement departements commune communes ville villes lieu lieux france entiere national nationale
+  classement classe classer top premieres premiers derniers dernieres principales principaux ordre plus moins grand grands petit petits
+  evolution evoluer augmente baisse depuis entre rapport relativement compare comparaison an annee annees dernier derniere precedente
+  selective selectives selectif selectifs selectivite public publics publique publiques prive prives privee privees statut
+  apprentissage apprenti apprentis alternance svp merci stp
+  bas basse haut haute eleve elevee eleves elevees faible faibles fort forte forts fortes important importante
+  remplissage admission admissions acceptation reussite acces filles fille garcons garcon femmes hommes sexe genre
+  neo bachelier bacheliers bacheliere bachelieres bac general generale generaux technologique technologiques professionnel professionnels
+  origine meme accueillies accueillis recrutement recrutes`.trim().split(/\s+/));
+const MOTS_COURTS = new Set('a y d l s n j m t c qu de la le du au un et ou en se ne sa son ma ta me te on il je tu nb vs si ni mes ses ces des les une aux par sur'.split(' '));
+function elaguerTermesCouverts(plan) {
+  const tf = (plan.filters || []).find(f => f && f.op === 'contains_all');
+  if (!tf || !Array.isArray(tf.terms)) return plan;
+  const autres = (plan.filters || []).filter(f => f && f !== tf && f.op !== 'contains_all' && f.op !== 'neq' && !SYMBOLES_OPS[f.op]);
+  const sing = w => String(w).replace(/(s|x)$/, '');
+  const mots = new Set(autres.flatMap(f => normalizeText(f.value).split(' ')).filter(w => w.length >= 3).map(sing));
+  if (!mots.size) return plan;
+  const labels = String(tf.label || '').split(' + ');
+  // singulier / pluriel confondus (« Nouvelles » d'un intitulé, « Nouvelle » de la région)
+  const garder = tf.terms.map((t, i) => ({ t, l: labels[i] })).filter(x => !(Array.isArray(x.t) ? x.t : [x.t]).some(w => mots.has(sing(w))) && !mots.has(sing(normalizeText(x.l || ''))));
+  if (garder.length === tf.terms.length) return plan;
+  if (!garder.length) { plan.filters = plan.filters.filter(f => f !== tf); return plan; }
+  const nv = { ...tf, terms: garder.map(x => x.t), label: garder.map(x => x.l).join(' + '), value: garder.map(x => x.l).join(' + ') };
+  plan.filters = plan.filters.map(f => f === tf ? nv : f);
+  return plan;
+}
+function motsNonReconnus(plan) {
+  if (!plan || !plan.table || plan.table.rowUnit !== 'formation') return [];
+  if (!['count_rows', 'sum', 'stats', 'group_by', 'top', 'classement', 'part'].includes(plan.tool)) return [];
+  if (plan.dimensionIntrouvable && !plan.targetCol) return []; // « par couleur » : message dédié plus loin
+  const info = formationTermsInfo(plan.table);
+  const filtres = [...(plan.filters || []), ...((plan.tool === 'part' && plan.part?.condition) || [])].filter(Boolean);
+  const cols = [plan.targetCol, plan.targetCol2, plan.sumCol, plan.groupSumCol, plan.classement?.col, plan.classement?.entite?.col, plan.part?.num, plan.part?.den, ...filtres.map(f => f.col)].filter(Boolean);
+  const connus = new Set();
+  const ajouter = t => normalizeText(t).split(' ').forEach(w => { if (w) connus.add(w); });
+  filtres.forEach(f => { ajouter(f.value); ajouter(f.label || ''); (f.terms || []).forEach(t => (Array.isArray(t) ? t : [t]).forEach(ajouter)); });
+  cols.forEach(c => ajouter(_hx(c)));
+  (plan.table.headers || []).forEach(h => ajouter(h)); // un mot d'en-tête désigne une colonne (« taux d'accès »)
+  const prefixe = w => w.slice(0, Math.min(5, w.length));
+  const couvert = w => connus.has(w) || [...connus].some(c => c.length >= 4 && w.length >= 4 && prefixe(c) === prefixe(w));
+  const q = normalizeText(plan.question || '');
+  const manque = [];
+  q.split(' ').forEach(w => {
+    // mots de 2 lettres : seuls les mots outils sont ignorés (« Sciences Po », « BUT TC » : « po », « tc » comptent)
+    if (!w || /^\d/.test(w) || (w.length < 3 && MOTS_COURTS.has(w))) return;
+    if (FORMATION_TERM_STOP.has(w) || MOTS_QUESTION.has(w) || info.geo.has(w) || couvert(w)) return;
+    manque.push(w);
+  });
+  return [...new Set(manque)];
+}
+
 function conceptsNonFiltres(plan) {
   if (!plan || !plan.table || ['compare', 'chart_current', 'export_current_excel', 'export_current_csv'].includes(plan.tool)) return [];
   let q = normalizeText(plan.question || '');
@@ -1835,6 +1943,74 @@ const REFORMULATIONS = [
   [/\b(?:sur|dans)\s+(?:la\s+)?(?:commune|ville)\s+de\s+(?![ld]['’]|la\b|l\s)/gi, 'à '],
   [/\b(?:la\s+)?(?:commune|ville)\s+de\s+(?=[A-ZÀ-Ý])/g, 'à '],
 ];
+/* v27.22 — Sigles et surnoms de formations → mots des intitulés officiels.
+   Open data réel : « MCO », « NDRC », « SIO », « GEA », « TC », « khâgne », « Sciences Po » n'apparaissent dans
+   aucun intitulé ; le mot était ignoré et le moteur comptait tous les BTS (5 351), tous les BUT (820), tout le
+   fichier (khâgnes) ou toutes les formations dont l'intitulé contient « Sciences » (2 525). Un sigle n'est traduit
+   que s'il est absent des intitulés de la source active (un fichier qui écrit « BTS MCO » reste lu tel quel) et que
+   les mots de la traduction y sont tous. [re, traduction, sigle tel qu'il serait écrit dans les données] */
+const SIGLES_FORMATIONS = [
+  // BTS
+  [/\bmco\b|\bmuc\b/gi, 'management commercial opérationnel', 'mco'],
+  [/\bndrc\b|\bnrc\b/gi, 'négociation et digitalisation de la relation client', 'ndrc'],
+  [/\bsio\b/gi, 'services informatiques aux organisations', 'sio'],
+  [/\bbts\s+cg\b/gi, 'BTS comptabilité et gestion', 'cg'],
+  [/\bbts\s+ci\b/gi, 'BTS commerce international', 'ci'],
+  [/\bsam\b/gi, 'support à l action managériale', 'sam'],
+  [/\bgpme\b|\bpme\s*-?\s*pmi\b/gi, 'gestion de la PME', 'gpme'],
+  [/\bsp3s\b/gi, 'services et prestations des secteurs sanitaire et social', 'sp3s'],
+  [/\besf\b/gi, 'économie sociale familiale', 'esf'],
+  [/\bciel\b/gi, 'cybersécurité informatique et réseaux électronique', 'ciel'],
+  [/\bati\b/gi, 'assistance technique d ingénieur', 'ati'],
+  // BUT
+  [/\bgea\b/gi, 'gestion des entreprises et des administrations', 'gea'],
+  [/\bbut\s+tc\b/gi, 'BUT techniques de commercialisation', 'tc'],
+  [/\bgeii\b/gi, 'génie électrique et informatique industrielle', 'geii'],
+  [/\bgmp\b/gi, 'génie mécanique et productique', 'gmp'],
+  [/\bmmi\b/gi, 'métiers du multimédia et de l internet', 'mmi'],
+  [/\bqlio\b/gi, 'qualité logistique industrielle et organisation', 'qlio'],
+  [/\bgccd\b/gi, 'génie civil construction durable', 'gccd'],
+  [/\bbut\s+cj\b/gi, 'BUT carrières juridiques', 'cj'],
+  [/\bbut\s+rt\b/gi, 'BUT réseaux et télécommunications', 'rt'],
+  // prépas littéraires, Sciences Po, écoles, santé
+  [/\b(?:hypo)?kh[aâ]gnes?\s+b\s*\/?\s*l\b|\bcpge\s+b\s*\/\s*l\b/gi, 'CPGE lettres et sciences sociales', 'khagne'],
+  [/\b(?:hypo)?kh[aâ]gnes?\b|\bcpge\s+a\s*\/?\s*l\b/gi, 'CPGE lettres', 'khagne'], // A/L ; la B/L est une autre valeur
+  // sigle null : traduit même si le mot existe ailleurs dans les données (« orthophonie » dans une licence
+  // préparatoire, « Sciences Po » dans un intitulé de licence) — la traduction désigne la formation elle-même
+  [/\bsciences?\s*-?\s*po\b|\biep\b|\binstituts?\s+d\s*['’]?\s*(?<![a-zà-ÿ])[eé]tudes\s+politiques\b/gi, 'instituts d études politiques', null],
+  [/(?<![a-zà-ÿ])[eé]coles?\s+de\s+commerce\b/gi, 'formation des écoles de commerce et de management', null],
+  [/(?<![a-zà-ÿ])[eé]coles?\s+d\s*['’]?\s*ing[eé]nieurs?\b/gi, 'formations des écoles d\'ingénieurs', null],
+  [/\bstaps\b/gi, 'sciences et techniques des activités physiques et sportives', null],
+  [/\borthophonie\b/gi, 'orthophoniste', null],
+  [/\b(?:formations?\s+en\s+)?soins\s+infirmiers\b/gi, 'IFSI', null],
+  [/\bifsi\b/gi, 'D.E infirmier', 'ifsi'],
+  [/\bl1\b/gi, 'licence', null], // première année de licence : sur Parcoursup, toutes les licences sont des L1
+];
+function appliquerSiglesFormations(question, table) {
+  let q = String(question ?? '');
+  if (!table || !Array.isArray(table.objects) || !table.objects.length) return q;
+  let info;
+  try { info = formationTermsInfo(table); } catch (e) { return q; }
+  if (!info.cols.length) return q;
+  // texte de tous les intitulés (une fois par valeur distincte) pour chercher un sigle ou une expression
+  if (!info._texteIntitules) {
+    const vus = new Set();
+    table.objects.forEach(r => info.cols.forEach(c => { const v = r?.[c]; if (v !== undefined && v !== null && v !== '') vus.add(normalizeText(v)); }));
+    info._texteIntitules = ` ${[...vus].join(' | ')} `;
+  }
+  const present = expr => info._texteIntitules.includes(` ${normalizeText(expr)} `);
+  SIGLES_FORMATIONS.forEach(([re, trad, sigle]) => {
+    re.lastIndex = 0;
+    if (!re.test(q)) return;
+    re.lastIndex = 0;
+    if (sigle && present(sigle)) return; // le sigle existe tel quel dans les données : on le garde
+    const mots = normalizeText(trad).split(' ').filter(w => w.length >= 3 && !FORMATION_TERM_STOP.has(w));
+    if (!mots.every(w => info.words.has(w) || info.words.has(w.replace(/s$/, '')) || info.words.has(w + 's'))) return; // traduction absente : on ne change rien
+    q = q.replace(re, trad);
+  });
+  return q;
+}
+
 function reformulerQuestion(question) {
   let q = String(question ?? '');
   REFORMULATIONS.forEach(([re, rep]) => { q = q.replace(re, rep); });
@@ -1965,6 +2141,9 @@ function detectDataEnginePlan(question, filterContextText = question) {
   const tables = getActiveQueryTables();
   if (!tables.length) return null;
   const table = tables[0]; // Grist est déjà prioritaire dans getActiveQueryTables()
+  // v27.22 — sigles (« BTS MCO », « BUT GEA », « khâgne », « Sciences Po ») → mots des intitulés de la source
+  const _avecSigles = appliquerSiglesFormations(question, table);
+  if (_avecSigles !== question) { if (filterContextText === question) filterContextText = _avecSigles; question = _avecSigles; }
   if (!table || !table.objects || !table.objects.length) return null;
   const headers = table.headers || Object.keys(table.objects[0] || {});
 
@@ -2243,10 +2422,12 @@ function _finalSanitizeAnalysisPlanBase(plan) {
 
   const onlyBoursier = /^(combien|nombre|effectif|total)\s+(de\s+)?(candidats\s+)?(non\s+)?boursiers?\s*\??$/.test(q);
   // v27.7 — filtre « intitulé de formation contenant » : vient de la question elle-même, toujours conservé
-  const termFilters = (plan.filters || []).filter(f => f && f.source === 'termes_formation');
+  // v27.22 — la catégorie officielle tirée d'un mot de la question (« licences » → Licence) aussi
+  const _deQuestion = f => f && (f.source === 'termes_formation' || f.source === 'categorie_formation');
+  const termFilters = (plan.filters || []).filter(_deQuestion);
   const keepTermFilters = () => {
     if (!termFilters.length) return;
-    plan.filters = [...(plan.filters || []).filter(f => f.source !== 'termes_formation'), ...termFilters];
+    plan.filters = [...(plan.filters || []).filter(f => !_deQuestion(f)), ...termFilters];
   };
 
   if (onlyBoursier) {
@@ -2709,12 +2890,19 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
   if (plan.tool !== 'compare' && plan.tool !== 'chart_current' && plan.tool !== 'export_current_excel' && plan.tool !== 'export_current_csv') {
     const manque = conceptsNonFiltres(plan);
     if (manque.length) return unresolvedConceptExecution(plan, manque);
+    // v27.22 — un mot d'intitulé déjà couvert par un autre filtre (« Nouvelle » de « Région = Nouvelle Aquitaine »,
+    // ajouté après la recherche des intitulés) n'est pas un critère d'intitulé : on le retire
+    elaguerTermesCouverts(plan);
     const termFilter = (plan.filters || []).find(f => f && f.op === 'contains_all');
     // v27.17 — option lisible seulement pour une partie des formations (PASS) : pas de chiffre trop petit
     const _precision = termFilter ? precisionPartielleIntitules(plan, termFilter) : null;
     if (_precision) return unresolvedPrecisionExecution(plan, _precision);
     if (plan.unresolvedTerms && plan.unresolvedTerms.length) return unresolvedFormationExecution(plan, plan.unresolvedTerms, termFilter);
     if (termFilter && !applyLocalActionFilters(plan.table.objects || [], [termFilter]).length) return unresolvedFormationExecution(plan, [], termFilter);
+    // v27.22 — un mot de la question n'a correspondu à rien (« khâgnes », « NDRC ») : arrêt, pas un compte plus large
+    // (après les messages plus précis : formation non trouvée, option non précisée)
+    const inconnus = motsNonReconnus(plan);
+    if (inconnus.length) return unresolvedConceptExecution(plan, inconnus, `je n'ai reconnu dans les données ni intitulé ni colonne pour « ${inconnus.join(' », « ')} » : le chiffre porterait sur un ensemble plus large que celui demandé. Écrivez l'intitulé tel qu'il figure dans les données (par exemple « BTS management commercial opérationnel » plutôt que « BTS MCO »)`);
   }
   if (plan.tool === 'compare') {
     const groups = plan.compareGroups || detectCompareGroups(plan.table, plan.question);
@@ -3105,6 +3293,15 @@ function perimetreResultat(kind, plan, result) {
         if (n > 0) notes.push(`aucune ${mot(1)} dans la commune de ${fc.value}, mais ${_nf(n)} dans ${nom} de ${fc.value} (demandez « … dans ${nom} de ${fc.value} »)`);
       });
     }
+  }
+  // v27.22 — catégorie exacte (« Licence ») : formations d'une catégorie voisine (« Licence_Las ») laissées de côté
+  if (plan.categorieExclue && ['count', 'count_rows', 'sum', 'stats', 'group_by', 'top', 'classement', 'part'].includes(kind)) {
+    const ce = plan.categorieExclue;
+    const sans = filtres.filter(f => !(f.col === ce.col && f.op === 'eq'));
+    ce.autres.forEach(v => {
+      const k = applyLocalActionFilters(table.objects || [], [...sans, { col: ce.col, op: 'eq', value: v }]).length;
+      if (k > 0) notes.push(`${_nf(k)} ${mot(k)} « ${v} » (${/las/i.test(v) ? 'LAS, licences accès santé' : 'autre catégorie'}) ont aussi ces mots mais ne sont pas comptée${k > 1 ? 's' : ''} : seule la catégorie « ${ce.valeur} » est retenue`);
+    });
   }
   if (kind === 'group_by' && plan.listMode && result.sansPrecision) {
     const sans = (result.total || 0) - (result.filled || 0);

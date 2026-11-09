@@ -28,6 +28,9 @@ export const QUESTIONS = [
   { id: 'zoologie', q: 'combien de PASS option Zoologie' },
   // v27.17 — option précisée pour une partie des PASS seulement (70 sur 287 en 2025)
   { id: 'bio_bdx', q: 'combien de PASS option biologie à Bordeaux' },
+  // v27.22 — mot non reconnu : arrêt, jamais un compte plus large
+  { id: 'mot_inconnu', q: 'combien de formations de pilote de ligne' },
+  { id: 'bts_ndrc', q: 'combien de BTS NDRC' },
   // v27.18 — mesure par groupe et évolution par groupe
   { id: 'places_par_aca', q: 'nombre de places en BTS par académie' },
   { id: 'formations_par_aca', q: 'nombre de BTS par académie' },
@@ -198,6 +201,27 @@ export function diagnosticColonnes(table, filiere = 'PASS') {
   }) };
 }
 
+// Diagnostic des intitulés (variable DIAG_MOTS, mots séparés par « ; ») : pour chaque mot, les valeurs exactes
+// des colonnes de formation qui le contiennent, avec leur nombre de formations. Sert à vérifier comment le ministère
+// nomme une formation (« khâgne », « MCO », « Sciences Po »…) avant de corriger le moteur. Calcul direct sur les lignes.
+const _nd = s => String(s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/œ/g, 'oe').replace(/[^a-z0-9]+/g, ' ').trim();
+export function diagnosticMots(table, mots = []) {
+  const cols = (table.headers || []).filter(h => /fili|formation|intitul|nom complet|libell/i.test(h) && !/statut|nombre|effectif|capacit|taux|%|rang|code|session|lien/i.test(h));
+  return mots.map(m => String(m).trim()).filter(Boolean).map(mot => {
+    // « orthophon* » : début de mot (orthophonie, orthophoniste) ; sinon mot entier
+    const prefixe = /\*$/.test(mot);
+    const base = _nd(mot.replace(/\*$/, ''));
+    const contient = v => prefixe ? ` ${_nd(v)}`.includes(` ${base}`) : ` ${_nd(v)} `.includes(` ${base} `);
+    const lignes = (table.objects || []).filter(o => cols.some(c => contient(o[c])));
+    return { mot, total: lignes.length, colonnes: cols.map(c => {
+      const comptes = new Map();
+      lignes.forEach(o => { const v = String(o[c] ?? '').trim(); if (v && contient(v)) comptes.set(v, (comptes.get(v) || 0) + 1); });
+      return { colonne: c, distinctes: comptes.size, valeurs: [...comptes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([v, k]) => `${v} (${k})`) };
+    }).filter(x => x.distinctes) };
+  });
+}
+export function motsDiagnostic(texte) { return String(texte || '').split(';').map(s => s.trim()).filter(Boolean); }
+
 export function poserQuestions(table, questions = QUESTIONS, autresSessions = []) {
   return questions.map(item => {
     const ctx = creerMoteur({ table, autresSessions });
@@ -246,6 +270,9 @@ export function controler(resultats) {
     ctl('« places en BTS par académie » : somme des places, pas le nombre de BTS', R.places_par_aca.kind === 'group_by' && !!R.places_par_aca.somme && bdx(R.places_par_aca) > bdx(R.formations_par_aca), `Bordeaux : ${bdx(R.places_par_aca) ?? '?'} places · ${bdx(R.formations_par_aca) ?? '?'} BTS`);
   }
   if (R.evo_formations_demandees) ctl('évolution d\'un classement de formations : arrêt expliqué (pas suivies une à une)', R.evo_formations_demandees.kind === 'unresolved', R.evo_formations_demandees.reponse);
+  if (R.mot_inconnu) ctl('mot absent des données (« pilote ») : arrêt, pas tout le fichier', R.mot_inconnu.kind === 'unresolved', R.mot_inconnu.reponse);
+  // sigle absent des intitulés : traduit (une partie des BTS) ou arrêt — jamais tous les BTS
+  if (R.bts_ndrc && R.bts) ctl('« BTS NDRC » : une partie des BTS (ou arrêt), jamais tous', R.bts_ndrc.kind === 'unresolved' || (R.bts_ndrc.kind === 'count' && R.bts_ndrc.count > 0 && R.bts_ndrc.count < R.bts.count), `${R.bts_ndrc.reponse} · BTS : ${R.bts.count ?? '?'}`);
   if (R.zoologie) ctl('« PASS option Zoologie » : non trouvée, pas de chiffre', R.zoologie.kind === 'unresolved', R.zoologie.reponse);
   if (R.bts) ctl('« combien de BTS » : un nombre, ni zéro ni tout le fichier', R.bts.kind === 'count' && R.bts.count > 0 && R.bts.count < R.bts.total, R.bts.reponse);
   if (R.licence_droit && R.droit) ctl('« licences de droit » ne se confond pas avec PASS option Droit', R.licence_droit.kind === 'count' && R.licence_droit.count > 0 && R.licence_droit.count !== R.droit.count, `${R.licence_droit.reponse} · PASS option Droit : ${R.droit.count ?? '?'}`);
@@ -373,7 +400,7 @@ function sectionComparaison(cmp) {
   return l;
 }
 
-export function rapport(table, resultats, controles, diag = null, cmp = undefined, verifs = null) {
+export function rapport(table, resultats, controles, diag = null, cmp = undefined, verifs = null, diagMots = []) {
   const ok = controles.filter(c => c.ok).length;
   const lignes = [];
   lignes.push(`# Essai sur données réelles — ${table?.name || 'open data'}`);
@@ -401,6 +428,12 @@ export function rapport(table, resultats, controles, diag = null, cmp = undefine
     (r.lignes || []).slice(0, 30).forEach(x => lignes.push(`- ${x.value} : **${x.count.toLocaleString('fr-FR')}**`));
     if ((r.lignes || []).length > 30) lignes.push(`- … et ${r.lignes.length - 30} autres`);
     (r.suggestions || []).forEach(s => lignes.push(`- proposé : ${s}`));
+  });
+  (diagMots || []).forEach(d => {
+    lignes.push('', `## Diagnostic du mot « ${d.mot} » : ${d.total.toLocaleString('fr-FR')} formation(s) dont un intitulé le contient (mot entier)`, '');
+    if (!d.colonnes.length) { lignes.push('Aucun intitulé ne contient ce mot.'); return; }
+    lignes.push('| Colonne | Valeurs | Exemples (formations) |', '|---|---|---|');
+    d.colonnes.forEach(c => lignes.push(`| ${cell(c.colonne)} | ${c.distinctes} | ${cell(c.valeurs.join(' · '))} |`));
   });
   if (diag && diag.n) {
     lignes.push('');
@@ -462,6 +495,12 @@ export const REFERENCES = [
   { id: 'ref_places_bts_par_aca', q: 'nombre de places en BTS par académie', type: 'group', champ: 'acad_mies', somme: 'capa_fin', egal: { fili: 'BTS' } },
   { id: 'ref_evolution_bts_par_aca', q: 'évolution du nombre de BTS par académie depuis {N-1}', type: 'evolution_groupe', base: { type: 'group', champ: 'acad_mies', egal: { fili: 'BTS' } } },
   { id: 'ref_evolution_places_aca', q: 'les académies avec le plus de places en BTS : évolution depuis {N-1}', type: 'evolution_groupe', base: { type: 'group', champ: 'acad_mies', somme: 'capa_fin', egal: { fili: 'BTS' } } },
+  // v27.22 — sigles et surnoms de formations : chiffre du serveur filtré sur l'intitulé officiel
+  { id: 'ref_bts_mco', q: 'combien de BTS MCO', type: 'count', egal: { fili: 'BTS', fil_lib_voe_acc: 'Management Commercial Opérationnel' } },
+  { id: 'ref_ecoles_commerce', q: "combien d'écoles de commerce", type: 'count', egal: { fili: 'Ecole de Commerce' } },
+  { id: 'ref_khagnes', q: 'combien de khâgnes', type: 'count', egal: { fili: 'CPGE', fil_lib_voe_acc: 'Lettres' } },
+  { id: 'ref_licences_staps', q: 'combien de licences STAPS', type: 'count', egal: { fili: 'Licence', fil_lib_voe_acc: 'Sciences et Techniques des Activités Physiques et Sportives' } },
+  { id: 'ref_orthophonie', q: "combien de formations d'orthophonie", type: 'count', egal: { fil_lib_voe_acc: "Certificat de capacité d'Orthophoniste" } },
   { id: 'ref_top_places_bdx', q: 'les 5 formations avec le plus de places à Bordeaux', type: 'top', champ: 'capa_fin', ordre: 'desc', n: 5, egal: { ville_etab: 'Bordeaux' } },
 ];
 const _odsql = v => `"${String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
@@ -594,7 +633,7 @@ export function sectionOfficiels(verifs) {
   return l;
 }
 
-export async function essai({ fetchImpl = globalThis.fetch, questions = QUESTIONS, precedent = undefined, contexte = {}, references = REFERENCES } = {}) {
+export async function essai({ fetchImpl = globalThis.fetch, questions = QUESTIONS, precedent = undefined, contexte = {}, references = REFERENCES, mots = [] } = {}) {
   const table = await chargerOpenData(fetchImpl);
   // v27.16 — session précédente (comparaisons) ; « {N-1} » dans une question = l'année de cette session
   const n1 = Number(table.session) - 1;
@@ -615,7 +654,8 @@ export async function essai({ fetchImpl = globalThis.fetch, questions = QUESTION
   const diag = diagnosticColonnes(table);
   const snap = instantane(table, resultats, contexte);
   const cmp = precedent === undefined ? undefined : comparer(precedent, snap);
-  return { table, resultats, controles, verifs, diag, instantane: snap, comparaison: cmp, texte: rapport(table, resultats, controles, diag, cmp, verifs) };
+  const diagMots = diagnosticMots(table, mots);
+  return { table, resultats, controles, verifs, diag, diagMots, instantane: snap, comparaison: cmp, texte: rapport(table, resultats, controles, diag, cmp, verifs, diagMots) };
 }
 
 // Instantané du lancement précédent, déposé par le workflow dans precedent/ (absent au premier lancement)
@@ -654,6 +694,7 @@ async function main() {
   try {
     res = await essai({
       questions: [...QUESTIONS, ...questionsEnPlus(process.env.QUESTIONS_EN_PLUS)],
+      mots: motsDiagnostic(process.env.DIAG_MOTS),
       precedent: lirePrecedent(process.env.ESSAI_PRECEDENT || 'precedent/essai_resultats.json'),
       contexte: { branche: process.env.GITHUB_REF_NAME || '', commit: (process.env.GITHUB_SHA || '').slice(0, 7) },
     });

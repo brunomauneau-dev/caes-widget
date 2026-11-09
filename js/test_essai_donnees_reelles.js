@@ -34,7 +34,7 @@ const add = (n, v) => { for (let i = 0; i < n; i++) lignes.push(v.join(';')); };
 add(30, [2025, 'Public', 'Université de Bordeaux', 'Bordeaux', 'Bordeaux', 'PASS', 'PASS', "Parcours d'Accès Spécifique Santé (PASS)", 'PASS option Droit', 50, 900, 'PASS Bordeaux']);
 add(10, [2025, 'Privé sous contrat', 'Institut catholique', 'Toulouse', 'Toulouse', 'PASS', 'PASS', "Parcours d'Accès Spécifique Santé (PASS)", 'PASS option Droit', 40, 300, 'PASS Toulouse']);
 add(60, [2025, 'Public', 'Université de Bordeaux', 'Bordeaux', 'Bordeaux', 'PASS', 'PASS', "Parcours d'Accès Spécifique Santé (PASS)", 'PASS option Biologie', 60, 1200, 'PASS Bordeaux']);
-add(300, [2025, 'Public', 'Lycée Gustave Eiffel', 'Bordeaux', 'Bordeaux', 'BTS', 'BTS - Services', 'BTS - Management Commercial Opérationnel', 'Management Commercial Opérationnel', 30, 400, 'BTS MCO Eiffel']);
+add(300, [2025, 'Public', 'Lycée Gustave Eiffel', 'Bordeaux', 'Bordeaux', 'BTS', 'BTS - Services', 'Management Commercial Opérationnel', 'Management Commercial Opérationnel', 30, 400, 'BTS MCO Eiffel']);
 add(200, [2025, 'Public', 'Faculté de Droit et Science politique', 'Pau', 'Bordeaux', 'Licence', 'Licence - Droit, économie, gestion', 'Licence - Droit', 'Droit', 200, 2500, 'Licence Droit Pau']);
 const CSV = FIELDS.map(f => f[0]).join(';') + '\n' + lignes.join('\n');
 
