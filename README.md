@@ -44,7 +44,7 @@ Table Grist additionnelle (chargée via GitHub Actions) :
 
 | Table | Rôle |
 |---|---|
-| `Parcoursup_National` | Données nationales Parcoursup n-1 (académie Bordeaux, session 2025, 631 lignes). Rechargeable manuellement via l'onglet *Actions* → `.github/workflows/load-parcoursup.yml`. |
+| `Parcoursup_National` | Copie Grist de l'open data Parcoursup (académie Bordeaux), rechargeable via l'onglet *Actions* → `.github/workflows/load-parcoursup.yml`. Le widget ne la lit plus d'office (l'ancien bouton « National 2025 » est retiré) : pour l'interroger, la choisir dans le sélecteur de source comme toute table Grist. |
 
 ---
 
@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-32 fichiers, 1 529 tests. Depuis la racine du repo :
+33 fichiers, 1 547 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -104,6 +104,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 - **open data** de 14 000 formations : statut public/privé, académie, département, ville, région, sélectivité, sommes (places, candidats, admis), moyennes (capacité, taux d'accès), en moins de 3 secondes par question.
 
 ### Réponses incorrectes et questions à revoir
+
+`js/test_sans_mode_national.js` vérifie le retrait du bouton **« National 2025 »**. Ce bouton changeait seulement le sous-titre : aucun calcul ne s'en servait, et un agent pouvait croire interroger la France entière en 2025 alors que le calcul portait sur la source choisie. La source se choisit désormais uniquement dans le sélecteur.
 
 `js/test_retours.js` vérifie le bouton **« 👎 Réponse incorrecte »**, présent sous chaque réponse. L'agent peut préciser ce qui ne va pas, par exemple le chiffre attendu. Le widget note aussi automatiquement deux cas :
 - les questions qu'il n'a pas comprises (« Critère non reconnu ») ;

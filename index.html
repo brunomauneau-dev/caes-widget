@@ -13,7 +13,7 @@
 <script src="js/planner.js?v=27.5.15" defer></script>
 <script src="js/dataEngine.js?v=27.5.36" defer></script>
 <script src="js/config.js?v=27.5.9" defer></script>
-<script src="js/knowledge.js?v=27.5.23" defer></script>
+<script src="js/knowledge.js?v=27.5.24" defer></script>
 <script src="js/documents.js?v=27.5.16" defer></script>
 <script src="js/infographic.js?v=27.5.11" defer></script>
 <script src="js/sessions.js?v=27.5.21" defer></script>
@@ -937,7 +937,6 @@
         <button class="header-action" onclick="openSessionsPanel()" title="Retrouver vos anciennes conversations et en démarrer une nouvelle">🗂 <span class="label">Sessions</span></button>
         <button class="header-action primary" onclick="openSourcesPanel()" title="Voir quelle table Grist ou quels fichiers sont utilisés pour répondre à vos questions">📂 <span class="label">Sources</span></button>
         <button class="header-action" onclick="openInfographicComposer()" title="Créer une infographie en choisissant parmi vos résultats précédents dans cette conversation">🖼 <span class="label">Composer une infographie</span></button>
-        <button class="header-action" id="btn-national-mode" onclick="toggleNationalMode()" title="Interroger les données nationales Parcoursup 2025 (académie Bordeaux)">🇫🇷 <span class="label">National 2025</span></button>
         <button class="header-action" onclick="ouvrirPanneauRetours()" title="Réponses signalées (👎) et questions non comprises : à exporter pour améliorer le widget">📝 <span class="label">À revoir</span> <span id="retours-compteur" style="display:none;background:var(--rouge,#e1000f);color:#fff;border-radius:999px;padding:0 6px;font-size:10px;font-weight:700"></span></button>
         <button class="header-action" onclick="resetCopilotDialogue()" title="Effacer le contexte actuel (filtres, dernière question) pour repartir d'une analyse neutre">↻ <span class="label">Reset</span></button>
         <div class="albert-badge"><div class="dot"></div>Albert API</div>
@@ -1186,23 +1185,6 @@
 <!-- ═══════════════ CONTENEUR D'IMPRESSION PDF CIBLÉE (bloc unique) ═══════════════ -->
 <div id="de-print-root"></div>
 
-<script>
-function toggleNationalMode() {
-  const btn = document.getElementById('btn-national-mode');
-  if (!btn) return;
-  const isActive = btn.classList.toggle('active');
-  if (typeof setNationalMode === 'function') setNationalMode(isActive);
-  const sub = document.getElementById('chat-sub');
-  if (sub) {
-    if (isActive) {
-      sub.dataset.prevText = sub.textContent;
-      sub.textContent = '🇫🇷 Données nationales 2025 — académie Bordeaux';
-    } else {
-      sub.textContent = sub.dataset.prevText || '';
-    }
-  }
-}
-</script>
 
 </body>
 </html>
