@@ -72,6 +72,7 @@ parcoursup-opendata-reference-v1.json
 | NATIONAL | Bouton « National 2025 » retiré : il ne changeait que le sous-titre (aucun calcul ni Albert ne lisait ce mode) et faisait croire à un calcul France entière 2025 ; chargement inutile de la table `Parcoursup_National` au démarrage supprimé (`test_sans_mode_national.js`) | ✅ |
 | OPTIONS-PASS | Options des PASS (option écrite pour 70 PASS sur 287) : « PASS option Biologie à Bordeaux » ne répond plus 0 « calcul exact » mais « Option non précisée » avec ce que disent les données ; « liste des PASS » signalée incomplète ; formations sans précision listées par établissement avec la capacité de chacune ; règle générale (mot lisible seulement dans une colonne remplie à moins de 80 % pour la famille) ; 0 dans la commune de Bordeaux complété par le nombre dans l'académie (PASS à Talence). Bug corrigé : « PASS dans l'académie de Bordeaux » compris « hors académie » (« pas » trouvé dans « PASS » : 279 au lieu de 8) (`test_options_pass.js`) | ✅ |
 | EVOL-GROUPES | Répartition d'une mesure : « places / candidats / admis par académie » = somme par groupe (avant : nombre de formations affiché comme des places) ; tableau croisé de places → arrêt. Évolution entre deux sessions des répartitions et des classements de groupes (valeurs, écart, %, rangs, total, groupes nouveaux ou disparus) ; formations suivies une à une et tableaux croisés → arrêt expliqué ; 3 vérifications par le serveur du ministère (`test_evolution_groupes.js`) | ✅ |
+| CODE-MORT | `documents.js` : 193 lignes jamais appelées retirées (tableaux croisés `buildCrossTabs`, ontologie `PARCOURSUP_ONTOLOGY_RULES` / `classifyParcoursupColumn`, `summarizeColumnForOntology`, `detectParcoursupAnalysisIntent`, `LOCAL_TOOLS`, `isLocalExportRequest`) ; contrôle permanent « aucune fonction sans appel » (`test_code_mort.js`) | ✅ |
 | RETOURS | Bouton « 👎 Réponse incorrecte » (commentaire facultatif) ; questions non comprises et chiffres d'Albert non vérifiés notés automatiquement ; « 📝 À revoir » : liste, export CSV / texte, effacement ; tout reste dans le navigateur (localStorage), résumé du résultat seulement, 300 entrées au plus | ✅ |
 
 ---
@@ -80,5 +81,4 @@ parcoursup-opendata-reference-v1.json
 
 - Mise à jour KB vers v3 (`build_parcoursup_kb_v3.py` prêt dans `scripts/`)
 - Export PDF multi-blocs
-- Nettoyer le code mort de `documents.js` (`PARCOURSUP_ONTOLOGY_RULES`, `classifyParcoursupColumn`, jamais appelés)
 - **Options des PASS — suite** : relever l'option et la capacité sur la fiche Parcoursup de chaque PASS sans précision (site indisponible le 06/11), pour faire correspondre par établissement + capacité ; vérifier si la « cartographie des formations Parcoursup » du ministère donne l'option.

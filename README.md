@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-35 fichiers, 1 665 tests. Depuis la racine du repo :
+36 fichiers, 1 703 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -104,6 +104,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 - **open data** de 14 000 formations : statut public/privé, académie, département, ville, région, sélectivité, sommes (places, candidats, admis), moyennes (capacité, taux d'accès), en moins de 3 secondes par question.
 
 ### Réponses incorrectes et questions à revoir
+
+`js/test_code_mort.js` vérifie que le **code jamais appelé** retiré de `documents.js` (anciens tableaux croisés, ancienne classification des colonnes, ancienne détection des exports : 193 lignes) ne revient pas, que les modules se chargent toujours ensemble, et qu'aucune fonction de `documents.js` ne reste sans appel.
 
 `js/test_evolution_groupes.js` vérifie les **répartitions d'une mesure** et leur **évolution entre deux sessions**. « Nombre de places en BTS par académie » donne la somme des places de chaque académie (avant : le nombre de BTS, présenté comme des places) ; de même pour les candidats et les admis. « Évolution du nombre de BTS (ou des places) par académie depuis 2024 » et « les académies avec le plus de places : évolution » donnent, groupe par groupe, la valeur de chaque session, l'écart, l'évolution en %, les rangs et le total ; un groupe absent d'une session est signalé. Les formations ne peuvent pas être suivies une à une d'une année à l'autre, ni les tableaux croisés comparés : le widget le dit.
 
