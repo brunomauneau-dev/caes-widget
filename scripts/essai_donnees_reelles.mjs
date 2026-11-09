@@ -124,6 +124,10 @@ function resumer(ctx, question) {
   } else if (exec.kind === 'stats') {
     r.moyenne = exec.result.avg; r.colonne = exec.plan?.targetCol;
     r.reponse = `moyenne ${Number(r.moyenne).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} (colonne « ${r.colonne} »)`;
+  } else if (exec.kind === 'classement') {
+    r.colonne = exec.plan.classement.col; r.valeurs = exec.result.lignes.map(l => l.valeur); r.total = exec.result.total;
+    r.lignes = exec.result.lignes.map(l => ({ value: `${l.rang}. ${l.libelles.join(' — ')}`, count: l.valeur }));
+    r.reponse = `classement de ${r.valeurs.length} selon « ${r.colonne} » : ${r.valeurs.slice(0, 3).join(' · ')}…`;
   } else if (exec.kind === 'unresolved') {
     r.suggestions = (exec.result?.suggestions || []).map(x => `${x.value} (${x.count})`);
     r.reponse = `Non reconnu, pas de chiffre (${(exec.result?.missing || []).join(', ') || 'termes jamais réunis'})`;
@@ -236,7 +240,7 @@ export function controler(resultats) {
     ctl(`reformulations « ${g} » : même chiffre pour les ${rs.length} tournures`, ok, rs.map(r => `« ${r.question} » → ${valeurReponse(r)}`).join(' · '));
   });
   // Chaque résultat chiffré porte son périmètre
-  const chiffres = resultats.flatMap(r => r.conversation || [r]).filter(r => ['count', 'sum', 'group_by', 'top', 'stats'].includes(r.kind));
+  const chiffres = resultats.flatMap(r => r.conversation || [r]).filter(r => ['count', 'sum', 'group_by', 'top', 'stats', 'classement'].includes(r.kind));
   if (chiffres.length) ctl('chaque résultat chiffré dit sur quoi il porte (périmètre)', chiffres.every(r => r.perimetre && /retenues? sur/.test(r.perimetre)), `${chiffres.filter(r => r.perimetre).length} / ${chiffres.length}`);
 
   // Contrôle général : une question qui cite une formation ne doit jamais compter tout le fichier
@@ -257,6 +261,7 @@ function valeurReponse(r) {
   if (r.kind === 'sum') return r.sum;
   if (r.kind === 'stats') return Math.round(Number(r.moyenne) * 100) / 100;
   if (r.kind === 'group_by' || r.kind === 'top') return `${r.distinct ?? (r.lignes || []).length} valeurs / ${r.total}`;
+  if (r.kind === 'classement') return (r.valeurs || []).join(' · ');
   if (r.kind === 'unresolved') return 'non reconnu';
   return r.kind;
 }
@@ -372,14 +377,20 @@ export const REFERENCES = [
   { id: 'ref_capa_moy_bts', q: 'capacité moyenne des BTS', type: 'avg', champ: 'capa_fin', egal: { fili: 'BTS' } },
   { id: 'ref_par_region', q: 'nombre de formations par région', type: 'group', champ: 'region_etab_aff' },
   { id: 'ref_par_filiere', q: 'répartition des formations par filière de formation très agrégée', type: 'group', champ: 'fili' },
+  // v27.14 — classements : le serveur trie lui-même ; mêmes valeurs, même ordre
+  { id: 'ref_top_demandees', q: 'quelles sont les formations les plus demandées', type: 'top', champ: 'voe_tot', ordre: 'desc', n: 10 },
+  { id: 'ref_top_bts_selectifs', q: 'les 10 BTS les plus sélectifs', type: 'top', champ: 'taux_acces_ens', ordre: 'asc', n: 10, egal: { fili: 'BTS' } },
+  { id: 'ref_top_places_bdx', q: 'les 5 formations avec le plus de places à Bordeaux', type: 'top', champ: 'capa_fin', ordre: 'desc', n: 5, egal: { ville_etab: 'Bordeaux' } },
 ];
 const _odsql = v => `"${String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 export function requeteOfficielle(ref, session) {
-  const conds = [...Object.entries(ref.egal || {}).map(([k, v]) => `${k}=${_odsql(v)}`),
+  const conds = [...Object.entries(ref.egal || {}).map(([k, v]) => `${k}=${_odsql(v)}`), ...(ref.type === 'top' ? [`${ref.champ} is not null`] : []),
     ...Object.entries(ref.different || {}).map(([k, v]) => `(${k} is null or ${k}!=${_odsql(v)})`)];
   const p = new URLSearchParams();
-  p.set('select', ref.type === 'count' ? 'count(*) as n' : ref.type === 'sum' ? `sum(${ref.champ}) as n` : ref.type === 'avg' ? `avg(${ref.champ}) as n` : `${ref.champ} as cle, count(*) as n`);
-  if (ref.type === 'group') { p.set('group_by', ref.champ); p.set('limit', '100'); } else p.set('limit', '1');
+  p.set('select', ref.type === 'count' ? 'count(*) as n' : ref.type === 'sum' ? `sum(${ref.champ}) as n` : ref.type === 'avg' ? `avg(${ref.champ}) as n` : ref.type === 'top' ? `${ref.champ} as n` : `${ref.champ} as cle, count(*) as n`);
+  if (ref.type === 'group') { p.set('group_by', ref.champ); p.set('limit', '100'); }
+  else if (ref.type === 'top') { p.set('order_by', `${ref.champ} ${ref.ordre === 'asc' ? 'asc' : 'desc'}`); p.set('limit', String(ref.n || 10)); }
+  else p.set('limit', '1');
   if (conds.length) p.set('where', conds.join(' and '));
   p.append('refine', `session:${session}`);
   return `${API_PARCOURSUP}/records?${p}`;
@@ -394,6 +405,7 @@ export async function chiffresOfficiels(fetchImpl, session, refs = REFERENCES) {
       if (!Array.isArray(res)) throw new Error('réponse sans résultats');
       out[ref.id] = ref.type === 'group'
         ? { valeur: Object.fromEntries(res.map(x => [x.cle === null || x.cle === undefined || x.cle === '' ? '(vide)' : String(x.cle), Number(x.n)])) }
+        : ref.type === 'top' ? { valeur: res.map(x => Number(x.n)) }
         : { valeur: Number(res[0]?.n ?? 0) };
     } catch (e) { out[ref.id] = { erreur: e.message }; }
   }
@@ -417,6 +429,11 @@ export function verifierOfficiels(officiels, resultats, refs = REFERENCES) {
       if ((w.sansValeur || 0) !== vides) ecarts.push(`sans valeur : officiel ${vides}, widget ${w.sansValeur || 0}`);
       const nb = Object.keys(off.valeur).filter(k => k !== '(vide)').length;
       return { ...base, statut: ecarts.length ? 'ecart' : 'ok', officiel: `${nb} valeurs`, widget: w.reponse, detail: ecarts.length ? ecarts.slice(0, 5).join(' · ') : `${nb} valeurs identiques à l'unité` };
+    }
+    if (ref.type === 'top') {
+      const obtenu = w.kind === 'classement' ? (w.valeurs || []) : null;
+      const ok = !!obtenu && JSON.stringify(obtenu) === JSON.stringify(off.valeur);
+      return { ...base, statut: ok ? 'ok' : 'ecart', officiel: off.valeur.join(' · '), widget: obtenu ? obtenu.join(' · ') : w.reponse, detail: ok ? `${off.valeur.length} valeurs identiques, même ordre` : 'classement différent' };
     }
     const attendu = ref.type === 'avg' ? Math.round(off.valeur * 100) / 100 : off.valeur;
     const obtenu = ref.type === 'count' ? (w.kind === 'count' ? w.count : null)

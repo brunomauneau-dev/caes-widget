@@ -68,7 +68,7 @@ jobs:
           RAPPORT: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           if [ ! -f essai_alerte.json ]; then
-            echo '{"titre":"Essai hebdomadaire : test de l alerte","texte":"✅ Ceci est un test du circuit d alerte : tout va bien. Vous pouvez fermer ce ticket."}' > essai_alerte.json
+            echo '{"titre":"Essai hebdomadaire : test de l’alerte","texte":"✅ Ceci est un test du circuit d’alerte : tout va bien. Vous pouvez fermer ce ticket."}' > essai_alerte.json
           fi
           titre=$(node -e "console.log(JSON.parse(require('fs').readFileSync('essai_alerte.json','utf8')).titre)")
           node -e "const a=JSON.parse(require('fs').readFileSync('essai_alerte.json','utf8')); console.log(a.texte + '\n\n📄 Rapport complet : ' + process.env.RAPPORT)" > alerte.md

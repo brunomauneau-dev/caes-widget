@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-28 fichiers, 1 325 tests. Depuis la racine du repo :
+29 fichiers  1 375 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -102,6 +102,19 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 - colonnes d'**état** écrites Oui/Non, **1/0** ou **VRAI/FAUX** : filtrées, jamais additionnées ni moyennées ;
 - classeur dont le 1er onglet est une **notice** ;
 - **open data** de 14 000 formations : statut public/privé, académie, département, ville, région, sélectivité, sommes (places, candidats, admis), moyennes (capacité, taux d'accès), en moins de 3 secondes par question.
+
+### Classements
+
+`js/test_classement.js` vérifie les questions de classement, par exemple « quelles sont les formations les plus demandées », « les 10 BTS les plus sélectifs », « les formations avec le plus de places à Bordeaux » ou « les académies avec le plus de places ». Les formations, ou les regroupements, sont triées selon une colonne chiffrée, et le test vérifie l'ordre et les valeurs.
+
+Règles vérifiées :
+- « plus sélectif » signifie un taux d'accès plus bas ;
+- les formations sans valeur sont écartées et comptées ;
+- les ex æquo sont signalés ;
+- un taux n'est jamais additionné par académie : le widget s'arrête ;
+- une question comme « les critères les plus importants » reste à Albert.
+
+L'essai sur données réelles compare trois classements au tri fait par le serveur du ministère.
 
 ### Fiches métiers
 

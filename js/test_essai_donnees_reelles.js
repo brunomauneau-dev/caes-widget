@@ -48,6 +48,13 @@ function agregatOfficiel(p) {
   for (const [, k, v] of where.matchAll(/\((\w+) is null or \w+!="([^"]*)"\)/g)) rows = rows.filter(r => r[k] !== v);
   const sel = p.get('select');
   const num = (r, c) => Number(r[c]);
+  for (const [, k] of where.matchAll(/(\w+) is not null/g)) rows = rows.filter(r => r[k] !== '' && r[k] !== undefined);
+  // classement : valeurs triées par le serveur
+  if (p.get('order_by')) {
+    const [c, sens] = p.get('order_by').split(' ');
+    const vals = rows.map(r => num(r, c)).filter(Number.isFinite).sort((a, b) => sens === 'asc' ? a - b : b - a).slice(0, Number(p.get('limit')));
+    return { results: vals.map(n => ({ n })) };
+  }
   let n;
   if (p.get('group_by')) {
     const c = p.get('group_by'); const m = new Map();
@@ -69,7 +76,8 @@ function fakeFetch(url) {
   if (u.includes('/exports/csv')) return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve(CSV) });
   if (u.includes('/records?')) {
     // comme le vrai serveur : un champ inconnu → erreur 400
-    const champ = (new URL(u).searchParams.get('select').match(/\((\w+)\)/) || [])[1];
+    const sel = new URL(u).searchParams.get('select');
+    const champ = (sel.match(/\((\w+)\)/) || sel.match(/^(\w+) as n$/) || [])[1];
     if (champ && champ !== '*' && !FIELDS.some(([n]) => n === champ)) return Promise.resolve({ ok: false, status: 400, json: () => Promise.resolve({}) });
     return json(agregatOfficiel(new URL(u).searchParams));
   }
@@ -289,6 +297,12 @@ await describe('v27.12 — Chiffres officiels : le widget retrouve à l\'unité 
   assert(faux[0].statut === 'ecart' && /PASS : officiel 100, widget absent/.test(faux[0].detail) && /sans valeur : officiel 4, widget 0/.test(faux[0].detail), 'répartition : valeur absente et cases vides → écarts détaillés');
   assert(V.ref_admis_bts.statut === 'indisponible' && /HTTP 400/.test(V.ref_admis_bts.detail), 'champ absent des données (admis) : non vérifié, pas un faux « identique »');
   assert(R.ref_admis_bts === undefined && res.verifs.length, 'questions de référence posées à part (pas mélangées aux questions de l\'essai)');
+  // v27.14 — classements : mêmes valeurs, même ordre que le tri du serveur
+  assert(V.ref_top_demandees.statut === 'ok' && /10 valeurs identiques, même ordre/.test(V.ref_top_demandees.detail), `classement « les plus demandées » identique au tri du serveur (obtenu : ${V.ref_top_demandees.statut} ${V.ref_top_demandees.detail} · officiel ${V.ref_top_demandees.officiel} · widget ${V.ref_top_demandees.widget})`);
+  assert(V.ref_top_places_bdx.statut === 'ok', `classement « le plus de places à Bordeaux » identique (obtenu : ${V.ref_top_places_bdx.officiel} / ${V.ref_top_places_bdx.widget})`);
+  assert(/order_by=voe_tot\+desc/.test(requeteOfficielle(REFERENCES.find(r => r.id === 'ref_top_demandees'), 2025)) && /voe_tot\+is\+not\+null/.test(requeteOfficielle(REFERENCES.find(r => r.id === 'ref_top_demandees'), 2025)), 'requête de classement : tri par le serveur, valeurs vides exclues (comme le widget)');
+  const vt = verifierOfficiels({ t: { valeur: [9, 8, 7] } }, [{ id: 't', kind: 'classement', valeurs: [9, 7, 8], reponse: 'x' }], [{ id: 't', q: 't', type: 'top' }]);
+  assert(vt[0].statut === 'ecart', 'classement dans un autre ordre → écart');
   assert(sectionOfficiels([]).length === 0 && sectionOfficiels(null).length === 0, 'aucune référence : pas de section');
 });
 

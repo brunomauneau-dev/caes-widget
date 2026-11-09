@@ -155,7 +155,8 @@ function isExplicitFreshDataQuestion(question) {
 function isFilterOnlyFollowUp(question) {
   const q = normalizeText(question || '').trim();
   if (/^combien\s+(sont[- ]ils|y\s*(?:en\s+)?a[- ]?t[- ]?il|en tout|au total|maintenant|cela|ca|[cç]a)\s*\??$/.test(q)) return true;
-  return /^(seulement|uniquement|avec|sans|sauf|hors|excluant|en excluant|les boursiers|les non boursiers|non boursiers|boursiers|et pour|et les|et chez|parmi les|pour les|chez les|uniquement les|notamment les|en particulier|et parmi)/.test(q);
+  // v27.14 — « et à Bordeaux ? », « et en Gironde ? », « et dans l'académie de Toulouse ? », « et sur Pau ? »
+  return /^(seulement|uniquement|avec|sans|sauf|hors|excluant|en excluant|les boursiers|les non boursiers|non boursiers|boursiers|et pour|et les|et chez|parmi les|pour les|chez les|uniquement les|notamment les|en particulier|et parmi|et a |et au |et aux |et en |et dans |et sur |et hors |et sauf )/.test(q);
 }
 
 // PR 2.1 — distingue "filtre sur population" vs "nouvelle paire à comparer".
@@ -306,7 +307,8 @@ function strictFiltersFromQuestion(table, question) {
   }
   const selCol = headersS.find(h => /selectiv/.test(_hx(h)));
   // v27.10 — « par sélectivité » est une répartition, pas un filtre : seul l'adjectif (sélectif, sélectives…) filtre
-  if (selCol && /\bselecti(f|fs|ve|ves)\b/.test(q)) {
+  // v27.14 — « les plus / moins sélectives » est un critère de classement, pas un filtre
+  if (selCol && /(?<!\b(?:plus|moins) )\bselecti(f|fs|ve|ves)\b/.test(q)) {
     const non = /\bnon selecti/.test(q);
     const v = _distinctValues(table, selCol).find(x => { const n = normalizeText(x); return non ? /non selecti/.test(n) : (/selecti/.test(n) && !/\bnon\b/.test(n)); });
     if (v) add(selCol, v, 'eq');
@@ -423,6 +425,7 @@ function inheritConversationContext(plan, question) {
       if (!plan.targetCol && prev.targetCol && !plan.dimensionIntrouvable) plan.targetCol = prev.targetCol;
     } else if (filterFollowUp) {
       plan.tool = prev.tool || plan.tool;
+      if (prev.tool === 'classement' && prev.classement && !plan.classement) plan.classement = prev.classement; // « et à Bordeaux ? »
       if (prev.targetCol)  plan.targetCol  = prev.targetCol;
       if (prev.targetCol2) plan.targetCol2 = prev.targetCol2;
       if (prev.limit)      plan.limit      = prev.limit;
@@ -1006,6 +1009,158 @@ function applyMeasureSum(plan) {
   return plan;
 }
 
+/* ═══════════════ v27.14 — Classement selon un chiffre ═══════════════
+   « les formations les plus demandées », « les 10 BTS les plus sélectifs », « les académies avec le plus de places ».
+   Les lignes (ou les groupes : académies, régions…) sont triées sur une colonne chiffrée ; les lignes sans valeur
+   sont écartées et comptées. Un taux ne s'additionne pas : pas de classement de groupes sur un taux (arrêt). */
+const CLASSEMENT_CUE = /\b(les?|la) (plus|moins)\b|\b(plus|moins) (grandes?|petites?|nombreu)|\bclassement\b|\bclasse[rz]?\b|\bmeilleur(e|es|s)?\b|\btop\s*\d*\b|\bpalmares\b/;
+const CLASSEMENT_MESURES = [
+  // « plus sélectif » = taux d'accès le plus bas
+  { re: /\bselecti(f|fs|ve|ves)\b|\bselectivite\b/, col: /taux d acces/, inverse: true, libelle: "taux d'accès", additif: false, mot: /\bselecti(f|fs|ve|ves)\b|\bselectivite\b/ },
+  { re: /\btaux d ?acces\b/, col: /taux d acces/, libelle: "taux d'accès", additif: false, mot: /\btaux d ?acces\b/ },
+  { re: /\b(pourcentage|part|taux|%)\b.*\bboursiers?\b|\bboursiers?\b.*\b(pourcentage|part|taux)\b/, col: /^% .*boursier|pourcentage.*boursier|part.*boursier/, libelle: '% de boursiers', additif: false, mot: /\bboursiers?\b|\b(pourcentage|part|taux)\b/ },
+  { re: /\bboursiers?\b/, col: /admis boursier/, libelle: 'admis boursiers', additif: true, mot: /\bboursiers?\b|\badmis\b/ },
+  { re: /\badmis(es)?\b/, col: /ayant accepte.*admis|\badmis\b/, libelle: 'admis', additif: true, mot: /\badmis(es)?\b/, numerique: true },
+  { re: /\bplaces?\b|\bcapacites?\b|\b(plus|moins) (grandes?|petites?)\b/, col: /capacit/, libelle: 'places', additif: true, mot: /\bplaces?\b|\bcapacites?\b|\bgrandes?\b|\bpetites?\b/ },
+  { re: /\bdemande(e|es|s)?\b|\battractiv|\bpopulaires?\b|\bprisee?s?\b|\bcandidats?\b|\bcandidatures?\b/, col: /effectif total des candidats pour une formation/, libelle: 'candidats', additif: true, mot: /\bdemande(e|es|s)?\b|\battractiv\w*|\bpopulaires?\b|\bprisee?s?\b|\bcandidats?\b|\bcandidatures?\b/ },
+  { re: /\bvoeux\b/, col: /^nb.*voeux|nombre.*voeux|\bvoeux\b/, libelle: 'vœux', additif: true, mot: /\bvoeux\b/ },
+];
+const CLASSEMENT_ENTITES = [
+  { re: /academies?/, col: h => /^academie/.test(h) && !/code/.test(h), nom: 'académies' },
+  { re: /regions?/, col: h => /^region/.test(h) && !/code/.test(h), nom: 'régions' },
+  { re: /departements?/, col: h => /^departement/.test(h) && !/code/.test(h), nom: 'départements' },
+  { re: /communes?|villes?/, col: h => /^(commune|ville)/.test(h) && !/code|insee|postal/.test(h), nom: 'communes' },
+  { re: /etablissements?|lycees|universites|ecoles/, col: h => /^etablissement( d accueil)?$|^etablissement\b/.test(h) && !/code|uai|statut|academie|commune|departement|region/.test(h), nom: 'établissements' },
+];
+const _estNumerique = (table, h) => { const st = numericStats((table.objects || []).slice(0, 400), h); return st.numericCount >= Math.max(3, Math.min(400, (table.objects || []).length) * 0.5); };
+function detecterClassement(table, question) {
+  if (!table || !Array.isArray(table.objects) || !table.objects.length) return null;
+  const q = normalizeText(question || '');
+  if (!CLASSEMENT_CUE.test(q)) return null;
+  const headers = (table.headers || Object.keys(table.objects[0] || {})).filter(Boolean);
+  // le critère est d'abord le mot qui suit « le(s) plus / moins » (« les formations sélectives les plus demandées » → demandées)
+  // (3 mots au plus : « les critères les plus importants pour être admis » n'est pas un classement des admis)
+  const apres = (q.match(/\b(?:les?|la) (?:plus|moins) (?:de |d )?([a-z0-9]+(?: [a-z0-9]+){0,2})/) || [])[1] || '';
+  // ailleurs dans la question seulement pour « le plus haut / bas / élevé », « classement … par / selon », « top N … par »
+  const ailleurs = !apres || /^(haut|hauts|haute|hautes|eleve|elevee|eleves|elevees|bas|basse|basses|faibles?|forts?|fortes?|grands?|grandes?|petits?|petites?|gros|grosses?)\b/.test(apres)
+    || /\bclassement\b|\bclasse[rz]?\b|\btop\s*\d*\b.*\b(par|selon)\b|\bpalmares\b/.test(q);
+  const ordreMesures = apres ? [...CLASSEMENT_MESURES.filter(m => m.re.test(apres)), ...CLASSEMENT_MESURES.filter(m => !m.re.test(apres))] : CLASSEMENT_MESURES;
+  for (const m of ordreMesures) {
+    if (!(m.re.test(apres) || (ailleurs && m.re.test(q)))) continue;
+    const col = headers.find(h => m.col.test(_hx(h)) && _estNumerique(table, h));
+    if (!col) continue;
+    const moins = /\b(les?|la) moins\b|\bmoins (grandes?|nombreu)|\b(plus|moins) petites?\b|\bplus (faibles?|bas(se|ses)?)\b|\ble plus bas\b|\bderniers?\b/.test(q);
+    const croissant = m.inverse ? !moins : moins;
+    // entité classée : formations (les lignes) par défaut, ou un regroupement nommé comme sujet (« les académies avec… »)
+    let entite = null;
+    const sujet = q.match(/(?:^|\b(?:les|quel(?:le)?s?|top\s*\d*\s*(?:des)?|classement des)\s+(?:\d+\s+)?)(academies?|regions?|departements?|communes?|villes?|etablissements?|lycees|universites|ecoles)\b(?!\s+(?:de|d|du|des)\s)/);
+    if (sujet) {
+      const e = CLASSEMENT_ENTITES.find(x => x.re.test(sujet[1]));
+      const ecol = e && headers.find(h => e.col(_hx(h)));
+      if (e && ecol) entite = { col: ecol, nom: e.nom };
+    }
+    const n = (q.match(/\b(?:top|les|des)\s+(\d{1,3})\b/) || q.match(/\b(\d{1,3})\s+(?:premier|premieres|formations|bts|cpge|licences|but|academies|regions|communes|etablissements)/) || [])[1];
+    const unique = /\b(quel(?:le)?|la formation|le bts|l etablissement|l academie)\b[^?]*\b(le|la) (plus|moins)\b/.test(q) && !/\bquel(le)?s\b/.test(q);
+    return { col, ordre: croissant ? 'asc' : 'desc', libelle: m.libelle, additif: m.additif, mot: m.mot, entite, limit: n ? Math.min(Number(n), 100) : (unique ? 1 : 10) };
+  }
+  // « les communes avec le plus de formations », « les lycées avec le plus de candidats » (une ligne = un candidat) :
+  // classement par nombre de lignes = répartition triée (outil top)
+  const sujet = q.match(/(?:^|\b(?:les|quel(?:le)?s?|top\s*\d*\s*(?:des)?|classement des)\s+(?:\d+\s+)?)(academies?|regions?|departements?|communes?|villes?|etablissements?|lycees|universites|ecoles)\b(?!\s+(?:de|d|du|des)\s)/);
+  if (sujet && /\b(le|les) plus de (formations?|lignes?|candidats?|eleves|dossiers?)\b|\b(le|les) plus (nombreu|represente)/.test(q)) {
+    const e = CLASSEMENT_ENTITES.find(x => x.re.test(sujet[1]));
+    const ecol = e && headers.find(h => e.col(_hx(h)));
+    const n = (q.match(/\b(?:top|les|des)\s+(\d{1,3})\b/) || [])[1];
+    if (ecol) return { frequence: true, entite: { col: ecol, nom: e.nom }, limit: n ? Math.min(Number(n), 100) : 10, mot: /\b(formations?|lignes?|candidats?|eleves|dossiers?)\b/ };
+  }
+  return null;
+}
+function applyClassement(plan) {
+  if (!plan || !plan.table || ['compare', 'chart_current', 'export_current_excel', 'export_current_csv', 'export_excel', 'export_csv'].includes(plan.tool)) return plan;
+  const c = detecterClassement(plan.table, plan.question);
+  if (!c) return plan;
+  if (c.frequence) { plan.tool = 'top'; plan.targetCol = c.entite.col; plan.limit = c.limit; return plan; }
+  plan.tool = 'classement';
+  plan.classement = c;
+  plan.targetCol = c.entite ? c.entite.col : null;
+  // le critère de classement n'est pas un filtre : « les plus sélectives » ne garde pas que les sélectives,
+  // « les plus demandées » ne cherche pas un intitulé « demandées »
+  const q = normalizeText(plan.question || '');
+  plan.filters = (plan.filters || []).filter(f => {
+    if (!f) return false;
+    if (f.op === 'contains_all') {
+      const mots = (f.terms || []).map(t => (Array.isArray(t) ? t : [t]).map(normalizeText));
+      const restants = mots.filter(forms => !forms.some(w => c.mot.test(w)));
+      if (restants.length === mots.length) return true;
+      if (!restants.length) return false;
+      f.terms = restants; f.label = f.value = restants.map(x => x[0]).join(' + ');
+      return true;
+    }
+    if (/selecti/.test(_hx(f.col)) && c.col && /taux d acces/.test(_hx(c.col)) && !/\bformations? (non )?selectives?\b(?!.*\b(plus|moins) selecti)/.test(q)) return false;
+    return true;
+  });
+  if (plan.unresolvedTerms) plan.unresolvedTerms = plan.unresolvedTerms.filter(t => !c.mot.test(normalizeText(Array.isArray(t) ? t[0] : t)));
+  return plan;
+}
+// Colonnes qui décrivent une formation dans le classement : intitulé, établissement, commune
+function _colonnesDescription(table) {
+  const headers = (table.headers || []).filter(Boolean);
+  const objets = table.objects || [];
+  const remplie = h => objets.slice(0, 500).filter(r => String(r?.[h] ?? '').trim() !== '').length >= Math.min(500, objets.length) * 0.8;
+  const info = formationTermsInfo(table);
+  const nbVal = h => new Set(objets.slice(0, 2000).map(r => r?.[h])).size;
+  const intitule = info.cols.filter(remplie).sort((a, b) => nbVal(b) - nbVal(a))[0];
+  const etab = headers.find(h => /^etablissement$|^etablissement d accueil$/.test(_hx(h))) || headers.find(h => /etablissement/.test(_hx(h)) && !/code|uai|statut|academie|commune|departement|region|origine/.test(_hx(h)) && !_estNumerique(table, h));
+  const commune = headers.find(h => /^(commune|ville)/.test(_hx(h)) && !/code|insee|postal|origine/.test(_hx(h)));
+  // une ligne qui n'est pas une formation (candidat, dossier) : son identifiant en premier
+  const ident = table.rowUnit === 'formation' ? null : headers.find(h => /^(numero|num|n°|id|identifiant|dossier|ine)\b/.test(_hx(h)));
+  return [ident, intitule, etab, commune].filter((h, i, a) => h && a.indexOf(h) === i);
+}
+function executerClassement(plan) {
+  const c = plan.classement;
+  const rows = applyLocalActionFilters(plan.table.objects || [], plan.filters || []);
+  const avecValeur = rows.map(r => ({ r, v: _nombreCellule(r?.[c.col]) })).filter(x => x.v !== null);
+  const sansValeur = rows.length - avecValeur.length;
+  let lignes, exAequo = 0;
+  if (c.entite) {
+    if (!c.additif) return unresolvedConceptExecution(plan, [], `un classement des ${c.entite.nom} selon le ${c.libelle} demanderait de combiner des taux, ce que le widget ne fait pas (un taux ne s'additionne pas). Classez plutôt les formations : « les formations les plus … »`);
+    const m = new Map();
+    avecValeur.forEach(({ r, v }) => { const k = String(r?.[c.entite.col] ?? '').trim() || 'Non renseigné'; const g = m.get(k) || { valeur: k, total: 0, n: 0 }; g.total += v; g.n++; m.set(k, g); });
+    const tri = [...m.values()].sort((a, b) => c.ordre === 'asc' ? a.total - b.total : b.total - a.total);
+    lignes = tri.slice(0, c.limit).map((g, i) => ({ rang: i + 1, libelles: [g.valeur], valeur: Math.round(g.total * 100) / 100, n: g.n }));
+    if (tri.length > c.limit) exAequo = tri.slice(c.limit).filter(g => g.total === tri[c.limit - 1].total).length;
+  } else {
+    const desc = _colonnesDescription(plan.table);
+    const tri = avecValeur.slice().sort((a, b) => c.ordre === 'asc' ? a.v - b.v : b.v - a.v);
+    lignes = tri.slice(0, c.limit).map((x, i) => ({ rang: i + 1, libelles: desc.map(h => String(x.r?.[h] ?? '').trim()), valeur: x.v }));
+    plan.colonnesDescription = desc;
+    if (tri.length > c.limit) exAequo = tri.slice(c.limit).filter(x => x.v === tri[c.limit - 1].v).length;
+  }
+  const result = { lignes, total: rows.length, avecValeur: avecValeur.length, sansValeur, exAequo, groupes: c.entite ? new Set(avecValeur.map(x => String(x.r?.[c.entite.col] ?? '').trim() || 'Non renseigné')).size : null };
+  const exec = { kind: 'classement', plan, result, text: lignes.map(l => `${l.rang}. ${l.libelles.join(' — ')} : ${l.valeur}`).join('\n') };
+  exec.html = renderClassementHtml(plan, result);
+  return exec;
+}
+function renderClassementHtml(plan, result) {
+  const c = plan.classement;
+  const sens = c.inverse ? (c.ordre === 'asc' ? 'les plus sélectives' : 'les moins sélectives') : (c.ordre === 'asc' ? `le moins de ${c.libelle}` : `le plus de ${c.libelle}`);
+  const pluriel = result.lignes.length > 1;
+  const quoi = c.entite ? (pluriel ? c.entite.nom : c.entite.nom.replace(/s$/, '')) : (plan.table?.rowUnit === 'formation' ? (pluriel ? 'formations' : 'formation') : (pluriel ? 'lignes' : 'ligne'));
+  const titre = `Classement — ${result.lignes.length} ${quoi} ${c.inverse ? sens : `avec ${sens}`}`;
+  const entetes = c.entite ? [c.entite.col.replace(/ de l'établissement.*$/i, '')] : (plan.colonnesDescription || []).map(h => _shortColName(h) || h);
+  const fmt = v => Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 2 });
+  const th = 'text-align:left;padding:6px 8px;background:#e8edff;color:var(--bleu,#003189);font-size:11px';
+  const td = 'padding:6px 8px;border-bottom:1px solid var(--gris1,#f3f4f6);font-size:12px';
+  const table = `<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%"><thead><tr><th style="${th}">Rang</th>${entetes.map(h => `<th style="${th}">${escapeHtml(h)}</th>`).join('')}<th style="${th};text-align:right">${escapeHtml(c.libelle)}${c.entite ? ' (somme)' : ''}</th></tr></thead><tbody>`
+    + result.lignes.map(l => `<tr><td style="${td}">${l.rang}</td>${l.libelles.map(x => `<td style="${td}">${escapeHtml(x || '—')}</td>`).join('')}<td style="${td};text-align:right"><strong>${fmt(l.valeur)}</strong></td></tr>`).join('')
+    + `</tbody></table></div>`;
+  const quoiNote = c.entite ? (result.exAequo > 1 ? c.entite.nom : c.entite.nom.replace(/s$/, '')) : (result.exAequo > 1 ? 'formations' : 'formation');
+  const note = result.exAequo ? `<p style="font-size:12px;color:var(--gris3)">${result.exAequo.toLocaleString('fr-FR')} autre${result.exAequo > 1 ? 's' : ''} ${quoiNote} ${result.exAequo > 1 ? 'ont' : 'a'} la même valeur que la dernière ligne (ex æquo).</p>` : '';
+  const crit = `<p>Classement selon la colonne <strong>${escapeHtml(c.col)}</strong>${c.inverse ? ' (plus le taux d\'accès est bas, plus la formation est sélective)' : ''}${c.entite ? `, additionnée par ${escapeHtml(c.entite.nom.replace(/s$/, ''))} (${(result.groupes || 0).toLocaleString('fr-FR')} ${escapeHtml(c.entite.nom)} en tout)` : ''}.</p>`;
+  const perim = perimetreResultat('classement', plan, result).html;
+  const debug = `<details class="msg-sources"><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : classement · ${escapeHtml(c.col)} · ${c.ordre}${c.entite ? ` · par ${escapeHtml(c.entite.col)}` : ''}</div></details>`;
+  return `${deTitleHtml(titre, plan.blockId, plan.originalTitle || titre)}${perim}${crit}${table}${note}${debug}`;
+}
+
 // v27.8 — garde-fou : un critère cité dans la question (boursiers, filles, apprentis, Pays Basque, public/privé,
 // sélective, lycée X, Gironde…) qui n'a donné aucun filtre → on s'arrête au lieu de répondre sur tout le fichier.
 const CONCEPTS_A_FILTRER = [
@@ -1021,10 +1176,12 @@ const CONCEPTS_A_FILTRER = [
 const LIEUX_AMBIGUS = new Set('somme manche nord lot var ain cher orne oise eure gers aube aude gard jura tarn indre doubs loire marne meuse vienne creuse rhone yonne'.split(' '));
 function conceptsNonFiltres(plan) {
   if (!plan || !plan.table || ['compare', 'chart_current', 'export_current_excel', 'export_current_csv'].includes(plan.tool)) return [];
-  const q = normalizeText(plan.question || '');
+  let q = normalizeText(plan.question || '');
+  // v27.14 — le critère d'un classement (« les plus sélectives », « le plus de boursiers ») n'est pas un filtre manquant
+  if (plan.tool === 'classement' && plan.classement) q = q.replace(new RegExp(plan.classement.mot.source, 'g'), ' ');
   const filtres = (plan.filters || []).filter(Boolean);
   // la colonne analysée ou additionnée compte aussi (« admis boursiers » → colonne « admis boursiers »)
-  const cibles = [plan.targetCol, plan.targetCol2, plan.sumCol].filter(Boolean).map(c => ({ col: c, value: '' }));
+  const cibles = [plan.targetCol, plan.targetCol2, plan.sumCol, plan.classement?.col].filter(Boolean).map(c => ({ col: c, value: '' }));
   const texte = f => `${_hx(f.col)} ${normalizeText(f.value)} ${normalizeText(f.label || '')}`;
   const manque = [];
   CONCEPTS_A_FILTRER.forEach(c => {
@@ -1108,6 +1265,8 @@ function isDataEngineQuestion(question) {
   if (!q) return false;
   // Exclusion : demandes de synthèse/résumé général → répondre via Albert narratif, pas Data Engine
   if (/^(fais |donne|produis |r[eé]dige )?(une? )?(synth[eè]se|r[eé]sum[eé]|bilan|vue d'ensemble|portrait|analyse globale)/.test(q)) return false;
+  // v27.14 — classement selon un chiffre (« les formations les plus demandées »)
+  try { if (CLASSEMENT_CUE.test(q) && detecterClassement((getActiveQueryTables() || [])[0], question)) return true; } catch (e) { /* source absente */ }
   return /compare|comparaison|comparer|versus| vs |combien|nombre|\btotale?\b|effectif|compte|compter|repartition|r[eé]partition|ventilation|par |groupe|group[eé]|top|classement|principa|plus frequen|plus fréquent|croise|crois[eé]|tableau crois[eé]|pivot|moyen|moyenne|median|m[eé]diane|minimum|maximum|min|max|export|excel|csv|liste|filtre|graphique|graphe|diagramme|histogramme|camembert|barres?|boursier|basque|hors|sauf|seulement|uniquement|visualis|repr[eé]sent|montre-?moi|dessine|trace|issus?\s+d[ue]|originaires?|venant\s+d[ue]|provenant|scolaris|scolarit/.test(q) || isListValuesRequest(question) || isFollowUpQuestion(question);
 }
 
@@ -1227,7 +1386,9 @@ function detectDataEnginePlan(question, filterContextText = question) {
   const currentPlan = buildCurrentResultPlan(question, table);
   if (currentPlan) return currentPlan;
 
-  const tool = inferMeasureIntent(question);
+  let tool = inferMeasureIntent(question);
+  // v27.14 — « quelle formation a le plus de candidats » : classement, même sans mot d'analyse reconnu
+  if ((!tool || tool === 'stats' || tool === 'count_rows') && detecterClassement(table, question)) tool = 'top';
   if (!tool) return null;
 
   if (tool === 'compare') {
@@ -1256,7 +1417,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
     // à partir de filtres structurés validés, jamais depuis les résultats calculés
     // (moyenne, médiane, valeur de tableau, etc.).
     const plannerPlan = buildPlannerPlan(question, question, table, tool);
-    if (plannerPlan) return inheritConversationContext(applyMeasureSum(applyListMode(applyFormationTerms(plannerPlan))), question);
+    if (plannerPlan) return inheritConversationContext(applyClassement(applyMeasureSum(applyListMode(applyFormationTerms(plannerPlan)))), question);
   }
 
   // Fallback V16 si planner indisponible.
@@ -1266,7 +1427,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
   // V25.1 — idem : le fallback ne doit pas analyser le contexte textuel
   // précédent comme s'il s'agissait de la question utilisateur.
   const filters = detectFilters(table, normalizeText(question || ''), targetCol);
-  return inheritConversationContext(applyMeasureSum(applyListMode(applyFormationTerms({
+  return inheritConversationContext(applyClassement(applyMeasureSum(applyListMode(applyFormationTerms({
     tool,
     table,
     filters,
@@ -1274,13 +1435,17 @@ function detectDataEnginePlan(question, filterContextText = question) {
     mentionedCols,
     question,
     createdAt: new Date().toISOString()
-  }))), question);
+  })))), question);
 }
 
 
 function currentExecutionToRows(exec) {
   if (!exec) return [];
   const p = exec.plan || {};
+  if (exec.kind === 'classement') {
+    const cols = p.classement?.entite ? [p.classement.entite.col] : (p.colonnesDescription || []);
+    return (exec.result?.lignes || []).map(l => Object.fromEntries([['Rang', l.rang], ...cols.map((c, i) => [c, l.libelles[i] ?? '']), [p.classement?.col || 'Valeur', l.valeur]]));
+  }
   if (exec.kind === 'group_by' || exec.kind === 'top') {
     const label = p.targetCol || 'Valeur';
     return (exec.result?.rows || []).map(r => ({
@@ -1378,6 +1543,14 @@ function renderCurrentChartExecution(plan) {
     const clonedPlan = { ...(prev.plan || {}), renderChart: true, chartType: isPieChartRequest(plan.question || '') ? 'pie' : (prev.plan?.chartType || 'bar') };
     const html = renderDataEngineResultHtml(prev.plan?.tool || prev.kind, clonedPlan, prev.result);
     return { kind: prev.kind, plan: clonedPlan, result: prev.result, text: prev.text, html };
+  }
+  // v27.14 — classement : barres des valeurs classées (pas une répartition de repli)
+  if (prev.kind === 'classement') {
+    const rows = (prev.result?.lignes || []).map(l => ({ value: `${l.rang}. ${l.libelles.filter(Boolean).slice(0, 2).join(' — ')}`, count: l.valeur }));
+    const total = rows.reduce((t, r) => t + (r.count || 0), 0);
+    const titre = `Graphique — classement selon ${prev.plan?.classement?.libelle || 'la valeur'}`;
+    const html = `${deTitleHtml(titre, prev.plan?.blockId, prev.plan?.originalTitle || titre)}${perimetreResultat('classement', prev.plan, prev.result).html}${renderMiniBarChart(rows, total, 'classement.png')}`;
+    return { kind: 'classement', plan: prev.plan, result: prev.result, text: prev.text, html };
   }
   // Branche pivot : deux graphiques (totaux + stacké) depuis la matrix complète
   if (prev.kind === 'pivot') {
@@ -1975,6 +2148,11 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     rememberDataEngineExecution(exec);
     return exec;
   }
+  if (plan.tool === 'classement' && plan.classement) {
+    const exec = executerClassement(plan);
+    if (exec && exec.kind === 'classement') rememberDataEngineExecution(exec);
+    return exec;
+  }
   if (plan.tool === 'group_by' || plan.tool === 'top') {
     // v27.10 — « par couleur » : aucune colonne ne correspond, on le dit au lieu de répartir selon une autre colonne
     if (!plan.targetCol && plan.dimensionIntrouvable) return unresolvedConceptExecution(plan, [], `aucune colonne ne correspond à « ${String(plan.dimensionIntrouvable).trim()} »`);
@@ -2123,6 +2301,7 @@ function dataEngineResultToContext(exec) {
   if (_perim) out += `${_perim}\n`;
   if (exec.kind === 'count') out += `Résultat : ${exec.result.count} ligne(s) sur ${exec.result.total}.\n`;
   if (exec.kind === 'sum') out += `Résultat : ${exec.result.sum} ${exec.result.unite} (somme de « ${exec.result.col} ») sur ${exec.result.count} formation(s).\n`;
+  if (exec.kind === 'classement') out += `Classement selon « ${exec.plan.classement.col} » (${exec.plan.classement.ordre === 'asc' ? 'croissant' : 'décroissant'})${exec.plan.classement.entite ? `, somme par ${exec.plan.classement.entite.col}` : ''} :\n${exec.result.lignes.map(l => `${l.rang}. ${l.libelles.join(' — ')} : ${l.valeur}`).join('\n')}\n`;
   if (exec.kind === 'unresolved') out += `Résultat : aucun calcul. ${exec.text}\nIntitulés proches : ${(exec.result?.suggestions || []).map(s => s.value).join(' ; ')}\n`;
   if (exec.kind === 'group_by' || exec.kind === 'top') {
     out += `Colonne de répartition : ${p.targetCol}\nLignes retenues : ${exec.result.total}\nValeurs renseignées : ${exec.result.filled}\n`;
@@ -2208,6 +2387,7 @@ function perimetreResultat(kind, plan, result) {
   const totalTable = (table.objects || []).length;
   const mot = n => `${table.rowUnit === 'formation' ? 'formation' : 'ligne'}${n > 1 ? 's' : ''}`;
   const retenues = ['count', 'count_rows', 'sum'].includes(kind) ? result.count
+    : kind === 'classement' ? result.total
     : kind === 'compare' ? result.baseTotal : result.total;
   const parties = [];
   parties.push(retenues !== undefined && totalTable
@@ -2238,6 +2418,7 @@ function perimetreResultat(kind, plan, result) {
     const ign = result.count - result.renseignees;
     notes.push(`${_nf(ign)} ${mot(ign)} sans valeur dans « ${result.col} », non comptée${ign > 1 ? 's' : ''}`);
   }
+  if (kind === 'classement' && result.sansValeur > 0) notes.push(`${_nf(result.sansValeur)} ${mot(result.sansValeur)} sans valeur dans « ${plan.classement.col} », écartée${result.sansValeur > 1 ? 's' : ''} du classement`);
   if (kind === 'pivot') {
     const nonAffiche = (result.total || 0) - (result.matrix || []).reduce((t, r) => t + (r.total || 0), 0);
     if (nonAffiche > 0) notes.push(`${_nf(nonAffiche)} ${mot(nonAffiche)} dans des valeurs moins fréquentes, non affichées dans le tableau`);
@@ -2304,16 +2485,16 @@ function renderDataEngineResultHtml(tool, plan, result) {
     // Tronquer les en-têtes de colonnes longs tout en gardant le tooltip
     const truncCol = (s) => s && s.length > 14 ? s.slice(0, 13) + '…' : (s || '—');
     // Styles communs
-    const thStyle = `text-align:right;padding:7px 10px;background:var(--bleu2,#e8f0fe);color:var(--bleu,#003189);font-size:10px;letter-spacing:.5px;white-space:nowrap;border-bottom:2px solid var(--bleu-doux,#c8d8f0);max-width:90px;overflow:hidden;text-overflow:ellipsis`;
-    const thFirstStyle = `text-align:left;padding:7px 10px;background:var(--bleu2,#e8f0fe);color:var(--bleu,#003189);font-size:10px;letter-spacing:.5px;border-bottom:2px solid var(--bleu-doux,#c8d8f0);min-width:120px`;
+    const thStyle = `text-align:right;padding:7px 10px;background:#e8edff;color:var(--bleu,#003189);font-size:10px;letter-spacing:.5px;white-space:nowrap;border-bottom:2px solid var(--bleu-doux,#c8d8f0);max-width:90px;overflow:hidden;text-overflow:ellipsis`;
+    const thFirstStyle = `text-align:left;padding:7px 10px;background:#e8edff;color:var(--bleu,#003189);font-size:10px;letter-spacing:.5px;border-bottom:2px solid var(--bleu-doux,#c8d8f0);min-width:120px`;
     const header = `<tr><th style="${thFirstStyle}">${escapeHtml(_shortColName(plan.targetCol))}</th>${cols.map(c => `<th style="${thStyle}" title="${escapeHtml(c)}">${escapeHtml(truncCol(c))}</th>`).join('')}<th style="${thStyle};font-weight:800;min-width:60px">Total</th><th style="${thStyle};min-width:50px">%</th></tr>`;
     const body = (result.matrix || []).map((r, i) => {
       const pct = total ? (r.total / total * 100).toFixed(1).replace('.', ',') : '—';
       const rowBg = i % 2 === 1 ? 'background:var(--gris0,#f8fafc)' : '';
-      return `<tr style="${rowBg}" onmouseover="this.style.background='var(--bleu2,#e8f0fe)'" onmouseout="this.style.background='${i % 2 === 1 ? 'var(--gris0,#f8fafc)' : ''}'"><td style="padding:6px 10px;font-size:12px;color:var(--bleu,#003189);font-weight:500;white-space:nowrap">${escapeHtml(r.value)}</td>${r.cells.map(c => `<td style="text-align:right;padding:6px 10px;font-size:12px">${c > 0 ? `<strong>${c.toLocaleString('fr-FR')}</strong>` : '<span style="color:var(--gris2,#e5e7eb)">—</span>'}</td>`).join('')}<td style="text-align:right;padding:6px 10px;font-size:12px;font-weight:800;color:var(--texte,#1a1a2e);border-left:1px solid var(--gris1,#f3f4f6)">${r.total.toLocaleString('fr-FR')}</td><td style="text-align:right;padding:6px 10px;font-size:11px;color:var(--gris3,#6b7280)">${pct} %</td></tr>`;
+      return `<tr style="${rowBg}" onmouseover="this.style.background='#e8edff'" onmouseout="this.style.background='${i % 2 === 1 ? 'var(--gris0,#f8fafc)' : ''}'"><td style="padding:6px 10px;font-size:12px;color:var(--bleu,#003189);font-weight:500;white-space:nowrap">${escapeHtml(r.value)}</td>${r.cells.map(c => `<td style="text-align:right;padding:6px 10px;font-size:12px">${c > 0 ? `<strong>${c.toLocaleString('fr-FR')}</strong>` : '<span style="color:var(--gris2,#e5e7eb)">—</span>'}</td>`).join('')}<td style="text-align:right;padding:6px 10px;font-size:12px;font-weight:800;color:var(--texte,#1a1a2e);border-left:1px solid var(--gris1,#f3f4f6)">${r.total.toLocaleString('fr-FR')}</td><td style="text-align:right;padding:6px 10px;font-size:11px;color:var(--gris3,#6b7280)">${pct} %</td></tr>`;
     }).join('');
     const colTotals = cols.map((_, i) => (result.matrix || []).reduce((s, r) => s + (r.cells[i] || 0), 0));
-    const foot = `<tr style="background:var(--bleu2,#e8f0fe);border-top:2px solid var(--bleu-doux,#c8d8f0)"><td style="padding:7px 10px;font-weight:800;font-size:12px;color:var(--bleu,#003189)">Total</td>${colTotals.map(t => `<td style="text-align:right;padding:7px 10px;font-weight:800;font-size:12px">${t.toLocaleString('fr-FR')}</td>`).join('')}<td style="text-align:right;padding:7px 10px;font-weight:800;font-size:12px;border-left:1px solid var(--bleu-doux,#c8d8f0)">${total.toLocaleString('fr-FR')}</td><td></td></tr>`;
+    const foot = `<tr style="background:#e8edff;border-top:2px solid var(--bleu-doux,#c8d8f0)"><td style="padding:7px 10px;font-weight:800;font-size:12px;color:var(--bleu,#003189)">Total</td>${colTotals.map(t => `<td style="text-align:right;padding:7px 10px;font-weight:800;font-size:12px">${t.toLocaleString('fr-FR')}</td>`).join('')}<td style="text-align:right;padding:7px 10px;font-weight:800;font-size:12px;border-left:1px solid var(--bleu-doux,#c8d8f0)">${total.toLocaleString('fr-FR')}</td><td></td></tr>`;
     const clearTitle = `${_shortColName(plan.targetCol)} × ${_shortColName(plan.targetCol2)}`;
     const colNote = cols.length > 8 ? `<p style="font-size:11px;color:var(--gris3);margin-top:6px">💡 Survolez les en-têtes pour voir les libellés complets.</p>` : '';
     return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}${perim}<p style="font-size:13px;color:var(--gris3)"><strong style="color:var(--texte)">${total.toLocaleString('fr-FR')}</strong> lignes retenues · Croisement <strong style="color:var(--texte)">${escapeHtml(_shortColName(plan.targetCol))}</strong> × <strong style="color:var(--texte)">${escapeHtml(_shortColName(plan.targetCol2))}</strong></p><div style="overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--gris1,#f3f4f6);border-radius:10px;padding-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,.04)"><table style="border-collapse:collapse;font-size:12px;width:auto;min-width:100%;margin-bottom:0"><thead>${header}</thead><tbody>${body}${foot}</tbody></table></div>${colNote}${filtersHtml}${debug}`;
@@ -2331,7 +2512,7 @@ function shouldAnswerLocallyWithoutAlbert(exec) {
   // Les requêtes de comptage/répartition simples doivent être résolues par le moteur,
   // sinon Albert risque de répondre à partir d'un résumé incomplet.
   // v27.7 — « unresolved » : terme introuvable, on le dit plutôt que de laisser Albert inventer
-  return ['count','group_by','top','pivot','stats','export','compare','unresolved','sum'].includes(exec.kind);
+  return ['count','group_by','top','pivot','stats','export','compare','unresolved','sum','classement'].includes(exec.kind);
 }
 /* ═══════════════ v27.9 — Chiffres écrits par Albert : vérifiés contre les données fournies ═══════════════
    Albert rédige ; il ne doit pas produire de chiffres. Chaque nombre de sa réponse est comparé aux nombres
