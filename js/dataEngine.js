@@ -2938,7 +2938,15 @@ function perimetreResultat(kind, plan, result) {
       [['academie', "l'académie"], ['departement', 'le département']].forEach(([cle, nom]) => {
         const col = (table.headers || []).find(h => new RegExp(`^${cle}`).test(_hx(h)) && !/code|origine/.test(_hx(h)));
         if (!col || !(table.objects || []).some(r => normalizeText(r?.[col]) === v)) return;
-        const n = applyLocalActionFilters(table.objects || [], [...autres, { col, op: 'eq', value: (table.objects || []).find(r => normalizeText(r?.[col]) === v)[col] }]).length;
+        const fAutre = { col, op: 'eq', value: (table.objects || []).find(r => normalizeText(r?.[col]) === v)[col] };
+        // « PASS option biologie à Bordeaux » : dans l'académie, l'option n'est pas toujours précisée → pas de nombre trop petit
+        const tf = autres.find(f => f.op === 'contains_all');
+        const pp = tf ? precisionPartielleIntitules({ ...plan, filters: [...autres, fAutre] }, tf) : null;
+        if (pp && pp.sansPrecision.length) {
+          notes.push(`aucune ${mot(1)} dans la commune de ${fc.value} ; dans ${nom} de ${fc.value}, ${_nf(pp.precisees.length)} ${mot(pp.precisees.length)} « ${pp.famille} » ${pp.precisees.length > 1 ? 'précisent' : 'précise'} « ${pp.terme} » et ${_nf(pp.sansPrecision.length)} ne précisent pas leur option (demandez « … dans ${nom} de ${fc.value} »)`);
+          return;
+        }
+        const n = applyLocalActionFilters(table.objects || [], [...autres, fAutre]).length;
         if (n > 0) notes.push(`aucune ${mot(1)} dans la commune de ${fc.value}, mais ${_nf(n)} dans ${nom} de ${fc.value} (demandez « … dans ${nom} de ${fc.value} »)`);
       });
     }

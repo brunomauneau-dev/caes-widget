@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-34 fichiers, 1 594 tests. Depuis la racine du repo :
+34 fichiers, 1 603 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -105,7 +105,7 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 
 ### Réponses incorrectes et questions à revoir
 
-`js/test_options_pass.js` vérifie les **options des PASS**. Dans l'open data 2025, l'option d'un PASS n'est écrite que pour 70 PASS sur 287. Le widget ne donne donc pas de chiffre pour « combien de PASS option Biologie à Bordeaux » (avant : 0, affiché comme « calcul exact ») : il écrit « Option non précisée dans les données », combien de formations précisent l'option, combien n'en disent rien, et liste ces dernières par établissement avec la capacité de chacune. « Liste des PASS » est signalée **incomplète**, avec le même tableau. Quand toutes les formations du périmètre précisent leur option, le chiffre est donné normalement. Enfin, un 0 pour une commune qui porte aussi le nom d'une académie est complété : « aucune formation dans la commune de Bordeaux, mais 12 dans l'académie de Bordeaux » (les PASS de l'Université de Bordeaux sont à Talence).
+`js/test_options_pass.js` vérifie les **options des PASS**. Dans l'open data 2025, l'option d'un PASS n'est écrite que pour 70 PASS sur 287. Le widget ne donne donc pas de chiffre pour « combien de PASS option Biologie à Bordeaux » (avant : 0, affiché comme « calcul exact ») : il écrit « Option non précisée dans les données », combien de formations précisent l'option, combien n'en disent rien, et liste ces dernières par établissement avec la capacité de chacune. « Liste des PASS » est signalée **incomplète**, avec le même tableau. Quand toutes les formations du périmètre précisent leur option, le chiffre est donné normalement. Enfin, un 0 pour une commune qui porte aussi le nom d'une académie est complété : « aucune formation dans la commune de Bordeaux, mais 12 dans l'académie de Bordeaux » (les PASS de l'Université de Bordeaux sont à Talence). Corrigé au passage : « PASS » contient « pas », et « PASS dans l'académie de Bordeaux » était compris « hors académie de Bordeaux » (279 PASS au lieu de 8 sur les données réelles) ; cas ajouté au banc `test_reformulations.js`.
 
 `js/test_sans_mode_national.js` vérifie le retrait du bouton **« National 2025 »**. Ce bouton changeait seulement le sous-titre : aucun calcul ne s'en servait, et un agent pouvait croire interroger la France entière en 2025 alors que le calcul portait sur la source choisie. La source se choisit désormais uniquement dans le sélecteur.
 

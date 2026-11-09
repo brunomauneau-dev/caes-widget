@@ -183,7 +183,11 @@ await describe('0 dans la commune, mais des formations dans l\'académie du mêm
   assert(texte(e).includes(`mais ${nAca} dans l'académie de Bordeaux`), `note : « mais ${nAca} dans l'académie de Bordeaux »`);
   assert(/dans l'académie de Bordeaux/.test(run(ctx, 'dataEngineResultToContext')(e)), 'Albert reçoit la note');
   const b = ask(ctx, 'combien de PASS option biologie à Bordeaux');
-  assert(b?.kind === 'count' && b.result.count === 0 && /dans l'académie de Bordeaux/.test(texte(b)), 'option à Bordeaux : 0 exact (aucun PASS dans la commune), avec la note');
+  const nAcaSans = lignes.filter(o => o.fili === 'PASS' && o.aca === 'Bordeaux' && o.detail === '').length;
+  assert(b?.kind === 'count' && b.result.count === 0 && texte(b).includes(`« biologie » et ${nAcaSans} ne précisent pas leur option`) && !/mais \d+ dans l'académie/.test(texte(b)),
+    `option à Bordeaux : 0 exact (aucun PASS dans la commune), avec la note « ${nAcaSans} PASS de l'académie ne précisent pas leur option »`);
+  const ba = ask(ctx, "combien de PASS option biologie dans l'académie de Bordeaux");
+  assert(ba?.kind === 'unresolved' && ba.result.precision.perimetre === nAca, `dans l'académie : arrêt « option non précisée » sur les ${nAca} PASS de l'académie`);
   const bts = ask(ctx, 'combien de BTS à Bordeaux');
   assert(bts?.kind === 'count' && bts.result.count > 0 && !/dans l'académie de/.test(texte(bts)), 'faux positif : des BTS dans la commune, pas de note');
   const pau = ask(ctx, 'combien de PASS à Pau');
