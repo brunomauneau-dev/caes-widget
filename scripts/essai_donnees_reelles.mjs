@@ -131,6 +131,10 @@ function resumer(ctx, question) {
     r.sansValeur = exec.result.filled !== undefined ? exec.result.total - exec.result.filled : 0;
     r.lignes = (exec.result.rows || []).map(x => ({ value: x.value, count: x.count }));
     r.reponse = `${r.distinct ?? r.lignes.length} valeur(s) de « ${r.colonne} » pour ${r.total.toLocaleString('fr-FR')} formations`;
+    if (exec.result.memeIntitule) {
+      r.parEtablissement = exec.result.memeIntitule.groupes.map(g => `${g.etablissement}${g.commune ? ` (${g.commune})` : ''} : ${g.n}${g.places.length ? ` — ${g.places.join(' / ')} places` : ''}`);
+      r.reponse += ` (même intitulé : ${exec.result.memeIntitule.formations} formations dans ${exec.result.memeIntitule.total} établissement(s) — ${r.parEtablissement.join(' ; ')})`;
+    }
     if (exec.result.sansPrecision) { r.incomplete = true; r.sansPrecisionEtab = exec.result.sansPrecision.formations; r.reponse += ` (liste incomplète : ${exec.result.sansPrecision.formations} sans précision)`; }
   } else if (exec.kind === 'sum') {
     r.sum = exec.result.sum; r.count = exec.result.count; r.colonne = exec.result.col;
