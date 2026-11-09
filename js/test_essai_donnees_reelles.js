@@ -185,6 +185,11 @@ await describe('Questions en plus (champ du formulaire GitHub)', async () => {
   assert(questionsEnPlus('').length === 0, 'champ vide → aucune question en plus');
   const r = await essai({ fetchImpl: fakeFetch, questions: [...QUESTIONS, ...q] });
   assert(r.resultats.length === QUESTIONS.length + 2, 'questions en plus posées après les questions types');
+  // v27.18 — bug vu sur l'essai réel : une évolution par groupe n'avait pas de périmètre dans le rapport
+  const evo = await essai({ fetchImpl: fakeFetch, questions: [...QUESTIONS, ...questionsEnPlus('évolution du nombre de BTS par académie depuis {N-1}')] });
+  const ev = evo.resultats.find(x => x.kind === 'evolution_groupes');
+  assert(ev && /retenues? sur/.test(ev.perimetre || '') && /^chaque session/.test(ev.perimetre), `évolution par groupe : périmètre dans le rapport (${ev?.perimetre?.slice(0, 60) ?? 'absent'})`);
+  assert(evo.controles.find(c => /dit sur quoi il porte/.test(c.libelle))?.ok, 'contrôle « chaque résultat chiffré dit sur quoi il porte » réussi');
 });
 
 await describe('Erreur réseau : message clair, pas de résultat inventé', async () => {

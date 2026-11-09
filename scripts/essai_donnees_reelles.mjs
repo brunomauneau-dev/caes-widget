@@ -125,6 +125,9 @@ function resumer(ctx, question) {
   if (exec && exec.kind === 'evolution' && typeof ctx.perimetreResultat === 'function') {
     const der = exec.result.lignes[exec.result.lignes.length - 1].exec;
     r.perimetre = `chaque session (${exec.result.lignes.map(l => l.session).join(', ')}) · ${ctx.perimetreResultat(der.kind, der.plan, der.result).texte.replace(/^Périmètre : /, '')}`;
+  } else if (exec && exec.kind === 'evolution_groupes') {
+    // v27.18 — périmètre de la dernière session, calculé par le moteur (même texte que sous le résultat)
+    r.perimetre = `chaque session (${exec.result.sessions.join(', ')}) · ${String(exec.result.perimetre || '').replace(/^Périmètre : /, '')}`;
   } else if (exec && exec.kind !== 'unresolved' && exec.kind !== 'export' && typeof ctx.perimetreResultat === 'function') r.perimetre = ctx.perimetreResultat(exec.kind, exec.plan, exec.result).texte.replace(/^Périmètre : /, '') || undefined;
   if (!exec) { r.reponse = routee ? 'Le moteur n\'a rien calculé' : 'Non traitée par le moteur : la question part vers Albert (connaissances)'; return r; }
   if (exec.kind === 'count') {
