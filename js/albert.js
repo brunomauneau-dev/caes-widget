@@ -963,6 +963,8 @@ async function sendMessage() {
     // v27.7 — « Formation non trouvée » : rien à exporter ni à mettre en infographie
     const _introuvable = dataExecution.kind === 'unresolved';
     addMessage('assistant', dataExecution.html, { dataExecution, question, noActions: _introuvable });
+    // v27.17 — question non comprise : notée dans « À revoir » (reste dans le navigateur)
+    if (_introuvable && typeof enregistrerRetour === 'function') enregistrerRetour({ type: 'non_compris', question, outil: 'arrêt', perimetre: String(dataExecution.text || '').slice(0, 300) });
     chatHistory.push({ role: 'user', content: question });
     const deCtx = dataEngineResultToContext(dataExecution);
     chatHistory.push({ role: 'assistant', content: deCtx });
@@ -1072,6 +1074,8 @@ ${context || "(Aucun document chargé)"}`;
     const sAlbert = getCurrentSession();
     // v27.9 — une réponse avec des chiffres non vérifiés n'alimente pas les infographies
     const chiffresDouteux = !!(verifChiffres && verifChiffres.inconnus.length);
+    // v27.17 — chiffres d'Albert non vérifiés : notés dans « À revoir »
+    if (chiffresDouteux && typeof enregistrerRetour === 'function') enregistrerRetour({ type: 'chiffres_douteux', question, outil: 'albert', chiffre: verifChiffres.inconnus.map(x => x.affiche).join(' · ') });
     if (sAlbert && answer && answer.length > 80 && !chiffresDouteux) {
       try {
         sAlbert.dataBlocks = sAlbert.dataBlocks || [];

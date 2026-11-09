@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-31 fichiers, 1 496 tests. Depuis la racine du repo :
+32 fichiers, 1 529 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -102,6 +102,18 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 - colonnes d'**état** écrites Oui/Non, **1/0** ou **VRAI/FAUX** : filtrées, jamais additionnées ni moyennées ;
 - classeur dont le 1er onglet est une **notice** ;
 - **open data** de 14 000 formations : statut public/privé, académie, département, ville, région, sélectivité, sommes (places, candidats, admis), moyennes (capacité, taux d'accès), en moins de 3 secondes par question.
+
+### Réponses incorrectes et questions à revoir
+
+`js/test_retours.js` vérifie le bouton **« 👎 Réponse incorrecte »**, présent sous chaque réponse. L'agent peut préciser ce qui ne va pas, par exemple le chiffre attendu. Le widget note aussi automatiquement deux cas :
+- les questions qu'il n'a pas comprises (« Critère non reconnu ») ;
+- les réponses d'Albert dont des chiffres n'ont pas été vérifiés.
+
+Le bouton **« 📝 À revoir »** de l'en-tête, avec un compteur, affiche la liste. On peut la **télécharger en CSV** (Excel), la copier en texte ou l'effacer.
+
+**Tout reste dans le navigateur** : rien n'est écrit dans Grist, rien n'est envoyé ailleurs. Seuls la question, le commentaire et un résumé du résultat sont gardés (outil, chiffre, périmètre), jamais la réponse complète. La liste est limitée à 300 entrées. Les formules sont neutralisées dans le CSV.
+
+Les questions exportées servent à enrichir `test_reformulations.js` et `test_fiches_metiers.js`.
 
 ### Comparaison entre sessions
 
