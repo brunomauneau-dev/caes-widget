@@ -1062,7 +1062,9 @@ ${context || "(Aucun document chargé)"}`;
       .filter(m => m.role === 'user' || String(m.content || '').startsWith('=== DATA ENGINE'))
       .map(m => m.content)];
     const verifChiffres = (typeof verifierChiffresAlbert === 'function') ? verifierChiffresAlbert(answer, sourcesChiffres, question) : null;
-    const answerAffiche = (verifChiffres && typeof annoterReponseAlbert === 'function') ? annoterReponseAlbert(answer, verifChiffres) : answer;
+    const answerAnnote = (verifChiffres && typeof annoterReponseAlbert === 'function') ? annoterReponseAlbert(answer, verifChiffres) : answer;
+    // v27.19 — dates venant de fiches d'une session passée : bandeau sous la réponse
+    const answerAffiche = answerAnnote + ((typeof bandeauCalendrierKB === 'function') ? bandeauCalendrierKB(answer) : '');
 
     removeLoadingMessage(loadingId);
     addMessage('assistant', answerAffiche);

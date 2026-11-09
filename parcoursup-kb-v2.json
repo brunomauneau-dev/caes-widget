@@ -6,7 +6,7 @@
     "main_section_count": 28,
     "generated_note": "Découpage automatique initial. À relire/valider pour les fiches sensibles.",
     "version": "v2-hybrid-index",
-    "built_at": "2026-06-18T10:28:43.855591+00:00",
+    "built_at": "2026-11-09T13:23:07.960559+00:00",
     "added_in_v1": 26,
     "sources": [
       {
@@ -33,7 +33,9 @@
       "inverted_index",
       "related_ids",
       "debug_trace"
-    ]
+    ],
+    "session_reference": 2026,
+    "mise_a_jour": "12 juin 2026"
   },
   "entries": [
     {
