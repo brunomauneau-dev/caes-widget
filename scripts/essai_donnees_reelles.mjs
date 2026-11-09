@@ -26,6 +26,10 @@ export const QUESTIONS = [
   { id: 'pass', q: 'combien de PASS' },
   { id: 'droit', q: 'combien de PASS option Droit' },
   { id: 'zoologie', q: 'combien de PASS option Zoologie' },
+  // v27.17 — option précisée pour une partie des PASS seulement (70 sur 287 en 2025)
+  { id: 'bio_bdx', q: 'combien de PASS option biologie à Bordeaux' },
+  { id: 'bio_aca', q: "combien de PASS option biologie dans l'académie de Bordeaux" },
+  { id: 'pass_droit', q: 'combien de PASS option droit' },
   { id: 'bts', q: 'combien de BTS' },
   { id: 'licence_droit', q: 'combien de licences de droit' },
   { id: 'bordeaux', q: 'combien de formations à Bordeaux' },
@@ -127,6 +131,11 @@ function resumer(ctx, question) {
     r.sansValeur = exec.result.filled !== undefined ? exec.result.total - exec.result.filled : 0;
     r.lignes = (exec.result.rows || []).map(x => ({ value: x.value, count: x.count }));
     r.reponse = `${r.distinct ?? r.lignes.length} valeur(s) de « ${r.colonne} » pour ${r.total.toLocaleString('fr-FR')} formations`;
+    if (exec.result.memeIntitule) {
+      r.parEtablissement = exec.result.memeIntitule.groupes.map(g => `${g.etablissement}${g.commune ? ` (${g.commune})` : ''} : ${g.n}${g.places.length ? ` — ${g.places.join(' / ')} places` : ''}`);
+      r.reponse += ` (même intitulé : ${exec.result.memeIntitule.formations} formations dans ${exec.result.memeIntitule.total} établissement(s) — ${r.parEtablissement.join(' ; ')})`;
+    }
+    if (exec.result.sansPrecision) { r.incomplete = true; r.sansPrecisionEtab = exec.result.sansPrecision.formations; r.reponse += ` (liste incomplète : ${exec.result.sansPrecision.formations} sans précision)`; }
   } else if (exec.kind === 'sum') {
     r.sum = exec.result.sum; r.count = exec.result.count; r.colonne = exec.result.col;
     r.reponse = `${r.sum.toLocaleString('fr-FR')} ${exec.result.unite} (somme de « ${r.colonne} ») sur ${r.count.toLocaleString('fr-FR')} formations`;
@@ -146,6 +155,12 @@ function resumer(ctx, question) {
   } else if (exec.kind === 'unresolved') {
     r.suggestions = (exec.result?.suggestions || []).map(x => `${x.value} (${x.count})`);
     r.reponse = `Non reconnu, pas de chiffre (${(exec.result?.missing || []).join(', ') || 'termes jamais réunis'})`;
+    // v27.17 — option précisée pour une partie des formations seulement
+    const pr = exec.result?.precision;
+    if (pr) {
+      r.precision = { colonne: pr.col, renseignees: pr.nRenseignees, famille: pr.nFamille, perimetre: pr.perimetre, precisees: pr.precisees, sansPrecision: pr.sansPrecision };
+      r.reponse = `Option non précisée, pas de chiffre (« ${pr.terme} » : ${pr.precisees} la précisent, ${pr.sansPrecision} sans précision sur ${pr.perimetre})`;
+    }
   } else if (exec.kind === 'export') {
     r.count = ctx.__exports[ctx.__exports.length - 1] ?? 0;
     r.reponse = `Export de ${r.count} lignes`;
@@ -199,6 +214,18 @@ export function controler(resultats) {
     const ligneDroit = (R.liste1.lignes || []).find(x => /droit/i.test(x.value));
     const ok = R.droit.kind === 'unresolved' ? !ligneDroit : (ligneDroit && ligneDroit.count === R.droit.count);
     ctl('« PASS option Droit » cohérent avec la liste des PASS', ok, ligneDroit ? `liste : ${ligneDroit.value} = ${ligneDroit.count} · question : ${R.droit.reponse}` : `aucune ligne « Droit » dans la liste · question : ${R.droit.reponse}`);
+  }
+  // v27.17 — l'option n'est écrite que pour une partie des PASS : pas de chiffre (avant : 0 « calcul exact »)
+  if (R.bio_aca) ctl("« PASS option Biologie dans l'académie de Bordeaux » : pas de chiffre trop petit si des PASS ne précisent pas leur option",
+    R.bio_aca.kind === 'unresolved' || (R.bio_aca.kind === 'count' && (R.bio_aca.count > 0 || (R.liste1 && !R.liste1.incomplete))), `${R.bio_aca.reponse}${R.liste1 && !R.liste1.incomplete ? ' (options toujours précisées : 0 possible)' : ''}`);
+  // la commune de Bordeaux peut n'avoir aucun PASS (ils sont à Talence) : 0 exact, mais l'académie doit être signalée
+  if (R.bio_bdx) ctl('« PASS option Biologie à Bordeaux » : arrêt, nombre positif, ou 0 avec la note « dans l\'académie de Bordeaux »',
+    R.bio_bdx.kind === 'unresolved' || (R.bio_bdx.kind === 'count' && (R.bio_bdx.count > 0 || /dans l'académie de Bordeaux/.test(R.bio_bdx.perimetre || '') || (R.liste1 && !R.liste1.incomplete))), `${R.bio_bdx.reponse} · ${R.bio_bdx.perimetre || ''}`);
+  if (R.pass_droit) ctl('« PASS option droit » : le mot cherché est « droit », parmi les PASS', !R.pass_droit.precision || (/droit/i.test(R.pass_droit.reponse) && R.pass_droit.precision.famille === R.pass?.count), R.pass_droit.reponse);
+  if (R.liste1 && R.pass) {
+    const peuRemplie = (R.liste1.total || 0) - (R.liste1.sansValeur || 0) < (R.liste1.total || 0) * 0.8;
+    ctl('liste des PASS peu remplie : signalée « incomplète », formations sans précision par établissement',
+      !peuRemplie || (R.liste1.incomplete && R.liste1.sansPrecisionEtab === R.liste1.sansValeur), `${R.liste1.sansValeur || 0} sans précision sur ${R.liste1.total ?? '?'} · ${R.liste1.incomplete ? 'signalée incomplète' : 'non signalée'}`);
   }
   if (R.zoologie) ctl('« PASS option Zoologie » : non trouvée, pas de chiffre', R.zoologie.kind === 'unresolved', R.zoologie.reponse);
   if (R.bts) ctl('« combien de BTS » : un nombre, ni zéro ni tout le fichier', R.bts.kind === 'count' && R.bts.count > 0 && R.bts.count < R.bts.total, R.bts.reponse);

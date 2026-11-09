@@ -149,6 +149,13 @@ const GROUPES_OD = [
   { nom: 'BTS hors académie de Bordeaux', type: 'count', v: m(o => o.fili === 'BTS' && o.aca !== 'Bordeaux'), variantes: [
     "combien de BTS hors académie de Bordeaux", "combien de BTS en dehors de l'académie de Bordeaux", "combien de BTS sauf l'académie de Bordeaux",
     "nombre de BTS hors de l'académie de Bordeaux", "combien de BTS qui ne sont pas dans l'académie de Bordeaux"] },
+  // v27.17 — « PASS » contient « pas » : « PASS dans l'académie de Bordeaux » devenait « académie ≠ Bordeaux »
+  // (bug vu sur l'open data réel : 279 PASS au lieu de 8)
+  { nom: 'PASS de l\'académie de Bordeaux', type: 'count', v: m(o => o.fili === 'PASS' && o.aca === 'Bordeaux'), variantes: [
+    "combien de PASS dans l'académie de Bordeaux", "nombre de PASS dans l'académie de Bordeaux", "combien de PASS sur l'académie de Bordeaux",
+    "dans l'académie de Bordeaux, combien de PASS ?", "combien de PASS académie de Bordeaux"] },
+  { nom: 'PASS hors académie de Bordeaux', type: 'count', v: m(o => o.fili === 'PASS' && o.aca !== 'Bordeaux'), variantes: [
+    "combien de PASS hors académie de Bordeaux", "combien de PASS en dehors de l'académie de Bordeaux", "combien de PASS qui ne sont pas dans l'académie de Bordeaux"] },
   { nom: 'formations non sélectives', type: 'count', v: m(o => o.selectivite === 'formation non sélective'), variantes: [
     'combien de formations non sélectives', 'nombre de formations non sélectives', 'combien de formations qui ne sont pas sélectives', 'combien de formations sans sélection'] },
   { nom: 'BTS privés de l\'académie de Toulouse', type: 'count', v: m(o => o.fili === 'BTS' && o.statut !== 'Public' && o.aca === 'Toulouse'), variantes: [

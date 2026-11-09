@@ -439,8 +439,9 @@
     const idx = q.indexOf(a);
     const windowBefore = idx >= 0 ? q.slice(Math.max(0, idx - 35), idx) : q;
     const windowAround = idx >= 0 ? q.slice(Math.max(0, idx - 35), Math.min(q.length, idx + a.length + 20)) : q;
-    if (/(hors|sauf|exclu|excluant|exclure|different|differente|diff[eé]rent|pas|non)\s*$/.test(windowBefore)) return 'neq';
-    if (/(hors|sauf|exclu|excluant|exclure|different|differente|pas|non)/.test(windowAround) && entry.kind === 'academie') return 'neq';
+    // v27.17 — mots entiers : « PASS » contient « pas » (« PASS dans l'académie de Bordeaux » devenait « ≠ Bordeaux »)
+    if (/(^|\s)(hors|sauf|exclu|excluant|exclure|different|differente|diff[eé]rent|pas|non)\s*$/.test(windowBefore)) return 'neq';
+    if (/(^|\s)(hors|sauf|exclu|excluant|exclure|different|differente|pas|non)(\s|$)/.test(windowAround) && entry.kind === 'academie') return 'neq';
     return 'eq';
   }
 
@@ -493,7 +494,7 @@
         if (!bestAliasScore) return;
 
         // Si Bordeaux est présent dans "hors académie de Bordeaux", privilégier neq académie accueil.
-        if (nrm(item.value) === 'bordeaux' && /(hors|autre|sauf|different|differente|pas).*bordeaux/.test(q) && entry.kind !== 'academie') return;
+        if (nrm(item.value) === 'bordeaux' && /\b(hors|autres?|sauf|different|differente|pas)\b.*bordeaux/.test(q) && entry.kind !== 'academie') return;
 
         const op = operatorForMention(q, bestAlias, entry);
         const score = bestAliasScore + ctx + columnPriority(entry, q) / 3 + Math.log10((item.count || 1) + 1);
@@ -652,7 +653,7 @@
     }
 
     // Hors académie de Bordeaux : colonne Académie d'accueil acceptée, pas commune de scolarité.
-    if (/((hors|autre|sauf|different|differente|diff[eé]rente|pas).*academie.*bordeaux)|(academie.*(hors|autre|sauf|different|differente).*bordeaux)|(hors\s+bordeaux)/.test(q)) {
+    if (/(\b(hors|autres?|sauf|different|differente|diff[eé]rente|pas)\b.*academie.*bordeaux)|(academie.*\b(hors|autres?|sauf|different|differente)\b.*bordeaux)|(\bhors\s+bordeaux)/.test(q)) {
       const e = bestColumn(
         schema,
         x => x.kind === 'academie',
