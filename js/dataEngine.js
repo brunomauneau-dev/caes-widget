@@ -1571,6 +1571,114 @@ function unresolvedFormationExecution(plan, missing, termFilter) {
   return { kind: 'unresolved', plan, result: { missing, suggestions: sugg }, text: `NON TROUVÉ : ${quoi}`, html };
 }
 
+/* ═══════════════ v27.17 — Option précisée pour une partie des formations seulement ═══════════════
+   Open data réel (2025) : l'option d'un PASS ne figure que dans « Filière de formation très détaillée »,
+   renseignée pour 70 PASS sur 287 (et qui mêle options et lieux d'enseignement). « Combien de PASS option
+   Biologie à Bordeaux » répondait 0 « calcul exact », alors que les PASS de Bordeaux ne disent pas leur option.
+   Quand le mot cherché (option, mention…) ne peut se lire que dans une colonne remplie pour moins de 80 %
+   des formations de la famille (« PASS »), et que des formations du périmètre n'y ont rien : on s'arrête,
+   et on montre ce que disent les données (formations qui le précisent, formations sans précision). */
+const SEUIL_COLONNE_REMPLIE = 0.8;
+const _caseRemplie = (r, c) => String(r?.[c] ?? '').trim() !== '';
+const _nbRemplies = (rows, c) => rows.reduce((n, r) => n + (_caseRemplie(r, c) ? 1 : 0), 0);
+function precisionPartielleIntitules(plan, termFilter) {
+  const table = plan && plan.table;
+  if (!table || !termFilter || !Array.isArray(termFilter.terms) || !termFilter.terms.length) return null;
+  const objets = table.objects || [];
+  const info = formationTermsInfo(table);
+  if (!info.cols.length) return null;
+  const labels = String(termFilter.label || '').split(' + ');
+  const termes = termFilter.terms.map((t, i) => ({ t: Array.isArray(t) ? t : [t], label: labels[i] || String(t) }));
+  const candidats = [];
+  if (termes.length >= 2) termes.forEach((x, i) => candidats.push({ ...x, autres: termes.filter((_, j) => j !== i) }));
+  (plan.unresolvedTerms || []).forEach(m => candidats.push({ t: null, label: String(Array.isArray(m) ? m[0] : m), autres: termes }));
+  const autresFiltres = (plan.filters || []).filter(f => f && f !== termFilter && f.op !== 'contains_all');
+  for (const cand of candidats) {
+    // la famille : les formations qui ont les autres mots (« PASS »), dans tout le fichier
+    const famille = applyLocalActionFilters(objets, [{ col: FORMATION_TERMS_COL, op: 'contains_all', cols: info.cols, terms: cand.autres.map(a => a.t) }]);
+    if (famille.length < 5) continue;
+    const taux = c => _nbRemplies(famille, c) / famille.length;
+    let col = null;
+    if (cand.t) {
+      const ou = info.cols.map(c => ({ c, n: famille.filter(r => rowContainsAllTerms(r, { cols: [c], terms: [cand.t] })).length })).filter(x => x.n > 0);
+      if (ou.some(x => taux(x.c) >= SEUIL_COLONNE_REMPLIE)) continue; // le mot est dans une colonne bien remplie : chiffre fiable
+      col = (ou.sort((a, b) => b.n - a.n)[0] || {}).c || null;
+    }
+    if (!col) {
+      const partielles = info.cols.filter(c => { const x = taux(c); return x > 0 && x < SEUIL_COLONNE_REMPLIE; });
+      if (!partielles.length) continue;
+      const nbVal = c => new Set(famille.map(r => r?.[c]).filter(v => String(v ?? '').trim() !== '')).size;
+      col = partielles.sort((a, b) => nbVal(b) - nbVal(a))[0];
+    }
+    // le périmètre de la question (« à Bordeaux ») : s'il est entièrement précisé, le chiffre est exact
+    const perimetre = applyLocalActionFilters(famille, autresFiltres);
+    const sansPrecision = perimetre.filter(r => !_caseRemplie(r, col));
+    if (!sansPrecision.length) continue;
+    const precisees = cand.t ? perimetre.filter(r => rowContainsAllTerms(r, { cols: [col], terms: [cand.t] })) : [];
+    return {
+      terme: cand.label, famille: cand.autres.map(a => a.label).join(' + '), col,
+      nFamille: famille.length, nRenseignees: _nbRemplies(famille, col),
+      perimetre: perimetre.length, precisees, sansPrecision, filtres: autresFiltres,
+    };
+  }
+  return null;
+}
+// Formations regroupées par établissement : nombre et places (« Université de Bordeaux : 2 formations, 165 et 270 places »)
+function formationsParEtablissement(table, rows, max = 40) {
+  const desc = _colonnesDescription(table);
+  const etab = desc.find(h => /etablissement/.test(_hx(h))) || desc[desc.length - 1];
+  const commune = (table.headers || []).find(h => /^(commune|ville)/.test(_hx(h)) && !/code|insee|postal|origine/.test(_hx(h)));
+  const capa = (table.headers || []).find(h => /capacit/.test(_hx(h)) && _estNumerique(table, h));
+  const groupes = new Map();
+  rows.forEach(r => {
+    const nom = String(r?.[etab] ?? '').trim() || '(établissement non renseigné)';
+    const lieu = commune ? String(r?.[commune] ?? '').trim() : '';
+    const cle = nom + '\u0001' + lieu;
+    if (!groupes.has(cle)) groupes.set(cle, { etablissement: nom, commune: lieu, n: 0, places: [] });
+    const g = groupes.get(cle);
+    g.n++;
+    const v = capa ? _nombreCellule(r?.[capa]) : null;
+    if (v !== null) g.places.push(v);
+  });
+  const liste = [...groupes.values()].sort((a, b) => b.n - a.n || a.etablissement.localeCompare(b.etablissement, 'fr'));
+  liste.forEach(g => g.places.sort((a, b) => a - b));
+  return { colEtab: etab, colCapa: capa || null, formations: rows.length, total: liste.length, groupes: liste.slice(0, max) };
+}
+function _placesEnClair(places) {
+  if (!places.length) return '';
+  const f = places.map(p => p.toLocaleString('fr-FR'));
+  return `${f.length > 1 ? `${f.slice(0, -1).join(', ')} et ${f[f.length - 1]}` : f[0]} place${places.length > 1 || places[0] > 1 ? 's' : ''}`;
+}
+function _tableauEtablissementsHtml(pe) {
+  if (!pe || !pe.groupes.length) return '';
+  const th = 'text-align:left;padding:6px 10px;background:#e8edff;color:var(--bleu,#003189);font-size:11px';
+  const td = 'padding:5px 10px;font-size:12px;border-top:1px solid var(--gris1,#f3f4f6)';
+  return `<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%"><thead><tr><th style="${th}">Établissement</th><th style="${th}">Commune</th><th style="${th};text-align:right">Formations</th>${pe.colCapa ? `<th style="${th}">Capacité de chacune</th>` : ''}</tr></thead><tbody>`
+    + pe.groupes.map(g => `<tr><td style="${td}">${escapeHtml(g.etablissement)}</td><td style="${td}">${escapeHtml(g.commune || '—')}</td><td style="${td};text-align:right"><strong>${g.n}</strong></td>${pe.colCapa ? `<td style="${td}">${escapeHtml(_placesEnClair(g.places) || '—')}</td>` : ''}</tr>`).join('')
+    + `</tbody></table></div>`
+    + (pe.total > pe.groupes.length ? `<p style="font-size:12px;color:var(--gris3)">… et ${(pe.total - pe.groupes.length).toLocaleString('fr-FR')} autres établissements.</p>` : '');
+}
+function unresolvedPrecisionExecution(plan, pp) {
+  const table = plan.table;
+  const fam = `« ${pp.famille} »`;
+  const portee = pp.filtres.length ? ` (${pp.filtres.map(_filtreEnClair).join(' ; ')})` : '';
+  const pe = formationsParEtablissement(table, pp.sansPrecision);
+  const desc = _colonnesDescription(table);
+  const capa = (table.headers || []).find(h => /capacit/.test(_hx(h)) && _estNumerique(table, h));
+  const ligne = r => [r?.[desc.find(h => /etablissement/.test(_hx(h)))], r?.[pp.col], capa ? `${_nombreCellule(r?.[capa]) ?? '?'} places` : ''].filter(x => String(x ?? '').trim()).map(x => escapeHtml(String(x))).join(' — ');
+  const quoi = `« ${pp.terme} » ne peut se lire que dans « ${pp.col} », renseignée pour ${_nf(pp.nRenseignees)} formations ${fam} sur ${_nf(pp.nFamille)}`;
+  const html = `<h4>Option non précisée dans les données</h4>`
+    + `<p>Dans ${escapeHtml(_sourceEnClair(table))}, ${escapeHtml(quoi)}. Les autres ne disent pas leur option : je ne donne donc pas de chiffre, il serait trop petit.</p>`
+    + `<p><strong>Ce que disent les données</strong>, pour les ${_nf(pp.perimetre)} formations ${escapeHtml(fam)}${escapeHtml(portee)} :</p><ul>`
+    + `<li><strong>${_nf(pp.precisees.length)}</strong> formation${pp.precisees.length > 1 ? 's' : ''} dont la précision contient « ${escapeHtml(pp.terme)} »${pp.precisees.length ? ' :' : ''}`
+    + (pp.precisees.length ? `<ul>${pp.precisees.slice(0, 30).map(r => `<li>${ligne(r)}</li>`).join('')}</ul>` : '') + `</li>`
+    + `<li><strong>${_nf(pp.sansPrecision.length)}</strong> formation${pp.sansPrecision.length > 1 ? 's' : ''} sans aucune précision : ${pp.sansPrecision.length > 1 ? 'elles peuvent' : 'elle peut'} proposer « ${escapeHtml(pp.terme)} » ou non.</li></ul>`
+    + `<p><strong>Formations sans précision, par établissement</strong> :</p>${_tableauEtablissementsHtml(pe)}`
+    + `<p style="font-size:12px;color:var(--gris3)">Pour connaître leur option, consultez la fiche de chaque formation sur Parcoursup. Quand un établissement a plusieurs formations au même intitulé, la capacité permet de les distinguer.</p>`;
+  const text = `NON CALCULÉ : ${quoi} ; les autres ne précisent pas leur option. Dans le périmètre (${_nf(pp.perimetre)} formations ${pp.famille}${portee}) : ${pp.precisees.length} précisent « ${pp.terme} », ${pp.sansPrecision.length} sans précision.`;
+  return { kind: 'unresolved', plan, result: { missing: [pp.terme], suggestions: [], precision: { ...pp, precisees: pp.precisees.length, sansPrecision: pp.sansPrecision.length, etablissements: pe.groupes } }, text, html };
+}
+
 /* v27.11 — Reformulations courantes ramenées à la forme que le moteur comprend.
    Ne change pas le sens : abréviations (« nb de »), négations (« qui ne sont pas boursiers »),
    « dans chaque académie » (= par académie), « bacheliers généraux » (= bac général),
@@ -2455,6 +2563,9 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     const manque = conceptsNonFiltres(plan);
     if (manque.length) return unresolvedConceptExecution(plan, manque);
     const termFilter = (plan.filters || []).find(f => f && f.op === 'contains_all');
+    // v27.17 — option lisible seulement pour une partie des formations (PASS) : pas de chiffre trop petit
+    const _precision = termFilter ? precisionPartielleIntitules(plan, termFilter) : null;
+    if (_precision) return unresolvedPrecisionExecution(plan, _precision);
     if (plan.unresolvedTerms && plan.unresolvedTerms.length) return unresolvedFormationExecution(plan, plan.unresolvedTerms, termFilter);
     if (termFilter && !applyLocalActionFilters(plan.table.objects || [], [termFilter]).length) return unresolvedFormationExecution(plan, [], termFilter);
   }
@@ -2540,12 +2651,21 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     const limit = plan.listMode ? 300 : (plan.limit || detectLimit(plan.question) || (plan.tool === 'top' ? 10 : 30));
     const counts = topCountsForRows(rows, col, Math.max(limit, 30));
     const topRows = counts.top.slice(0, limit);
+    const _res = { total: rows.length, filled: counts.filled, distinct: counts.distinct, rows: topRows };
+    // v27.17 — liste d'intitulés remplie pour moins de 80 % des formations (options des PASS) :
+    // la liste n'est pas celle de toutes les options ; formations sans précision montrées par établissement
+    if (plan.listMode && rows.length && counts.filled < rows.length * SEUIL_COLONNE_REMPLIE) {
+      _res.sansPrecision = formationsParEtablissement(plan.table, rows.filter(r => !_caseRemplie(r, col)));
+    }
+    const _txtSans = _res.sansPrecision
+      ? `\n(sans précision dans cette colonne : ${rows.length - counts.filled} sur ${rows.length} ; la liste ne couvre que ${counts.filled} formations)`
+      : '';
     const exec = {
       kind: plan.tool,
       plan: { ...plan, targetCol: col, limit },
-      result: { total: rows.length, filled: counts.filled, distinct: counts.distinct, rows: topRows },
-      text: topRows.map(x => `${x.value}: ${x.count} (${x.pct.toFixed(1)}%)`).join('\n'),
-      html: renderDataEngineResultHtml(plan.tool, { ...plan, targetCol: col, limit }, { total: rows.length, filled: counts.filled, distinct: counts.distinct, rows: topRows })
+      result: _res,
+      text: topRows.map(x => `${x.value}: ${x.count} (${x.pct.toFixed(1)}%)`).join('\n') + _txtSans,
+      html: renderDataEngineResultHtml(plan.tool, { ...plan, targetCol: col, limit }, _res)
     };
     rememberDataEngineExecution(exec);
     return exec;
@@ -2797,6 +2917,10 @@ function perimetreResultat(kind, plan, result) {
     const affichees = Math.min((result.rows || []).length, 20);
     if ((result.distinct || 0) > affichees) notes.push(`seules les ${_nf(affichees)} valeurs les plus fréquentes sont affichées, sur ${_nf(result.distinct)}`);
   }
+  if (kind === 'group_by' && plan.listMode && result.sansPrecision) {
+    const sans = (result.total || 0) - (result.filled || 0);
+    notes.push(`${_nf(sans)} ${mot(sans)} sur ${_nf(result.total)} sans précision dans « ${plan.targetCol} » : la liste ne couvre que ${_nf(result.filled)} ${mot(result.filled)}`);
+  }
   if (kind === 'stats' && result.total > result.numericCount) {
     const ign = result.total - result.numericCount;
     notes.push(`calcul sur ${_nf(result.numericCount)} valeur${result.numericCount > 1 ? 's' : ''} chiffrée${result.numericCount > 1 ? 's' : ''} ; ${_nf(ign)} ${mot(ign)} sans valeur chiffrée ignorée${ign > 1 ? 's' : ''}`);
@@ -2861,7 +2985,9 @@ function renderDataEngineResultHtml(tool, plan, result) {
     const clearTitle = `Liste — ${_shortColName(plan.targetCol)}`;
     const reste = ((result.distinct || rows.length) > rows.length ? `<p style="font-size:12px;color:var(--gris3)">… et ${(result.distinct - rows.length).toLocaleString('fr-FR')} autres intitulés.</p>` : '')
       // v27.8 — lignes sans valeur dans la colonne listée : affichées, pour que le total soit juste
-      + (result.filled !== undefined && result.filled < result.total ? `<p style="font-size:12px;color:var(--gris3)">${(result.total - result.filled).toLocaleString('fr-FR')} ${unit(result.total - result.filled)} sans valeur dans cette colonne.</p>` : '');
+      + (result.filled !== undefined && result.filled < result.total && !result.sansPrecision ? `<p style="font-size:12px;color:var(--gris3)">${(result.total - result.filled).toLocaleString('fr-FR')} ${unit(result.total - result.filled)} sans valeur dans cette colonne.</p>` : '')
+      // v27.17 — colonne peu remplie : avertissement visible et formations sans précision par établissement
+      + (result.sansPrecision ? `<div style="background:#fff7ed;border-left:3px solid #c2410c;border-radius:4px;padding:8px 12px;margin:10px 0"><p style="margin:0 0 6px"><strong>⚠️ Liste incomplète</strong> : seules <strong>${result.filled.toLocaleString('fr-FR')}</strong> ${unit(result.filled)} sur ${result.total.toLocaleString('fr-FR')} ont une précision dans « ${escapeHtml(plan.targetCol)} » (option, lieu d'enseignement…). Les <strong>${(result.total - result.filled).toLocaleString('fr-FR')}</strong> autres n'en ont aucune : cette liste n'est pas celle de toutes les options proposées.</p><p style="margin:0 0 6px"><strong>${unit(2).replace(/^./, c => c.toUpperCase())} sans précision, par établissement</strong> :</p>${_tableauEtablissementsHtml(result.sansPrecision)}<p style="font-size:12px;color:var(--gris3);margin:6px 0 0">Pour connaître leur option, consultez la fiche de chaque formation sur Parcoursup ; la capacité distingue les formations au même intitulé.</p></div>` : '');
     return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}${perim}<p><strong>${(result.distinct ?? rows.length).toLocaleString('fr-FR')}</strong> intitulé${(result.distinct ?? rows.length) > 1 ? 's' : ''} différent${(result.distinct ?? rows.length) > 1 ? 's' : ''} dans <strong>${escapeHtml(plan.targetCol)}</strong>, pour <strong>${result.total.toLocaleString('fr-FR')}</strong> ${unit(result.total)}.</p><ul>${rows.map(r => `<li>${escapeHtml(r.value)} : <strong>${r.count.toLocaleString('fr-FR')}</strong></li>`).join('')}</ul>${reste}<p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
   }
   if (tool === 'group_by' || tool === 'top') {

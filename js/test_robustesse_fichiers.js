@@ -273,7 +273,15 @@ await describe('Liste : colonne presque vide (cas réel des PASS : 70 lignes rem
   const vide = lignes.map(o => ({ ...o, nom: o.fili === 'PASS' ? '' : o.nom, fil_det: o.fili === 'PASS' ? '' : o.fil_det, form: o.form }));
   const ctx2 = ctxOpenData(vide);
   const r2 = ask(ctx2, 'donne moi la liste complète des filières de PASS');
-  if (r2.exec?.result && r2.exec.result.filled < r2.exec.result.total) assert(/sans valeur dans cette colonne/.test(r2.exec.html), 'le nombre de formations sans valeur est affiché');
+  // v27.17 — colonne remplie pour moins de 80 % des formations : la petite phrase grise
+  // « N sans valeur » est remplacée par l'avertissement « Liste incomplète » (avec le nombre)
+  if (r2.exec?.result && r2.exec.result.filled < r2.exec.result.total) {
+    const sans = (r2.exec.result.total - r2.exec.result.filled).toLocaleString('fr-FR');
+    const visible = r2.exec.result.filled < r2.exec.result.total * 0.8
+      ? /Liste incomplète/.test(r2.exec.html) && r2.exec.html.includes(`<strong>${sans}</strong> autres`)
+      : /sans valeur dans cette colonne/.test(r2.exec.html);
+    assert(visible, 'le nombre de formations sans valeur est affiché');
+  }
   else assert(true, 'colonne entièrement remplie : pas de mention « sans valeur »');
 });
 
