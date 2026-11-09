@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-37 fichiers, 1 735 tests. Depuis la racine du repo :
+38 fichiers, 1 763 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -104,6 +104,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 - **open data** de 14 000 formations : statut public/privé, académie, département, ville, région, sélectivité, sommes (places, candidats, admis), moyennes (capacité, taux d'accès), en moins de 3 secondes par question.
 
 ### Réponses incorrectes et questions à revoir
+
+`js/test_rapport_pdf.js` vérifie le **rapport PDF**. « 🖨 PDF » sous une réponse imprime cette réponse seule (avant : toute la page) ; « 📑 Rapport PDF » (en-tête) réunit les réponses cochées, dans l'ordre de la conversation, avec un titre, la date, la source, un sommaire et la question avant chaque bloc. Titres, « Sur quoi porte ce calcul » et avertissements sont gardés ; boutons et détails techniques retirés. Le PDF s'obtient par « Enregistrer au format PDF » dans la fenêtre d'impression ; rien ne sort du navigateur.
 
 `js/test_session_kb.js` vérifie la **session décrite par la base de connaissances**. Les 561 fiches viennent du guide Parcoursup de la session 2026 (mis à jour jusqu'au 12 juin 2026). À partir de septembre 2026, la session en préparation est 2027 : Les règles et la procédure restent valables (elles changent très peu d'une année à l'autre) : seules les dates exactes sont celles de 2026. Albert reçoit la consigne de ne jamais présenter une date de 2026 comme celle de 2027, et un bandeau « 📅 Dates de la session 2026 » s'affiche sous une réponse qui cite une date précise. Le test vérifie aussi que `scripts/construire_index_kb.py` redonne exactement la base et son index.
 
