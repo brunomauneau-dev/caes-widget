@@ -508,6 +508,8 @@ function extractBlockTitle(exec, question) {
   if (tool === 'count_rows') {
     const count = exec.result?.count ?? '';
     const n = Number(count).toLocaleString('fr-FR');
+    // v27.23 — établissements différents
+    if (exec.result?.etablissements === true) return `${n} établissement${count > 1 ? 's' : ''}${fPart}`;
     // v27.7 — open data : une ligne = une formation (pas un candidat)
     const unite = exec.plan?.table?.rowUnit === 'formation' ? 'formation' : 'candidat';
     return `${n} ${unite}${count > 1 ? 's' : ''}${fPart}`;
@@ -523,6 +525,7 @@ function extractBlockTitle(exec, question) {
   if (tool === 'pivot') {
     return `${_shortColName(col)} × ${_shortColName(col2)}${fPart}`;
   }
+  if (col && exec.result?.etablissements && exec.result.etablissements !== true) return `Établissements par ${_shortColName(col)} (${Number(exec.result.etablissements.total).toLocaleString('fr-FR')})${fPart}`;
   // v27.18 — somme par groupe : le titre donne l'unité (« Places par Académie (12 345 places) »)
   if (col && exec.result?.somme) {
     const so = exec.result.somme;

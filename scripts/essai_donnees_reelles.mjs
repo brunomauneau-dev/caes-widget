@@ -30,6 +30,9 @@ export const QUESTIONS = [
   { id: 'bio_bdx', q: 'combien de PASS option biologie à Bordeaux' },
   // v27.22 — mot non reconnu : arrêt, jamais un compte plus large
   { id: 'mot_inconnu', q: 'combien de formations de pilote de ligne' },
+  // v27.23 — établissements différents, pas des formations
+  { id: 'etab_bdx', q: "combien d'établissements dans l'académie de Bordeaux" },
+  { id: 'formations_bdx_par_etab', q: "nombre de formations par établissement dans l'académie de Bordeaux" },
   { id: 'bts_ndrc', q: 'combien de BTS NDRC' },
   // v27.18 — mesure par groupe et évolution par groupe
   { id: 'places_par_aca', q: 'nombre de places en BTS par académie' },
@@ -206,7 +209,8 @@ export function diagnosticColonnes(table, filiere = 'PASS') {
 // nomme une formation (« khâgne », « MCO », « Sciences Po »…) avant de corriger le moteur. Calcul direct sur les lignes.
 const _nd = s => String(s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/œ/g, 'oe').replace(/[^a-z0-9]+/g, ' ').trim();
 export function diagnosticMots(table, mots = []) {
-  const cols = (table.headers || []).filter(h => /fili|formation|intitul|nom complet|libell/i.test(h) && !/statut|nombre|effectif|capacit|taux|%|rang|code|session|lien/i.test(h));
+  // colonnes de formation, et colonne des établissements (nom de l'établissement)
+  const cols = (table.headers || []).filter(h => (/fili|formation|intitul|nom complet|libell/i.test(h) || /^[ée]tablissement$/i.test(String(h).trim())) && !/statut|nombre|effectif|capacit|taux|%|rang|code|session|lien/i.test(h));
   return mots.map(m => String(m).trim()).filter(Boolean).map(mot => {
     // « orthophon* » : début de mot (orthophonie, orthophoniste) ; sinon mot entier
     const prefixe = /\*$/.test(mot);
@@ -270,6 +274,7 @@ export function controler(resultats) {
     ctl('« places en BTS par académie » : somme des places, pas le nombre de BTS', R.places_par_aca.kind === 'group_by' && !!R.places_par_aca.somme && bdx(R.places_par_aca) > bdx(R.formations_par_aca), `Bordeaux : ${bdx(R.places_par_aca) ?? '?'} places · ${bdx(R.formations_par_aca) ?? '?'} BTS`);
   }
   if (R.evo_formations_demandees) ctl('évolution d\'un classement de formations : arrêt expliqué (pas suivies une à une)', R.evo_formations_demandees.kind === 'unresolved', R.evo_formations_demandees.reponse);
+  if (R.etab_bdx && R.formations_bdx_par_etab) ctl("« combien d'établissements » = nombre d'établissements différents (pas de formations)", R.etab_bdx.kind === 'count' && R.etab_bdx.count >= R.formations_bdx_par_etab.distinct && R.etab_bdx.count < R.formations_bdx_par_etab.total, `${R.etab_bdx.reponse} · répartition : ${R.formations_bdx_par_etab.distinct ?? '?'} établissements pour ${R.formations_bdx_par_etab.total ?? '?'} formations`);
   if (R.mot_inconnu) ctl('mot absent des données (« pilote ») : arrêt, pas tout le fichier', R.mot_inconnu.kind === 'unresolved', R.mot_inconnu.reponse);
   // sigle absent des intitulés : traduit (une partie des BTS) ou arrêt — jamais tous les BTS
   if (R.bts_ndrc && R.bts) ctl('« BTS NDRC » : une partie des BTS (ou arrêt), jamais tous', R.bts_ndrc.kind === 'unresolved' || (R.bts_ndrc.kind === 'count' && R.bts_ndrc.count > 0 && R.bts_ndrc.count < R.bts.count), `${R.bts_ndrc.reponse} · BTS : ${R.bts.count ?? '?'}`);
@@ -500,6 +505,9 @@ export const REFERENCES = [
   { id: 'ref_ecoles_commerce', q: "combien d'écoles de commerce", type: 'count', egal: { fili: 'Ecole de Commerce' } },
   { id: 'ref_khagnes', q: 'combien de khâgnes', type: 'count', egal: { fili: 'CPGE', fil_lib_voe_acc: 'Lettres' } },
   { id: 'ref_licences_staps', q: 'combien de licences STAPS', type: 'count', egal: { fili: 'Licence', fil_lib_voe_acc: 'Sciences et Techniques des Activités Physiques et Sportives' } },
+  // v27.23 — établissements : nom exact côté serveur
+  { id: 'ref_lycee_jullian', q: 'combien de formations au lycée Camille Jullian', type: 'count', egal: { g_ea_lib_vx: 'Lycée Camille Jullian' } },
+  { id: 'ref_lycee_montaigne', q: 'combien de formations au lycée Montaigne', type: 'count', egal: { g_ea_lib_vx: 'Lycée Montaigne' } },
   { id: 'ref_orthophonie', q: "combien de formations d'orthophonie", type: 'count', egal: { fil_lib_voe_acc: "Certificat de capacité d'Orthophoniste" } },
   { id: 'ref_top_places_bdx', q: 'les 5 formations avec le plus de places à Bordeaux', type: 'top', champ: 'capa_fin', ordre: 'desc', n: 5, egal: { ville_etab: 'Bordeaux' } },
 ];

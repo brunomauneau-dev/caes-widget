@@ -1943,6 +1943,139 @@ const REFORMULATIONS = [
   [/\b(?:sur|dans)\s+(?:la\s+)?(?:commune|ville)\s+de\s+(?![ld]['’]|la\b|l\s)/gi, 'à '],
   [/\b(?:la\s+)?(?:commune|ville)\s+de\s+(?=[A-ZÀ-Ý])/g, 'à '],
 ];
+/* ═══════════════ v27.23 — Établissements ═══════════════
+   Essai sur l'open data réel : « formations à l'université de Bordeaux » → 8 (le mot « université » cherché dans
+   les intitulés de formation), « combien d'établissements dans l'académie de Bordeaux » → 631 (des formations),
+   « formations dans les lycées de Bordeaux » → 0, « lycée Montaigne » → arrêt. Désormais :
+   - « lycée Montaigne », « université de Bordeaux », « IUT Bordeaux Montaigne » : filtre sur le nom de l'établissement
+     (expression exacte d'abord, puis tous les mots) ; plusieurs établissements du même nom sont listés ;
+   - « les lycées de Bordeaux », « combien d'universités » : établissements dont le nom contient « lycée » / « université » ;
+   - « combien d'établissements / de lycées … », « nombre d'établissements par académie » : établissements différents. */
+const NOM_ETAB_RE = /\b(lycees?|universites?|iut|etablissements?)\b/;
+const COUPURES_ETAB = new Set('dans en a au aux pour par avec sur proposent propose proposant offrent offre qui ou et sont est ont combien quel quels quelles ayant en'.split(' '));
+const MOTS_LIENS_ETAB = new Set('de du des la le les l d'.split(' '));
+function _colEtablissement(table) {
+  const headers = (table?.headers || []).filter(Boolean);
+  return headers.find(h => /^etablissement$/.test(_hx(h).trim()) || /^etablissement /.test(_hx(h)) && /g ea lib/.test(_hx(h)))
+    || headers.find(h => /^etablissement\b/.test(_hx(h)) && !/code|uai|statut|academie|commune|departement|region|origine|accueil|scolarite/.test(_hx(h)));
+}
+// « I.U.T de Bordeaux » → « iut de bordeaux » : lettres isolées d'un sigle recollées, pour la recherche
+const _compacte = k => String(k).replace(/\b[a-z](?: [a-z]\b)+/g, m => m.replace(/ /g, ''));
+function _nomsEtablissements(table, col) {
+  const cache = table._nomsEtab || (table._nomsEtab = {});
+  if (cache[col]) return cache[col];
+  const m = new Map();
+  (table.objects || []).forEach(r => { const v = r?.[col]; if (v !== undefined && v !== null && String(v).trim()) { const k = normalizeText(v); if (!m.has(k)) m.set(k, String(v).trim()); } });
+  return (cache[col] = m);
+}
+// { col, nom, phrase, valeurs[normalisées], noms[originaux], type, introuvable } ou null
+function etablissementDeLaQuestion(table, question) {
+  if (!table || !Array.isArray(table.objects) || !table.objects.length) return null;
+  const col = _colEtablissement(table);
+  if (!col) return null;
+  const q = normalizeText(question || '');
+  const m = q.match(NOM_ETAB_RE);
+  if (!m) return null;
+  const nom = m[1];
+  const apres = q.slice(m.index + m[0].length).trim().split(' ').filter(Boolean);
+  const suite = [];
+  for (const w of apres) { if (COUPURES_ETAB.has(w) || /^\d/.test(w) || suite.length >= 6) break; suite.push(w); }
+  while (suite.length && MOTS_LIENS_ETAB.has(suite[suite.length - 1])) suite.pop();
+  const noms = _nomsEtablissements(table, col);
+  const pluriel = /s$/.test(nom) && nom !== 'iut';
+  const generique = /^etablissement/.test(nom);
+  const geo = (() => { try { return formationTermsInfo(table).geo; } catch (e) { return new Set(); } })();
+  // qualificatifs (« public », « privés », « sélectifs ») : pas un nom d'établissement
+  let contenu = suite.filter(w => !MOTS_LIENS_ETAB.has(w) && !MOTS_QUESTION.has(w) && !FORMATION_TERM_STOP.has(w));
+  if (pluriel || generique) contenu = contenu.filter(w => !geo.has(w)); // « les lycées de Bordeaux » : Bordeaux est un lieu
+  const singulier = nom.replace(/s$/, '');
+  if (!contenu.length) {
+    if (generique) return null; // « établissements » sans nom : tous
+    // type d'établissement : nom contenant « lycée », « université », « IUT »
+    const valeurs = [...noms.keys()].filter(k => _compacte(k).split(' ').includes(singulier));
+    return { col, nom: singulier, type: true, phrase: singulier, valeurs, noms: valeurs.map(k => noms.get(k)) };
+  }
+  const phrase = [generique ? '' : singulier, ...suite].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  let valeurs = [...noms.keys()].filter(k => ` ${_compacte(k)} `.includes(` ${phrase} `));
+  if (!valeurs.length) {
+    const mots = [generique ? null : singulier, ...contenu].filter(Boolean);
+    valeurs = [...noms.keys()].filter(k => { const ws = _compacte(k).split(' '); return mots.every(w => ws.includes(w)); });
+  }
+  let horsNom = [];
+  if (!valeurs.length) {
+    // « lycée Montesquieu de Bordeaux » : « Bordeaux » est le lieu, pas le nom → reste un filtre de lieu
+    horsNom = contenu.filter(w => geo.has(w));
+    const mots = [generique ? null : singulier, ...contenu.filter(w => !geo.has(w))].filter(Boolean);
+    if (horsNom.length && mots.length > 1) valeurs = [...noms.keys()].filter(k => { const ws = _compacte(k).split(' '); return mots.every(w => ws.includes(w)); });
+    if (!valeurs.length) horsNom = [];
+  }
+  const motsNom = new Set([singulier, ...suite].filter(w => !horsNom.includes(w)));
+  return { col, nom: singulier, type: false, phrase, motsNom: [...motsNom], valeurs, noms: valeurs.map(k => noms.get(k)), introuvable: !valeurs.length };
+}
+function unresolvedEtablissementExecution(plan, e) {
+  const noms = _nomsEtablissements(plan.table, e.col);
+  // pistes : établissements dont le nom contient le mot le plus rare de la demande
+  const mots = (e.motsNom || []).filter(w => w.length >= 3 && w !== e.nom && !MOTS_LIENS_ETAB.has(w));
+  const pistes = [...noms.keys()].filter(k => mots.some(w => k.split(' ').includes(w))).slice(0, 12).map(k => noms.get(k));
+  const quoi = `aucun établissement dont le nom correspond à « ${e.phrase} »`;
+  const html = `<h4>Établissement non trouvé</h4><p>Je n'ai trouvé ${escapeHtml(quoi)} dans <strong>${escapeHtml(plan.table.name || 'la table active')}</strong> (colonne « ${escapeHtml(e.col)} »). Je ne donne donc pas de chiffre.</p>`
+    + (pistes.length ? `<p><strong>Établissements aux noms proches</strong> :</p><ul>${pistes.map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul>` : '')
+    + `<p style="font-size:12px;color:var(--gris3)">Reformulez avec le nom tel qu'il figure dans les données.</p>`;
+  return { kind: 'unresolved', plan, result: { missing: [e.phrase], suggestions: pistes.map(v => ({ value: v, count: 0 })) }, text: `NON TROUVÉ : ${quoi}`, html };
+}
+// Un établissement = un nom dans une commune (« Lycée Gustave Eiffel » existe dans plusieurs villes)
+function _cleEtablissement(table, col) {
+  const commune = (table?.headers || []).find(h => /^(commune|ville)/.test(_hx(h)) && !/code|insee|postal|origine/.test(_hx(h)));
+  return r => { const n = normalizeText(r?.[col]); return n ? `${n}|${commune ? normalizeText(r?.[commune]) : ''}` : ''; };
+}
+const COMPTER_ETAB_RE = /\b(?:combien|nombre)\s+(?:d\s+|de\s+|des\s+)?(etablissements?|lycees|universites|iut)\b/;
+function applyEtablissements(plan) {
+  if (!plan || !plan.table || ['compare', 'chart_current', 'export_current_excel', 'export_current_csv'].includes(plan.tool)) return plan;
+  const q = normalizeText(plan.question || '');
+  const e = etablissementDeLaQuestion(plan.table, plan.question);
+  if (e) {
+    if (e.introuvable) { plan.etablissementIntrouvable = e; return plan; }
+    const ACCENTS = { lycee: 'lycée', universite: 'université', iut: 'IUT', etablissement: 'établissement' };
+    const joli = t => String(t).split(' ').map(w => ACCENTS[w] || w).join(' ');
+    const libelle = e.type
+      ? `nom contenant « ${joli(e.nom)} » (${e.noms.length.toLocaleString('fr-FR')} établissements)`
+      : e.noms.length <= 4 ? e.noms.map(x => `« ${x} »`).join(', ') : `${e.noms.length} établissements dont le nom contient « ${joli(e.phrase)} »`;
+    const filtre = { col: e.col, op: 'in', values: e.valeurs, value: e.type ? e.nom : e.phrase, label: libelle, source: 'etablissement', noms: e.noms };
+    let filtres = (plan.filters || []).filter(f => f && f.col !== e.col);
+    // un nom d'établissement n'est pas un intitulé de formation (« université »), ni un lieu (« Bordeaux » de « université de Bordeaux »)
+    const motsNom = new Set(e.type ? [e.nom, e.nom + 's'] : e.motsNom);
+    filtres = filtres.filter(f => {
+      if (f.op === 'contains_all' && f.source === 'termes_formation') {
+        const garder = (f.terms || []).map((t, i) => ({ t, l: String(f.label || '').split(' + ')[i] })).filter(x => !(Array.isArray(x.t) ? x.t : [x.t]).some(w => motsNom.has(w)));
+        if (!garder.length) return false;
+        if (garder.length < (f.terms || []).length) { Object.assign(f, { terms: garder.map(x => x.t), label: garder.map(x => x.l).join(' + '), value: garder.map(x => x.l).join(' + ') }); }
+        return true;
+      }
+      if (!e.type && f.op === 'eq' && GEO_COL_RE.test(_hx(f.col))) return !normalizeText(f.value).split(' ').every(w => motsNom.has(w));
+      return true;
+    });
+    plan.filters = [...filtres, filtre];
+    plan.etablissement = e;
+  }
+  if (COMPTER_ETAB_RE.test(q)) {
+    const col = _colEtablissement(plan.table);
+    if (col) {
+      if (['group_by', 'top'].includes(plan.tool) && plan.targetCol && plan.targetCol !== col) plan.distinctCol = col;
+      else if (['count_rows', 'sum', 'group_by', 'top'].includes(plan.tool)) { plan.tool = 'count_rows'; plan.compterEtablissements = col; plan.sumCol = null; }
+    }
+  }
+  return plan;
+}
+// Nombre d'établissements différents par valeur de la colonne (même forme que topCountsForRows)
+function distinctParGroupe(rows, col, distinctCol, table = null) {
+  const cle = table ? _cleEtablissement(table, distinctCol) : (r => normalizeText(r?.[distinctCol]));
+  const m = new Map(); let filled = 0;
+  rows.forEach(r => { const v = r?.[col]; if (isEmptyCell(v)) return; filled++; const k = String(v).trim(); const d = cle(r); if (!d) return; if (!m.has(k)) m.set(k, new Set()); m.get(k).add(d); });
+  const total = new Set(rows.map(cle).filter(Boolean)).size;
+  const top = [...m.entries()].map(([value, s]) => ({ value, count: s.size, pct: total ? s.size / total * 100 : 0 })).sort((a, b) => b.count - a.count || a.value.localeCompare(b.value, 'fr'));
+  return { filled, distinct: m.size, top, totalDistinct: total };
+}
+
 /* v27.22 — Sigles et surnoms de formations → mots des intitulés officiels.
    Open data réel : « MCO », « NDRC », « SIO », « GEA », « TC », « khâgne », « Sciences Po » n'apparaissent dans
    aucun intitulé ; le mot était ignoré et le moteur comptait tous les BTS (5 351), tous les BUT (820), tout le
@@ -2185,7 +2318,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
     // à partir de filtres structurés validés, jamais depuis les résultats calculés
     // (moyenne, médiane, valeur de tableau, etc.).
     const plannerPlan = buildPlannerPlan(question, question, table, tool);
-    if (plannerPlan) return inheritConversationContext(applySessions(applyPart(applyConditionsChiffrees(applyClassement(applyMeasureSum(applyListMode(applyFormationTerms(plannerPlan))))))), question);
+    if (plannerPlan) return inheritConversationContext(applySessions(applyPart(applyConditionsChiffrees(applyClassement(applyMeasureSum(applyListMode(applyEtablissements(applyFormationTerms(plannerPlan)))))))), question);
   }
 
   // Fallback V16 si planner indisponible.
@@ -2195,7 +2328,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
   // V25.1 — idem : le fallback ne doit pas analyser le contexte textuel
   // précédent comme s'il s'agissait de la question utilisateur.
   const filters = detectFilters(table, normalizeText(question || ''), targetCol);
-  return inheritConversationContext(applySessions(applyPart(applyConditionsChiffrees(applyClassement(applyMeasureSum(applyListMode(applyFormationTerms({
+  return inheritConversationContext(applySessions(applyPart(applyConditionsChiffrees(applyClassement(applyMeasureSum(applyListMode(applyEtablissements(applyFormationTerms({
     tool,
     table,
     filters,
@@ -2203,7 +2336,7 @@ function detectDataEnginePlan(question, filterContextText = question) {
     mentionedCols,
     question,
     createdAt: new Date().toISOString()
-  }))))))), question);
+  })))))))), question);
 }
 
 
@@ -2423,7 +2556,7 @@ function _finalSanitizeAnalysisPlanBase(plan) {
   const onlyBoursier = /^(combien|nombre|effectif|total)\s+(de\s+)?(candidats\s+)?(non\s+)?boursiers?\s*\??$/.test(q);
   // v27.7 — filtre « intitulé de formation contenant » : vient de la question elle-même, toujours conservé
   // v27.22 — la catégorie officielle tirée d'un mot de la question (« licences » → Licence) aussi
-  const _deQuestion = f => f && (f.source === 'termes_formation' || f.source === 'categorie_formation');
+  const _deQuestion = f => f && (f.source === 'termes_formation' || f.source === 'categorie_formation' || f.source === 'etablissement');
   const termFilters = (plan.filters || []).filter(_deQuestion);
   const keepTermFilters = () => {
     if (!termFilters.length) return;
@@ -2888,6 +3021,8 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
   }
   // v27.7 — terme de formation introuvable, ou termes jamais réunis : on s'arrête (pas de total faux)
   if (plan.tool !== 'compare' && plan.tool !== 'chart_current' && plan.tool !== 'export_current_excel' && plan.tool !== 'export_current_csv') {
+    // v27.23 — établissement cité mais introuvable : message dédié (avec des noms proches), avant les autres contrôles
+    if (plan.etablissementIntrouvable) return unresolvedEtablissementExecution(plan, plan.etablissementIntrouvable);
     const manque = conceptsNonFiltres(plan);
     if (manque.length) return unresolvedConceptExecution(plan, manque);
     // v27.22 — un mot d'intitulé déjà couvert par un autre filtre (« Nouvelle » de « Région = Nouvelle Aquitaine »,
@@ -2948,9 +3083,22 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     return { kind: 'export', plan, action, result: res, html: res?.html || '' };
   }
   const rows = applyLocalActionFilters(plan.table.objects || [], plan.filters || []);
+  // v27.23 — établissement cité mais introuvable : arrêt, avec les noms proches
+  if (plan.etablissementIntrouvable) return unresolvedEtablissementExecution(plan, plan.etablissementIntrouvable);
   if (['count_rows', 'group_by', 'top', 'pivot'].includes(plan.tool) && plan.mesureIntrouvable) return unresolvedConceptExecution(plan, [], `aucune colonne de ${plan.mesureIntrouvable} dans les données`);
   // v27.18 — tableau croisé de places / candidats / admis : il compterait des formations → arrêt
   if (plan.tool === 'pivot' && plan.mesurePivot) return unresolvedConceptExecution(plan, [], `un tableau croisé compte des formations, pas des ${plan.mesurePivot} : demandez une seule répartition (« ${plan.mesurePivot} par ${_shortColName(plan.targetCol || '') || 'académie'} »)`);
+  // v27.23 — « combien d'établissements / de lycées … » : établissements différents, pas des formations
+  if (plan.tool === 'count_rows' && plan.compterEtablissements) {
+    const col = plan.compterEtablissements;
+    const cle = _cleEtablissement(plan.table, col);
+    const distinct = new Set(rows.map(cle).filter(Boolean)).size;
+    const tous = new Set((plan.table.objects || []).map(cle).filter(Boolean)).size;
+    const result = { count: distinct, total: tous, formations: rows.length, totalFormations: (plan.table.objects || []).length, etablissements: true, col };
+    const exec = { kind: 'count', plan, result, text: `ÉTABLISSEMENTS DIFFÉRENTS = ${distinct} (${rows.length} formations)`, html: renderDataEngineResultHtml('count_rows', plan, result) };
+    rememberDataEngineExecution(exec);
+    return exec;
+  }
   if (plan.tool === 'count_rows') {
     const exec = {
       kind: 'count',
@@ -2986,10 +3134,12 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     const col = plan.targetCol || plan.mentionedCols?.[0];
     if (!col) return null;
     const limit = plan.listMode ? 300 : (plan.limit || detectLimit(plan.question) || (plan.tool === 'top' ? 10 : 30));
-    const counts = plan.groupSumCol ? sommesParGroupe(rows, col, plan.groupSumCol) : topCountsForRows(rows, col, Math.max(limit, 30));
+    const counts = plan.distinctCol ? distinctParGroupe(rows, col, plan.distinctCol, plan.table)
+      : plan.groupSumCol ? sommesParGroupe(rows, col, plan.groupSumCol) : topCountsForRows(rows, col, Math.max(limit, 30));
     const topRows = counts.top.slice(0, limit);
     const _res = { total: rows.length, filled: counts.filled, distinct: counts.distinct, rows: topRows };
     if (plan.groupSumCol) _res.somme = { col: plan.groupSumCol, unite: plan.sumUnit, total: counts.somme, sansValeur: counts.sansValeur };
+    if (plan.distinctCol) _res.etablissements = { col: plan.distinctCol, total: counts.totalDistinct };
     // v27.17 — liste d'intitulés remplie pour moins de 80 % des formations (options des PASS) :
     // la liste n'est pas celle de toutes les options ; formations sans précision montrées par établissement
     if (plan.listMode && rows.length && counts.filled < rows.length * SEUIL_COLONNE_REMPLIE) {
@@ -3146,7 +3296,9 @@ function dataEngineResultToContext(exec) {
   // v27.10 — périmètre en clair : Albert doit le reprendre tel quel
   const _perim = perimetreResultat(exec.kind, p, exec.result).texte;
   if (_perim) out += `${_perim}\n`;
-  if (exec.kind === 'count') out += `Résultat : ${exec.result.count} ligne(s) sur ${exec.result.total}.\n`;
+  if (exec.kind === 'count') out += exec.result.etablissements === true
+    ? `Résultat : ${exec.result.count} établissement(s) différent(s) (qui proposent ${exec.result.formations} formation(s)) — ce n'est pas un nombre de formations.\n`
+    : `Résultat : ${exec.result.count} ligne(s) sur ${exec.result.total}.\n`;
   if (exec.kind === 'sum') out += `Résultat : ${exec.result.sum} ${exec.result.unite} (somme de « ${exec.result.col} ») sur ${exec.result.count} formation(s).\n`;
   if (exec.kind === 'evolution_groupes') {
     const r = exec.result; const [s1, s2] = r.sessions;
@@ -3219,6 +3371,7 @@ const _nf = n => Number(n || 0).toLocaleString('fr-FR');
 const _VALEURS_ETAT = { oui: 'oui', vrai: 'oui', true: 'oui', '1': 'oui', non: 'non', faux: 'non', false: 'non', '0': 'non' };
 function _filtreEnClair(f) {
   if (!f) return '';
+  if (f.op === 'in') return `« ${f.col} » : ${f.label || f.value}`;
   if (f.op === 'contains_all') {
     const mots = String(f.label || f.value || '').split(' + ').filter(Boolean).map(t => `« ${t} »`);
     return `intitulé de formation contenant ${mots.join(' et ')}`;
@@ -3243,7 +3396,8 @@ function perimetreResultat(kind, plan, result) {
   const table = plan.table || {};
   const totalTable = (table.objects || []).length;
   const mot = n => `${table.rowUnit === 'formation' ? 'formation' : 'ligne'}${n > 1 ? 's' : ''}`;
-  const retenues = ['count', 'count_rows', 'sum'].includes(kind) ? result.count
+  const retenues = result.etablissements === true ? result.formations
+    : ['count', 'count_rows', 'sum'].includes(kind) ? result.count
     : kind === 'classement' || kind === 'part' ? result.total
     : kind === 'compare' ? result.baseTotal : result.total;
   const parties = [];
@@ -3292,6 +3446,24 @@ function perimetreResultat(kind, plan, result) {
         const n = applyLocalActionFilters(table.objects || [], [...autres, fAutre]).length;
         if (n > 0) notes.push(`aucune ${mot(1)} dans la commune de ${fc.value}, mais ${_nf(n)} dans ${nom} de ${fc.value} (demandez « … dans ${nom} de ${fc.value} »)`);
       });
+    }
+  }
+  // v27.23 — établissements
+  if (result.etablissements === true) notes.push(`le chiffre compte des établissements différents (${_nf(result.count)}), pas des formations (${_nf(result.formations)})`);
+  if (result.etablissements && result.etablissements !== true) notes.push(`chiffres = nombre d'établissements différents par groupe, pas un nombre de formations`);
+  const fe = filtres.find(f => f.op === 'in' && f.source === 'etablissement');
+  if (fe && !plan.etablissement?.type) {
+    // établissements réellement retenus : nom + commune (homonymes dans plusieurs villes)
+    const commune = (table.headers || []).find(h => /^(commune|ville)/.test(_hx(h)) && !/code|insee|postal|origine/.test(_hx(h)));
+    const lignes = applyLocalActionFilters(table.objects || [], filtres);
+    const vus = new Map();
+    lignes.forEach(r => { const k = `${r?.[fe.col]}${commune && r?.[commune] ? ` (${r[commune]})` : ''}`; vus.set(k, (vus.get(k) || 0) + 1); });
+    if (vus.size > 1) notes.push(`${_nf(vus.size)} établissements correspondent : ${[...vus.keys()].slice(0, 12).join(' ; ')}${vus.size > 12 ? ' …' : ''} — précisez la commune si un seul est visé`);
+    // 0 : l'établissement existe, mais pas avec les autres critères (« lycée Montesquieu de Bordeaux » : il est ailleurs)
+    if (!lignes.length) {
+      const seul = applyLocalActionFilters(table.objects || [], [fe]);
+      const ou = [...new Set(seul.map(r => `${r?.[fe.col]}${commune && r?.[commune] ? ` (${r[commune]})` : ''}`))];
+      if (ou.length) notes.push(`aucune formation avec ces critères, mais ${ou.length > 1 ? 'les établissements de ce nom existent' : 'l\'établissement existe'} ailleurs : ${ou.slice(0, 8).join(' ; ')}${ou.length > 8 ? ' …' : ''} (${_nf(seul.length)} formation${seul.length > 1 ? 's' : ''})`);
     }
   }
   // v27.22 — catégorie exacte (« Licence ») : formations d'une catégorie voisine (« Licence_Las ») laissées de côté
@@ -3359,7 +3531,11 @@ function renderDataEngineResultHtml(tool, plan, result) {
   if (tool === 'count_rows') {
     const pct = result.total ? pctFr(result.count, result.total) : '—';
     const clearTitle = (typeof extractBlockTitle === 'function') ? extractBlockTitle({ plan, result }, '') : 'Comptage';
-    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}${perim}<p>Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ${unit(result.count)} correspondant à la demande (${pct} du jeu de données).</p><p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
+    // v27.23 — établissements différents (« combien de lycées proposent des BTS »)
+    const phrase = result.etablissements
+      ? `Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ${result.count > 1 ? 'établissements différents' : 'établissement'} correspondant à la demande, qui proposent <strong>${result.formations.toLocaleString('fr-FR')}</strong> formation${result.formations > 1 ? 's' : ''} (sur ${result.total.toLocaleString('fr-FR')} établissements dans les données).`
+      : `Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ${unit(result.count)} correspondant à la demande (${pct} du jeu de données).`;
+    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}${perim}<p>${phrase}</p><p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
   }
   if (tool === 'sum') {
     const clearTitle = (typeof extractBlockTitle === 'function') ? extractBlockTitle({ plan, result }, '') : `${result.sum} ${result.unite}`;
@@ -3381,10 +3557,13 @@ function renderDataEngineResultHtml(tool, plan, result) {
     const rows = result.rows || [];
     const clearTitle = (typeof extractBlockTitle === 'function') ? extractBlockTitle({ plan, result }, '') : (tool === 'top' ? 'Top' : 'Répartition');
     const _so = result.somme;
-    const _intro = _so
+    const _et = result.etablissements;
+    const _intro = _et
+      ? `<p><strong>${_et.total.toLocaleString('fr-FR')}</strong> établissements différents, sur <strong>${result.total.toLocaleString('fr-FR')}</strong> ${unit(result.total)}. Nombre d'établissements par <strong>${escapeHtml(plan.targetCol)}</strong>.</p>`
+      : _so
       ? `<p><strong>${_so.total.toLocaleString('fr-FR')}</strong> ${escapeHtml(_so.unite)} au total, sur <strong>${result.total.toLocaleString('fr-FR')}</strong> ${unit(result.total)}. Somme de « ${escapeHtml(_so.col)} » par <strong>${escapeHtml(plan.targetCol)}</strong>.</p>`
       : `<p><strong>${result.total.toLocaleString('fr-FR')}</strong> ligne${result.total>1?'s':''} retenue${result.total>1?'s':''}. Analyse par <strong>${escapeHtml(plan.targetCol)}</strong>.</p>`;
-    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}${perim}${_intro}<ul>${rows.slice(0,20).map(r => `<li>${escapeHtml(r.value)} : <strong>${r.count.toLocaleString('fr-FR')}</strong>${_so ? ` ${escapeHtml(_so.unite)}` : ''} (${r.pct.toFixed(1).replace('.', ',')} %)</li>`).join('')}</ul>${plan.renderChart ? (plan.chartType === 'pie' ? renderMiniPieChart(rows, result.total) : renderMiniBarChart(rows, result.total)) : ''}${filtersHtml}${debug}`;
+    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}${perim}${_intro}<ul>${rows.slice(0,20).map(r => `<li>${escapeHtml(r.value)} : <strong>${r.count.toLocaleString('fr-FR')}</strong>${_so ? ` ${escapeHtml(_so.unite)}` : _et ? ` établissement${r.count > 1 ? 's' : ''}` : ''}${_et ? '' : ` (${r.pct.toFixed(1).replace('.', ',')} %)`}</li>`).join('')}</ul>${plan.renderChart ? (plan.chartType === 'pie' ? renderMiniPieChart(rows, result.total) : renderMiniBarChart(rows, result.total)) : ''}${filtersHtml}${debug}`;
   }
   if (tool === 'pivot') {
     const cols = result.colValues || [];

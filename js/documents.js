@@ -584,6 +584,8 @@ function _chiffreCellule(v) {
 }
 function rowMatchesFilter(row, filter) {
   if (filter && filter.op === 'contains_all') return rowContainsAllTerms(row, filter);
+  // v27.23 — une valeur parmi une liste (établissements dont le nom correspond : « Lycée Montaigne », …)
+  if (filter && filter.op === 'in') return (filter.values || []).includes(normalizeText(row[filter.col]));
   if (filter && OPS_CHIFFRES[filter.op]) { const x = _chiffreCellule(row[filter.col]); return x !== null && OPS_CHIFFRES[filter.op](x, Number(filter.value)); }
   const rowValue = normalizeText(row[filter.col]);
   const filterValue = normalizeText(filter.value);
@@ -782,7 +784,7 @@ function triggerBlobDownload(blob, filename) {
 
 function formatActionFilters(filters) {
   if (!filters || !filters.length) return 'Filtres appliqués : aucun — export de toute la table active.';
-  return 'Filtres appliqués : ' + filters.map(f => `${f.col} ${({ neq: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤' })[f.op] || '='} "${f.value}"`).join(' ; ');
+  return 'Filtres appliqués : ' + filters.map(f => f.op === 'in' ? `${f.col} : ${f.label || f.value}` : `${f.col} ${({ neq: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤' })[f.op] || '='} "${f.value}"`).join(' ; ');
 }
 
 
