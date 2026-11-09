@@ -60,7 +60,9 @@ function agregatOfficiel(p) {
   let n;
   if (p.get('group_by')) {
     const c = p.get('group_by'); const m = new Map();
-    rows.forEach(r => m.set(r[c] || null, (m.get(r[c] || null) || 0) + 1));
+    // « cle, sum(capa_fin) as n » : somme par groupe ; sinon comptage
+    const somme = (sel.match(/sum\((\w+)\)/) || [])[1];
+    rows.forEach(r => m.set(r[c] || null, (m.get(r[c] || null) || 0) + (somme ? (Number.isFinite(num(r, somme)) ? num(r, somme) : 0) : 1)));
     return { results: [...m].map(([cle, n]) => ({ cle, n })) };
   }
   if (/^count/.test(sel)) n = rows.length;
@@ -303,6 +305,15 @@ await describe('v27.12 — Chiffres officiels : le widget retrouve à l\'unité 
   // Répartition : une valeur manquante ou des cases vides mal comptées → écart
   const faux = verifierOfficiels({ g: { valeur: { BTS: 300, PASS: 100, '(vide)': 4 } } }, [{ id: 'g', kind: 'group_by', reponse: 'x', sansValeur: 0, lignes: [{ value: 'BTS', count: 300 }] }], [{ id: 'g', q: 'g', type: 'group' }]);
   assert(faux[0].statut === 'ecart' && /PASS : officiel 100, widget absent/.test(faux[0].detail) && /sans valeur : officiel 4, widget 0/.test(faux[0].detail), 'répartition : valeur absente et cases vides → écarts détaillés');
+  // v27.18 — somme par groupe et évolution par groupe : écarts détectés
+  const sg = verifierOfficiels({ g: { valeur: { Bordeaux: 500, Lyon: 400 } } }, [{ id: 'g', kind: 'group_by', reponse: 'x', distinct: 2, lignes: [{ value: 'Bordeaux', count: 20 }, { value: 'Lyon', count: 15 }] }], [{ id: 'g', q: 'g', type: 'group', somme: 'capa_fin' }]);
+  assert(sg[0].statut === 'ecart' && /compté des formations au lieu de sommer/.test(sg[0].detail), 'somme par groupe : un comptage de formations est un écart');
+  const evoRef = [{ id: 'e', q: 'e', type: 'evolution_groupe' }];
+  const evoOff = { e: { valeur: [{ Bordeaux: 10, Lyon: 8 }, { Bordeaux: 12, Lyon: 7 }] } };
+  const evoOk = verifierOfficiels(evoOff, [{ id: 'e', kind: 'evolution_groupes', reponse: 'x', totaux: [18, 19], lignesEvo: [{ valeur: 'Bordeaux', v1: 10, v2: 12 }, { valeur: 'Lyon', v1: 8, v2: 7 }] }], evoRef);
+  assert(evoOk[0].statut === 'ok', 'évolution par groupe identique : ok');
+  const evoKo = verifierOfficiels(evoOff, [{ id: 'e', kind: 'evolution_groupes', reponse: 'x', totaux: [18, 20], lignesEvo: [{ valeur: 'Bordeaux', v1: 10, v2: 13 }, { valeur: 'Lyon', v1: 8, v2: 7 }] }], evoRef);
+  assert(evoKo[0].statut === 'ecart' && /Bordeaux : officiel 10 → 12, widget 10 → 13/.test(evoKo[0].detail) && /totaux/.test(evoKo[0].detail), 'évolution par groupe différente : écart détaillé');
   assert(V.ref_admis_bts.statut === 'indisponible' && /HTTP 400/.test(V.ref_admis_bts.detail), 'champ absent des données (admis) : non vérifié, pas un faux « identique »');
   assert(R.ref_admis_bts === undefined && res.verifs.length, 'questions de référence posées à part (pas mélangées aux questions de l\'essai)');
   // v27.14 — classements : mêmes valeurs, même ordre que le tri du serveur

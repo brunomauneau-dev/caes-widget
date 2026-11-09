@@ -994,11 +994,34 @@ const MESURES_SOMME = [
   { re: /\bpropositions?\b/, col: /recu une proposition/, unite: 'propositions' },
   { re: /\bcandidats?\b|\bcandidatures?\b|\bvoeux\b/, col: /effectif total des candidats pour une formation/, unite: 'candidats' },
 ];
+// v27.18 — somme d'une colonne par valeur (« places par académie ») ; même forme que topCountsForRows
+// (count = la somme du groupe, pct = sa part de la somme totale). Case vide : ligne écartée et comptée.
+function sommesParGroupe(rows, col, sumCol) {
+  const m = new Map();
+  let filled = 0, somme = 0, sansValeur = 0;
+  rows.forEach(r => {
+    const v = r?.[col];
+    if (isEmptyCell(v)) return;
+    filled++;
+    const x = _nombreCellule(r?.[sumCol]);
+    if (x === null) { sansValeur++; return; }
+    const k = String(v).trim();
+    m.set(k, (m.get(k) || 0) + x);
+    somme += x;
+  });
+  const top = [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'fr'))
+    .map(([value, total]) => ({ value, count: Math.round(total * 100) / 100, pct: somme ? total / somme * 100 : 0 }));
+  return { filled, distinct: m.size, top, somme: Math.round(somme * 100) / 100, sansValeur };
+}
 function applyMeasureSum(plan) {
-  if (!plan || !plan.table || plan.tool !== 'count_rows' || plan.table.rowUnit !== 'formation') return plan;
+  if (!plan || !plan.table || plan.table.rowUnit !== 'formation') return plan;
+  // v27.18 — répartition (« places en BTS par académie ») : somme par groupe, pas le nombre de formations
+  // (avant : « Paris : 315 » = 315 formations, affiché comme des places)
+  const groupe = ['group_by', 'top', 'pivot'].includes(plan.tool) && !plan.listMode;
+  if (plan.tool !== 'count_rows' && !groupe) return plan;
   // v27.14 — le mot d'une condition chiffrée (« avec au plus 30 admis ») n'est pas la mesure demandée
   const q = normalizeText(plan.question || '').replace(/\b(plus de|moins de|au moins|au plus)\s+\d+(?:[.,]\d+)?\s*%?\s*(places?|candidats?|admis|voeux|boursiers?)\b/g, ' ');
-  if (/\b(combien|nombre) d(e|es)? ?(formations?|filieres?|offres?|etablissements?)\b/.test(q)) return plan;
+  if (/\b(combien|nombre|repartition|ventilation) d(e|es)? ?(formations?|filieres?|offres?|etablissements?)\b/.test(q)) return plan;
   const headers = plan.table.headers || [];
   for (const m of MESURES_SOMME) {
     if (!m.re.test(q)) continue;
@@ -1006,6 +1029,13 @@ function applyMeasureSum(plan) {
     // v27.12 — mesure demandée (admis, places…) sans colonne correspondante : on s'arrête,
     // au lieu de compter des formations (« combien d'admis en BTS » répondait le nombre de BTS)
     if (!col) { plan.mesureIntrouvable = m.unite; return plan; }
+    if (groupe) {
+      if (col === plan.targetCol || col === plan.targetCol2) return plan; // « répartition par capacité » : la dimension, pas la mesure
+      if (plan.tool === 'pivot') { plan.mesurePivot = m.unite; return plan; }
+      plan.groupSumCol = col;
+      plan.sumUnit = m.unite;
+      return plan;
+    }
     plan.tool = 'sum';
     plan.sumCol = col;
     plan.sumUnit = m.unite;
@@ -1361,7 +1391,7 @@ function _planPourSession(plan, table) {
   const tr = c => _colAutreSession(c, plan.table, table);
   const p = { ...plan, table, _sousSession: true, sessionsDemandees: null, blockId: null,
     filters: (plan.filters || []).map(f => f && ({ ...f, col: tr(f.col), cols: f.cols ? f.cols.map(tr) : f.cols })),
-    targetCol: tr(plan.targetCol), sumCol: tr(plan.sumCol) };
+    targetCol: tr(plan.targetCol), sumCol: tr(plan.sumCol), groupSumCol: tr(plan.groupSumCol) };
   if (plan.part) p.part = { ...plan.part, num: tr(plan.part.num), den: tr(plan.part.den), condition: plan.part.condition ? plan.part.condition.map(f => ({ ...f, col: tr(f.col) })) : plan.part.condition };
   if (plan.classement) p.classement = { ...plan.classement, col: tr(plan.classement.col) };
   return p;
@@ -1383,8 +1413,10 @@ function executerSessions(plan) {
     rememberDataEngineExecution(e);
     return e;
   }
+  // v27.18 — répartitions (« places en BTS par académie ») et classements de groupes : groupe par groupe
+  if (execs.every(x => ['group_by', 'top', 'classement', 'pivot'].includes(x.e.kind))) return executerEvolutionGroupes(plan, execs);
   if (!execs.every(x => ['count', 'sum', 'stats', 'part'].includes(x.e.kind)))
-    return unresolvedConceptExecution(plan, [], `la comparaison entre sessions est disponible pour les comptages, sommes, moyennes et parts (pas encore pour les ${execs[0].e.kind === 'classement' ? 'classements' : 'répartitions'})`);
+    return unresolvedConceptExecution(plan, [], `la comparaison entre sessions est disponible pour les comptages, sommes, moyennes, parts, répartitions et classements de groupes (pas pour ce type de résultat : ${execs[0].e.kind})`);
   const lignes = execs.map(x => ({ session: x.s, valeur: _valeurExec(x.e), exec: x.e, formations: (x.e.plan.table.objects || []).length,
     // lignes retenues par les critères : comptage et somme → result.count ; moyenne et part → result.total (lignes du périmètre)
     retenues: ['count', 'sum'].includes(x.e.kind) ? x.e.result.count : x.e.result.total }));
@@ -1395,6 +1427,97 @@ function executerSessions(plan) {
   exec.html = renderEvolutionHtml(plan, result);
   rememberDataEngineExecution(exec);
   return exec;
+}
+/* v27.18 — Évolution d'une répartition ou d'un classement de groupes entre deux sessions.
+   Même calcul sur chaque session (comptage ou somme par groupe), groupes rapprochés par leur libellé
+   (sans accents ni majuscules). Un groupe absent d'une session est montré « — » et signalé : groupe nouveau,
+   disparu, ou libellé changé. Les formations, elles, ne sont pas suivies une à une (pas d'identifiant commun). */
+function _donneesGroupes(e) {
+  const p = e.plan;
+  const rows = applyLocalActionFilters(p.table.objects || [], p.filters || []);
+  const formation = p.table?.rowUnit === 'formation';
+  if (e.kind === 'classement') {
+    const c = p.classement;
+    const d = sommesParGroupe(rows, c.entite.col, c.col);
+    return { type: 'classement', col: c.entite.col, unite: c.libelle, ordre: c.ordre, limit: c.limit, groupes: d.top, total: d.somme, sansValeur: d.sansValeur, retenues: rows.length, nomGroupes: c.entite.nom };
+  }
+  if (p.groupSumCol) {
+    const d = sommesParGroupe(rows, p.targetCol, p.groupSumCol);
+    return { type: 'repartition', col: p.targetCol, unite: p.sumUnit, ordre: 'desc', limit: 30, groupes: d.top, total: d.somme, sansValeur: d.sansValeur, retenues: rows.length, mesureCol: p.groupSumCol };
+  }
+  const d = topCountsForRows(rows, p.targetCol, Infinity);
+  return { type: 'repartition', col: p.targetCol, unite: formation ? 'formations' : 'lignes', ordre: 'desc', limit: 30, groupes: d.top, total: d.filled, sansValeur: rows.length - d.filled, retenues: rows.length };
+}
+function executerEvolutionGroupes(plan, execs) {
+  const [x1, x2] = [execs[0], execs[execs.length - 1]];
+  const ex = x2.e;
+  if (ex.kind === 'pivot') return unresolvedConceptExecution(plan, [], `la comparaison entre sessions d'un tableau croisé n'est pas disponible : demandez une seule répartition (« évolution du nombre de formations par ${_shortColName(ex.plan.targetCol || '') || 'académie'} depuis ${x1.s} »)`);
+  if (ex.kind === 'classement' && !ex.plan.classement?.entite) return unresolvedConceptExecution(plan, [], `les formations ne peuvent pas être suivies une à une d'une session à l'autre (aucun identifiant commun fiable dans l'open data chargé) : comparez plutôt des groupes, par exemple « évolution des places par académie depuis ${x1.s} » ou « les académies avec le plus de places : évolution depuis ${x1.s} »`);
+  if (ex.plan.listMode) return unresolvedConceptExecution(plan, [], `la comparaison entre sessions d'une liste d'intitulés n'est pas disponible : demandez par exemple « évolution du nombre de formations par filière depuis ${x1.s} »`);
+  const d1 = _donneesGroupes(x1.e), d2 = _donneesGroupes(x2.e);
+  // colonne introuvable dans une session (renommée sans correspondance) : pas un tableau de « — »
+  const vide = [[x1, d1], [x2, d2]].find(([, d]) => d.retenues > 0 && !d.groupes.length);
+  if (vide) return unresolvedConceptExecution(plan, [], `la colonne « ${d2.col} »${d2.mesureCol ? ` ou « ${d2.mesureCol} »` : ''} n'a pas été retrouvée (ou est vide) dans la session ${vide[0].s} : comparaison impossible`);
+  const cle = v => normalizeText(v);
+  const m = new Map();
+  d1.groupes.forEach(g => m.set(cle(g.value), { valeur: g.value, v1: g.count, v2: null }));
+  d2.groupes.forEach(g => { const k = cle(g.value); const o = m.get(k) || { valeur: g.value, v1: null, v2: null }; o.valeur = g.value; o.v2 = g.count; m.set(k, o); });
+  const rangs = (d, champ) => {
+    const tri = [...m.values()].filter(o => o[champ] !== null).sort((a, b) => d.ordre === 'asc' ? a[champ] - b[champ] : b[champ] - a[champ]);
+    tri.forEach((o, i) => { o[champ === 'v1' ? 'rang1' : 'rang2'] = i + 1; });
+  };
+  rangs(d1, 'v1'); rangs(d2, 'v2');
+  const toutes = [...m.values()].map(o => ({ ...o,
+    ecart: o.v1 !== null && o.v2 !== null ? Math.round((o.v2 - o.v1) * 100) / 100 : null,
+    ecartPct: o.v1 && o.v2 !== null ? (o.v2 - o.v1) / o.v1 * 100 : null }));
+  const ordre = d2.ordre === 'asc' ? 1 : -1;
+  toutes.sort((a, b) => (a.v2 === null) - (b.v2 === null) || (a.v2 !== null && b.v2 !== null ? ordre * (a.v2 - b.v2) : 0) || ((b.v1 || 0) - (a.v1 || 0)) || a.valeur.localeCompare(b.valeur, 'fr'));
+  const lignes = toutes.slice(0, d2.limit);
+  const result = {
+    type: d2.type, col: d2.col, unite: d2.unite, ordre: d2.ordre, nomGroupes: d2.nomGroupes || null, mesureCol: d2.mesureCol || null,
+    sessions: [x1.s, x2.s], lignes, nbGroupes: toutes.length,
+    totaux: [d1.total, d2.total], retenues: [d1.retenues, d2.retenues], sansValeur: [d1.sansValeur, d2.sansValeur],
+    formations: [(x1.e.plan.table.objects || []).length, (x2.e.plan.table.objects || []).length],
+    nouveaux: toutes.filter(o => o.v1 === null).map(o => o.valeur), disparus: toutes.filter(o => o.v2 === null).map(o => o.valeur),
+    perimetre: perimetreResultat(x2.e.kind, x2.e.plan, x2.e.result).texte,
+  };
+  const exec = { kind: 'evolution_groupes', plan: { ...plan, targetCol: d2.col }, result,
+    text: `${result.unite} par ${d2.col}, ${x1.s} → ${x2.s} :\n` + lignes.map(l => `${l.valeur} : ${l.v1 ?? '—'} → ${l.v2 ?? '—'}${l.ecart !== null ? ` (${l.ecart > 0 ? '+' : ''}${l.ecart})` : ''}`).join('\n') };
+  exec.html = renderEvolutionGroupesHtml(exec.plan, result, x2.e);
+  rememberDataEngineExecution(exec);
+  return exec;
+}
+function renderEvolutionGroupesHtml(plan, r, exec2) {
+  const [s1, s2] = r.sessions;
+  const fmt = v => v === null || v === undefined ? '—' : Number(v).toLocaleString('fr-FR', { maximumFractionDigits: 2 });
+  const signe = v => v > 0 ? '+' : v < 0 ? '−' : '';
+  const ecartTxt = l => l.ecart === null ? '—' : `${signe(l.ecart)}${fmt(Math.abs(l.ecart))}`;
+  const pctTxt = l => l.ecartPct === null ? '—' : `${signe(l.ecartPct)}${_pctFr(Math.abs(l.ecartPct))} %`;
+  const couleur = v => v > 0 ? 'color:#15803d' : v < 0 ? 'color:#b91c1c' : '';
+  const dim = _shortColName(r.col) || r.col;
+  const classement = r.type === 'classement';
+  const titre = classement
+    ? `Classement des ${r.nomGroupes} (${r.unite}) : évolution ${s1} → ${s2}`
+    : `Évolution ${s1} → ${s2} — ${r.unite} par ${dim}`;
+  const th = 'text-align:left;padding:6px 8px;background:#e8edff;color:var(--bleu,#003189);font-size:11px;white-space:nowrap';
+  const td = 'padding:5px 8px;border-bottom:1px solid var(--gris1,#f3f4f6);font-size:12px';
+  const tdr = td + ';text-align:right;white-space:nowrap';
+  const entete = `<tr>${classement ? `<th style="${th}">Rang ${s2}</th>` : ''}<th style="${th}">${escapeHtml(dim)}</th><th style="${th};text-align:right">${s1}</th><th style="${th};text-align:right">${s2}</th><th style="${th};text-align:right">Écart</th><th style="${th};text-align:right">Évolution</th>${classement ? `<th style="${th};text-align:right">Rang ${s1}</th>` : ''}</tr>`;
+  const corps = r.lignes.map(l => `<tr>${classement ? `<td style="${td}">${l.rang2 ?? '—'}</td>` : ''}<td style="${td}">${escapeHtml(l.valeur)}</td><td style="${tdr}">${fmt(l.v1)}</td><td style="${tdr}"><strong>${fmt(l.v2)}</strong></td><td style="${tdr};${couleur(l.ecart)}">${ecartTxt(l)}</td><td style="${tdr};${couleur(l.ecartPct)}">${pctTxt(l)}</td>${classement ? `<td style="${tdr}">${l.rang1 ?? '—'}</td>` : ''}</tr>`).join('');
+  const tot = { ecart: Math.round((r.totaux[1] - r.totaux[0]) * 100) / 100, ecartPct: r.totaux[0] ? (r.totaux[1] - r.totaux[0]) / r.totaux[0] * 100 : null };
+  const pied = `<tr style="background:#e8edff">${classement ? `<td style="${td}"></td>` : ''}<td style="${td};font-weight:800">Total${r.nbGroupes > r.lignes.length ? ` (tous les ${r.nbGroupes} groupes)` : ''}</td><td style="${tdr};font-weight:800">${fmt(r.totaux[0])}</td><td style="${tdr};font-weight:800">${fmt(r.totaux[1])}</td><td style="${tdr};font-weight:800;${couleur(tot.ecart)}">${ecartTxt(tot)}</td><td style="${tdr};font-weight:800;${couleur(tot.ecartPct)}">${pctTxt(tot)}</td>${classement ? `<td style="${td}"></td>` : ''}</tr>`;
+  const table = `<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;margin:8px 0"><thead>${entete}</thead><tbody>${corps}${pied}</tbody></table></div>`;
+  const notes = [];
+  if (r.nbGroupes > r.lignes.length) notes.push(`${r.lignes.length} groupes affichés sur ${r.nbGroupes} (les plus ${classement && r.ordre === 'asc' ? 'petits' : 'grands'} en ${s2}) ; le total porte sur tous les groupes.`);
+  if (r.nouveaux.length || r.disparus.length) notes.push(`« — » : groupe absent d'une session${r.nouveaux.length ? ` (seulement en ${s2} : ${r.nouveaux.slice(0, 5).map(escapeHtml).join(', ')}${r.nouveaux.length > 5 ? '…' : ''})` : ''}${r.disparus.length ? ` (seulement en ${s1} : ${r.disparus.slice(0, 5).map(escapeHtml).join(', ')}${r.disparus.length > 5 ? '…' : ''})` : ''} — groupe nouveau, disparu, ou libellé changé d'une année à l'autre.`);
+  if (r.sansValeur.some(n => n > 0)) notes.push(`Formations sans valeur, non comptées : ${r.sansValeur[0].toLocaleString('fr-FR')} en ${s1}, ${r.sansValeur[1].toLocaleString('fr-FR')} en ${s2}.`);
+  if (r.formations[0] !== r.formations[1]) notes.push(`L'offre a changé entre les deux sessions (${_nf(r.formations[0])} formations en ${s1}, ${_nf(r.formations[1])} en ${s2}) : une variation peut venir de formations ouvertes ou fermées.`);
+  if (r.mesureCol) notes.push(`Chiffres = somme de « ${escapeHtml(r.mesureCol)} » par groupe, pas un nombre de formations.`);
+  const perim = perimetreResultat(exec2.kind, exec2.plan, exec2.result).html
+    .replace('Sur quoi porte ce calcul</strong> :', 'Sur quoi porte ce calcul</strong> (chaque session) :')
+    .replace(/\d[\d\s  ]* (?:formations?|lignes?) retenues? sur [\d\s  ]+ · open data Parcoursup \d+/, `mêmes critères appliqués à chaque session (${_nf(r.retenues[0])} formations retenues en ${s1}, ${_nf(r.retenues[1])} en ${s2}) · open data Parcoursup`);
+  const debug = `<details class="msg-sources"><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : évolution par groupe ${s1} → ${s2} · ${escapeHtml(r.type)} · ${escapeHtml(r.col)}</div></details>`;
+  return `${deTitleHtml(titre, plan.blockId, plan.originalTitle || titre)}${perim}${table}${notes.map(n => `<p style="font-size:12px;color:var(--gris3);margin:4px 0">${n}</p>`).join('')}${debug}`;
 }
 function _uniteEvolution(r) {
   const e = r.lignes[0].exec;
@@ -1908,6 +2031,10 @@ function detectDataEnginePlan(question, filterContextText = question) {
 function currentExecutionToRows(exec) {
   if (!exec) return [];
   const p = exec.plan || {};
+  if (exec.kind === 'evolution_groupes') {
+    const r = exec.result; const [s1, s2] = r.sessions;
+    return (r.lignes || []).map(l => ({ [r.col]: l.valeur, ...(r.type === 'classement' ? { [`Rang ${s2}`]: l.rang2 ?? '', [`Rang ${s1}`]: l.rang1 ?? '' } : {}), [`${s1} (${r.unite})`]: l.v1 ?? '', [`${s2} (${r.unite})`]: l.v2 ?? '', 'Écart': l.ecart ?? '', 'Évolution (%)': l.ecartPct === null ? '' : Math.round(l.ecartPct * 10) / 10 }));
+  }
   if (exec.kind === 'evolution') return (exec.result?.lignes || []).map(l => ({ Session: l.session, Valeur: exec.result.mesure === 'part' ? Math.round(l.valeur * 10) / 10 : l.valeur, 'Formations retenues': l.retenues, 'Formations de la session': l.formations }));
   if (exec.kind === 'part') {
     const lp = _libellePart(p);
@@ -1919,9 +2046,10 @@ function currentExecutionToRows(exec) {
   }
   if (exec.kind === 'group_by' || exec.kind === 'top') {
     const label = p.targetCol || 'Valeur';
+    const _mes = exec.result?.somme ? `${exec.result.somme.unite.replace(/^./, c => c.toUpperCase())} (somme)` : 'Nombre';
     return (exec.result?.rows || []).map(r => ({
       [label]: r.value,
-      Nombre: r.count,
+      [_mes]: r.count,
       Pourcentage: Number((r.pct || 0).toFixed(2))
     }));
   }
@@ -2021,6 +2149,14 @@ function renderCurrentChartExecution(plan) {
     const titre = `Graphique — évolution ${prev.result.lignes[0].session} → ${prev.result.lignes[prev.result.lignes.length - 1].session}`;
     const html = `${deTitleHtml(titre, prev.plan?.blockId, prev.plan?.originalTitle || titre)}${renderMiniBarChart(rows, rows.reduce((t, r) => t + r.count, 0), 'evolution.png')}`;
     return { kind: 'evolution', plan: prev.plan, result: prev.result, text: prev.text, html };
+  }
+  // v27.18 — évolution par groupe : deux barres par groupe (session précédente, session courante)
+  if (prev.kind === 'evolution_groupes') {
+    const r = prev.result; const [s1, s2] = r.sessions;
+    const rows = r.lignes.slice(0, 6).flatMap(l => [{ value: `${l.valeur} — ${s1}`, count: l.v1 || 0 }, { value: `${l.valeur} — ${s2}`, count: l.v2 || 0 }]);
+    const titre = `Graphique — ${r.unite} par ${_shortColName(r.col) || r.col}, ${s1} et ${s2}`;
+    const html = `${deTitleHtml(titre, prev.plan?.blockId, prev.plan?.originalTitle || titre)}${renderMiniBarChart(rows, rows.reduce((t, x) => t + x.count, 0), 'evolution_groupes.png')}${r.lignes.length > 6 ? `<p style="font-size:12px;color:var(--gris3)">Les 6 premiers groupes sur ${r.lignes.length}.</p>` : ''}`;
+    return { kind: 'evolution_groupes', plan: prev.plan, result: prev.result, text: prev.text, html };
   }
   // v27.15 — part : camembert « dans la part » / « reste »
   if (prev.kind === 'part') {
@@ -2624,7 +2760,9 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     return { kind: 'export', plan, action, result: res, html: res?.html || '' };
   }
   const rows = applyLocalActionFilters(plan.table.objects || [], plan.filters || []);
-  if (plan.tool === 'count_rows' && plan.mesureIntrouvable) return unresolvedConceptExecution(plan, [], `aucune colonne de ${plan.mesureIntrouvable} dans les données`);
+  if (['count_rows', 'group_by', 'top', 'pivot'].includes(plan.tool) && plan.mesureIntrouvable) return unresolvedConceptExecution(plan, [], `aucune colonne de ${plan.mesureIntrouvable} dans les données`);
+  // v27.18 — tableau croisé de places / candidats / admis : il compterait des formations → arrêt
+  if (plan.tool === 'pivot' && plan.mesurePivot) return unresolvedConceptExecution(plan, [], `un tableau croisé compte des formations, pas des ${plan.mesurePivot} : demandez une seule répartition (« ${plan.mesurePivot} par ${_shortColName(plan.targetCol || '') || 'académie'} »)`);
   if (plan.tool === 'count_rows') {
     const exec = {
       kind: 'count',
@@ -2660,9 +2798,10 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     const col = plan.targetCol || plan.mentionedCols?.[0];
     if (!col) return null;
     const limit = plan.listMode ? 300 : (plan.limit || detectLimit(plan.question) || (plan.tool === 'top' ? 10 : 30));
-    const counts = topCountsForRows(rows, col, Math.max(limit, 30));
+    const counts = plan.groupSumCol ? sommesParGroupe(rows, col, plan.groupSumCol) : topCountsForRows(rows, col, Math.max(limit, 30));
     const topRows = counts.top.slice(0, limit);
     const _res = { total: rows.length, filled: counts.filled, distinct: counts.distinct, rows: topRows };
+    if (plan.groupSumCol) _res.somme = { col: plan.groupSumCol, unite: plan.sumUnit, total: counts.somme, sansValeur: counts.sansValeur };
     // v27.17 — liste d'intitulés remplie pour moins de 80 % des formations (options des PASS) :
     // la liste n'est pas celle de toutes les options ; formations sans précision montrées par établissement
     if (plan.listMode && rows.length && counts.filled < rows.length * SEUIL_COLONNE_REMPLIE) {
@@ -2821,12 +2960,19 @@ function dataEngineResultToContext(exec) {
   if (_perim) out += `${_perim}\n`;
   if (exec.kind === 'count') out += `Résultat : ${exec.result.count} ligne(s) sur ${exec.result.total}.\n`;
   if (exec.kind === 'sum') out += `Résultat : ${exec.result.sum} ${exec.result.unite} (somme de « ${exec.result.col} ») sur ${exec.result.count} formation(s).\n`;
+  if (exec.kind === 'evolution_groupes') {
+    const r = exec.result; const [s1, s2] = r.sessions;
+    out += `Évolution par groupe calculée par le widget (mêmes critères sur chaque session ; chiffres = ${r.unite}${r.mesureCol ? `, somme de « ${r.mesureCol} »` : ''}) :\n`
+      + r.lignes.map(l => `- ${l.valeur} : ${s1} = ${l.v1 ?? 'absent'} ; ${s2} = ${l.v2 ?? 'absent'}${l.ecart !== null ? ` ; écart ${l.ecart}${l.ecartPct !== null ? ` (${_pctFr(l.ecartPct)} %)` : ''}` : ''}${r.type === 'classement' ? ` ; rang ${s1} = ${l.rang1 ?? '—'}, rang ${s2} = ${l.rang2 ?? '—'}` : ''}`).join('\n')
+      + `\nTotal : ${s1} = ${r.totaux[0]} ; ${s2} = ${r.totaux[1]}${r.nbGroupes > r.lignes.length ? ` (tous les ${r.nbGroupes} groupes)` : ''}\n`;
+  }
   if (exec.kind === 'evolution') out += `Évolution calculée par le widget (mêmes critères sur chaque session) :\n${exec.result.lignes.map(l => `- session ${l.session} : ${exec.result.mesure === 'part' ? `${_pctFr(l.valeur)} %` : l.valeur} (${l.retenues} formations retenues sur ${l.formations})`).join('\n')}\nÉcart : ${exec.result.ecart}${exec.result.ecartPct !== null ? ` (${_pctFr(exec.result.ecartPct)} %)` : ''}\n`;
   if (exec.kind === 'part') { const lp = _libellePart(exec.plan); out += `Part calculée par le widget : ${_pctFr(exec.result.pct)} % (${exec.result.num} ${lp.quoi} sur ${exec.result.den} ${lp.sur}).\n`; }
   if (exec.kind === 'classement') out += `Classement selon « ${exec.plan.classement.col} » (${exec.plan.classement.ordre === 'asc' ? 'croissant' : 'décroissant'})${exec.plan.classement.entite ? `, somme par ${exec.plan.classement.entite.col}` : ''} :\n${exec.result.lignes.map(l => `${l.rang}. ${l.libelles.join(' — ')} : ${l.valeur}`).join('\n')}\n`;
   if (exec.kind === 'unresolved') out += `Résultat : aucun calcul. ${exec.text}\nIntitulés proches : ${(exec.result?.suggestions || []).map(s => s.value).join(' ; ')}\n`;
   if (exec.kind === 'group_by' || exec.kind === 'top') {
     out += `Colonne de répartition : ${p.targetCol}\nLignes retenues : ${exec.result.total}\nValeurs renseignées : ${exec.result.filled}\n`;
+    if (exec.result.somme) out += `Chiffre de chaque groupe : somme de « ${exec.result.somme.col} » (${exec.result.somme.unite}), total ${exec.result.somme.total} — ce ne sont pas des nombres de formations\n`;
     out += `Répartition :\n${exec.result.rows.map(r => `- ${r.value}: ${r.count} (${r.pct.toFixed(1).replace('.', ',')} %)`).join('\n')}\n`;
   }
   if (exec.kind === 'pivot') {
@@ -2927,6 +3073,10 @@ function perimetreResultat(kind, plan, result) {
   parties.push(filtresTxt);
   // Ce qui n'entre pas dans le chiffre
   const notes = [];
+  if ((kind === 'group_by' || kind === 'top') && result.somme) {
+    notes.push(`chiffres = somme de « ${result.somme.col} » (${result.somme.unite}) par groupe, pas un nombre de ${mot(2)}`);
+    if (result.somme.sansValeur > 0) notes.push(`${_nf(result.somme.sansValeur)} ${mot(result.somme.sansValeur)} sans valeur dans « ${result.somme.col} », non comptée${result.somme.sansValeur > 1 ? 's' : ''}`);
+  }
   if ((kind === 'group_by' || kind === 'top') && !plan.listMode) {
     const vides = (result.total || 0) - (result.filled ?? result.total ?? 0);
     if (vides > 0) notes.push(`${_nf(vides)} ${mot(vides)} sans valeur dans « ${plan.targetCol} »`);
@@ -3033,7 +3183,11 @@ function renderDataEngineResultHtml(tool, plan, result) {
   if (tool === 'group_by' || tool === 'top') {
     const rows = result.rows || [];
     const clearTitle = (typeof extractBlockTitle === 'function') ? extractBlockTitle({ plan, result }, '') : (tool === 'top' ? 'Top' : 'Répartition');
-    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}${perim}<p><strong>${result.total.toLocaleString('fr-FR')}</strong> ligne${result.total>1?'s':''} retenue${result.total>1?'s':''}. Analyse par <strong>${escapeHtml(plan.targetCol)}</strong>.</p><ul>${rows.slice(0,20).map(r => `<li>${escapeHtml(r.value)} : <strong>${r.count.toLocaleString('fr-FR')}</strong> (${r.pct.toFixed(1).replace('.', ',')} %)</li>`).join('')}</ul>${plan.renderChart ? (plan.chartType === 'pie' ? renderMiniPieChart(rows, result.total) : renderMiniBarChart(rows, result.total)) : ''}${filtersHtml}${debug}`;
+    const _so = result.somme;
+    const _intro = _so
+      ? `<p><strong>${_so.total.toLocaleString('fr-FR')}</strong> ${escapeHtml(_so.unite)} au total, sur <strong>${result.total.toLocaleString('fr-FR')}</strong> ${unit(result.total)}. Somme de « ${escapeHtml(_so.col)} » par <strong>${escapeHtml(plan.targetCol)}</strong>.</p>`
+      : `<p><strong>${result.total.toLocaleString('fr-FR')}</strong> ligne${result.total>1?'s':''} retenue${result.total>1?'s':''}. Analyse par <strong>${escapeHtml(plan.targetCol)}</strong>.</p>`;
+    return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}${perim}${_intro}<ul>${rows.slice(0,20).map(r => `<li>${escapeHtml(r.value)} : <strong>${r.count.toLocaleString('fr-FR')}</strong>${_so ? ` ${escapeHtml(_so.unite)}` : ''} (${r.pct.toFixed(1).replace('.', ',')} %)</li>`).join('')}</ul>${plan.renderChart ? (plan.chartType === 'pie' ? renderMiniPieChart(rows, result.total) : renderMiniBarChart(rows, result.total)) : ''}${filtersHtml}${debug}`;
   }
   if (tool === 'pivot') {
     const cols = result.colValues || [];
@@ -3068,7 +3222,7 @@ function shouldAnswerLocallyWithoutAlbert(exec) {
   // Les requêtes de comptage/répartition simples doivent être résolues par le moteur,
   // sinon Albert risque de répondre à partir d'un résumé incomplet.
   // v27.7 — « unresolved » : terme introuvable, on le dit plutôt que de laisser Albert inventer
-  return ['count','group_by','top','pivot','stats','export','compare','unresolved','sum','classement','part','evolution'].includes(exec.kind);
+  return ['count','group_by','top','pivot','stats','export','compare','unresolved','sum','classement','part','evolution','evolution_groupes'].includes(exec.kind);
 }
 /* ═══════════════ v27.9 — Chiffres écrits par Albert : vérifiés contre les données fournies ═══════════════
    Albert rédige ; il ne doit pas produire de chiffres. Chaque nombre de sa réponse est comparé aux nombres
