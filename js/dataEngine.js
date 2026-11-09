@@ -805,6 +805,8 @@ const FORMATION_TERM_STOP = new Set(`
   ouvert ouverte ouvertes ouverts parcoursup open data donnees base jeu fichier table colonne colonnes ligne lignes
   non pas ne ni aucun aucune selective selectives selectif selectifs selection selectivite apprenti apprentis apprentie apprenties
   apprentissage alternance candidate candidates boursiere boursieres
+  augmente augmentee augmentes augmentees augmenter augmentation depuis evolution evolue evoluer diminue diminution baisse hausse
+  progression progresse recul variation compare comparee comparaison rapport relativement dernier derniere passe passee precedente
   svp merci peux pouvez voudrais aimerais veux montre montrer affiche afficher selective selectives selectif selectifs
   demande demandes demandee demandees exporte exporter export excel csv superieur superieure inferieur inferieure egal
 `.trim().split(/\s+/));

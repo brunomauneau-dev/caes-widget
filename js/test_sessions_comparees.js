@@ -191,6 +191,37 @@ await describe('Chargement à la demande de la session précédente (API simulé
   assert(/await preparerSessionsDemandees\(question\)/.test(albert) && albert.indexOf('await preparerSessionsDemandees') < albert.indexOf('let dataPlan = detectDataEnginePlan'), 'albert.js : chargement avant le calcul');
 });
 
+await describe('Session précédente absente du jeu principal : jeu archivé (« fr-esr-parcoursup_2024 »)', async () => {
+  // le jeu principal ne garde que la dernière session (constaté sur l'API réelle : 0 formation pour 2024)
+  const ctx = makeCtx();
+  const appels = [];
+  const champs = Object.keys(D.OD_API).map(k => ({ name: D.OD_API[k], label: D.OD[k], type: typeof OD24[0][k] === 'number' ? 'double' : 'text' }));
+  const csv = [Object.keys(D.OD_API).map(k => D.OD_API[k]).join(';'), ...OD24.map(o => Object.keys(D.OD_API).map(k => String(o[k] ?? '').replace(/;/g, ',')).join(';'))].join('\n');
+  const entete = csv.split('\n')[0];
+  ctx.fetch = async u => {
+    u = String(u); appels.push(u);
+    const archive = /fr-esr-parcoursup_2024/.test(u);
+    if (/exports\/csv/.test(u)) return { ok: true, text: async () => archive ? csv : entete }; // jeu principal : aucune ligne 2024
+    return { ok: true, json: async () => ({ fields: champs }) };
+  };
+  ctx.__t25 = { ...avecChamps(D.tableOpenData(OD25)), session: 2025 };
+  run(ctx, "defaultOpenDataTable = __t25; defaultOpenDataState = 'ready';");
+  await run(ctx, 'preparerSessionsDemandees')('évolution du nombre de BTS depuis 2024');
+  const t = run(ctx, 'getOpenDataSessionTable(2024)');
+  assert(t && t.jeu === 'fr-esr-parcoursup_2024' && t.objects.length === OD24.length, `jeu principal vide pour 2024 → jeu archivé utilisé (obtenu : ${t?.jeu})`);
+  assert(appels.findIndex(u => /fr-esr-parcoursup\/exports/.test(u)) < appels.findIndex(u => /fr-esr-parcoursup_2024\/exports/.test(u)), 'le jeu principal est essayé en premier');
+  const e = ask(ctx, 'évolution du nombre de BTS depuis 2024');
+  assert(e.kind === 'evolution' && e.result.lignes[0].valeur === n(OD24, bts), 'puis la comparaison est juste');
+  // lignes d'une autre session renvoyées par erreur : refusées (jamais les chiffres 2025 présentés comme 2024)
+  const ctx2 = makeCtx();
+  const csv25 = csv.replace(/^2024;/gm, '2025;');
+  ctx2.fetch = async u => /exports\/csv/.test(String(u)) ? { ok: true, text: async () => csv25 } : { ok: true, json: async () => ({ fields: champs }) };
+  ctx2.__t25 = ctx.__t25; run(ctx2, "defaultOpenDataTable = __t25; defaultOpenDataState = 'ready';");
+  await run(ctx2, 'preparerSessionsDemandees')('combien de BTS en 2024');
+  assert(!run(ctx2, 'getOpenDataSessionTable(2024)'), 'lignes d\'une autre session : refusées');
+  assert(ask(ctx2, 'combien de BTS en 2024').kind === 'unresolved', '… et la question s\'arrête (pas les chiffres 2025 sous l\'étiquette 2024)');
+});
+
 console.log('\n──────────────────────────────────────────────────');
 console.log(`Résultat : ${passed} ✓  ${failed} ✗  (${passed + failed} tests)`);
 if (failed) process.exit(1);

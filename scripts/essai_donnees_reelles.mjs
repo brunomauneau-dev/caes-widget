@@ -413,7 +413,7 @@ export const REFERENCES = [
   { id: 'ref_top_places_bdx', q: 'les 5 formations avec le plus de places à Bordeaux', type: 'top', champ: 'capa_fin', ordre: 'desc', n: 5, egal: { ville_etab: 'Bordeaux' } },
 ];
 const _odsql = v => `"${String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
-export function requeteOfficielle(ref, session) {
+export function requeteOfficielle(ref, session, jeu = null) {
   const conds = [...Object.entries(ref.egal || {}).map(([k, v]) => `${k}=${typeof v === 'number' ? v : _odsql(v)}`), ...Object.entries(ref.superieur || {}).map(([k, v]) => `${k}>${v}`), ...(ref.type === 'top' ? [`${ref.champ} is not null`] : []),
     ...Object.entries(ref.different || {}).map(([k, v]) => `(${k} is null or ${k}!=${_odsql(v)})`)];
   const p = new URLSearchParams();
@@ -422,16 +422,18 @@ export function requeteOfficielle(ref, session) {
   else if (ref.type === 'top') { p.set('order_by', `${ref.champ} ${ref.ordre === 'asc' ? 'asc' : 'desc'}`); p.set('limit', String(ref.n || 10)); }
   else p.set('limit', '1');
   if (conds.length) p.set('where', conds.join(' and '));
-  p.append('refine', `session:${session}`);
-  return `${API_PARCOURSUP}/records?${p}`;
+  // jeu archivé d'une session (« fr-esr-parcoursup_2024 ») : il ne contient que cette session
+  if (!jeu || jeu === 'fr-esr-parcoursup') p.append('refine', `session:${session}`);
+  return `${jeu ? API_PARCOURSUP.replace(/fr-esr-parcoursup$/, jeu) : API_PARCOURSUP}/records?${p}`;
 }
-export async function chiffresOfficiels(fetchImpl, session, refs = REFERENCES) {
+export async function chiffresOfficiels(fetchImpl, session, refs = REFERENCES, { jeuPrecedent = null } = {}) {
   const out = {};
+  const jeuDe = s => (s === session - 1 ? jeuPrecedent : null);
   const unChiffre = async r => { const x = await fetchImpl(requeteOfficielle(r, session), { cache: 'no-store' }); if (!x.ok) throw new Error(`HTTP ${x.status}`); const res = (await x.json()).results; if (!Array.isArray(res)) throw new Error('réponse sans résultats'); return Number(res[0]?.n ?? 0); };
   for (const ref of refs) {
     if (ref.type === 'evolution') {
       try {
-        const avant = await (async () => { const x = await fetchImpl(requeteOfficielle(ref.base, session - 1), { cache: 'no-store' }); if (!x.ok) throw new Error(`HTTP ${x.status}`); return Number((await x.json()).results?.[0]?.n ?? 0); })();
+        const avant = await (async () => { const x = await fetchImpl(requeteOfficielle(ref.base, session - 1, jeuDe(session - 1)), { cache: 'no-store' }); if (!x.ok) throw new Error(`HTTP ${x.status}`); return Number((await x.json()).results?.[0]?.n ?? 0); })();
         out[ref.id] = { valeur: [avant, await unChiffre(ref.base)] };
       } catch (e) { out[ref.id] = { erreur: e.message }; }
       continue;
@@ -446,7 +448,7 @@ export async function chiffresOfficiels(fetchImpl, session, refs = REFERENCES) {
       continue;
     }
     try {
-      const r = await fetchImpl(requeteOfficielle(ref, session + (ref.session || 0)), { cache: 'no-store' });
+      const r = await fetchImpl(requeteOfficielle(ref, session + (ref.session || 0), jeuDe(session + (ref.session || 0))), { cache: 'no-store' });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const res = (await r.json()).results;
       if (!Array.isArray(res)) throw new Error('réponse sans résultats');
@@ -522,7 +524,7 @@ export async function essai({ fetchImpl = globalThis.fetch, questions = QUESTION
   const resultats = poserQuestions(table, questionsAnnee, [precedente]);
   references = references.map(r => ({ ...r, q: annee(r.q) }));
   const resRefs = poserQuestions(table, references.map(r => ({ id: r.id, q: r.q })), [precedente]);
-  const officiels = references.length ? await chiffresOfficiels(fetchImpl, table.session, references) : {};
+  const officiels = references.length ? await chiffresOfficiels(fetchImpl, table.session, references, { jeuPrecedent: precedente?.jeu || null }) : {};
   const verifs = verifierOfficiels(officiels, resRefs, references);
   const controles = [...controler(resultats), ...verifs.filter(v => v.statut !== 'indisponible').map(v => ({ libelle: `chiffre officiel : « ${v.question} »`, ok: v.statut === 'ok', detail: `officiel ${v.officiel} · widget ${v.widget} · ${v.detail}` }))];
   const diag = diagnosticColonnes(table);

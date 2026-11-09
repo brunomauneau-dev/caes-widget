@@ -566,8 +566,8 @@ async function detectLatestOpenDataSession() {
 }
 
 // Liste des champs du jeu de données (nom technique, libellé, type)
-async function fetchOpenDataFields() {
-  const r = await fetch(PARCOURSUP_GOVAPI, { cache: 'no-store' });
+async function fetchOpenDataFields(jeu = PARCOURSUP_GOVAPI) {
+  const r = await fetch(jeu, { cache: 'no-store' });
   if (!r.ok) throw new Error(`schéma : HTTP ${r.status}`);
   const json = await r.json();
   return (json.fields || (json.dataset && json.dataset.fields) || []).filter(f => f && f.name);
@@ -584,19 +584,32 @@ function refreshDefaultTableUI() {
 // (table.champs / table.libelles) : d'une année à l'autre, le ministère peut changer un libellé, pas le nom technique.
 const openDataSessions = new Map(); // session → table chargée
 let openDataSessionsDisponibles = []; // sessions publiées (facette « session »)
-async function chargerSessionOpenData(session) {
-  if (openDataSessions.has(session)) return openDataSessions.get(session);
-  const fields = await fetchOpenDataFields();
+// Le jeu principal ne garde que la dernière session ; les précédentes sont publiées dans des jeux archivés
+// (« fr-esr-parcoursup_2024 »…). On essaie le jeu principal, puis les noms d'archive connus.
+const jeuxPourSession = session => [PARCOURSUP_GOVAPI, `${PARCOURSUP_GOVAPI}_${session}`, `${PARCOURSUP_GOVAPI}-${session}`];
+async function _lignesSession(jeu, session) {
+  const fields = await fetchOpenDataFields(jeu);
   const byName = new Map(fields.map(f => [f.name, f]));
   const select = OPENDATA_DEFAULT_FIELDS.filter(n => byName.has(n));
   if (select.length < 5) throw new Error('champs attendus introuvables dans le jeu de données');
-
   const params = new URLSearchParams({ select: select.join(','), limit: '-1', delimiter: ';' });
-  params.append('refine', `session:${session}`);
-  const r = await fetch(`${PARCOURSUP_GOVAPI}/exports/csv?${params}`, { cache: 'no-store' });
+  if (byName.has('session')) params.append('refine', `session:${session}`);
+  const r = await fetch(`${jeu}/exports/csv?${params}`, { cache: 'no-store' });
   if (!r.ok) throw new Error(`export : HTTP ${r.status}`);
-  const raw = parseCSVSimple(await r.text(), ';');
-  if (!raw.length) throw new Error(`aucune formation pour la session ${session}`);
+  return { byName, select, raw: parseCSVSimple(await r.text(), ';') };
+}
+async function chargerSessionOpenData(session) {
+  if (openDataSessions.has(session)) return openDataSessions.get(session);
+  let trouve = null, derniereErreur = null;
+  for (const jeu of jeuxPourSession(session)) {
+    try {
+      const x = await _lignesSession(jeu, session);
+      // un jeu sans colonne session (archive d'une seule année) : toutes ses lignes sont de cette session
+      if (x.raw.length && (!x.byName.has('session') || x.raw.some(l => String(l.session || '').slice(0, 4) === String(session)))) { trouve = { ...x, jeu }; break; }
+    } catch (e) { derniereErreur = e; }
+  }
+  if (!trouve) throw new Error(`aucune formation pour la session ${session}${derniereErreur ? ` (${derniereErreur.message})` : ''}`);
+  const { byName, select, raw, jeu } = trouve;
 
   // En-têtes lisibles (libellés officiels) → la détection de colonnes et
   // Albert comprennent directement « Académie de l'établissement », etc.
@@ -626,6 +639,7 @@ async function chargerSessionOpenData(session) {
     headers, objects,
     session,
     rowUnit: 'formation',
+    jeu: jeu.split('/').pop(), // jeu de données d'où vient la session (principal ou archive)
     champs: Object.fromEntries(headers.map((h, i) => [h, select[i]])),
     libelles: Object.fromEntries(headers.map((h, i) => [select[i], h])),
   };
