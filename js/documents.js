@@ -586,6 +586,12 @@ function rowMatchesFilter(row, filter) {
   if (filter && filter.op === 'contains_all') return rowContainsAllTerms(row, filter);
   // v27.23 — une valeur parmi une liste (établissements dont le nom correspond : « Lycée Montaigne », …)
   if (filter && filter.op === 'in') return (filter.values || []).includes(normalizeText(row[filter.col]));
+  // v27.5.53 — mots présents dans une seule colonne (« Enseignement(s) de spécialité suivi(s) » contient « Sciences
+  // Economiques et Sociales » parmi « SES | Mathématiques ») : chaque terme, sous l'une de ses formes
+  if (filter && filter.op === 'contains_words') {
+    const mots = new Set(normalizeText(row[filter.col]).split(' '));
+    return (filter.terms || []).every(t => [].concat(t).some(w => mots.has(w)));
+  }
   if (filter && OPS_CHIFFRES[filter.op]) { const x = _chiffreCellule(row[filter.col]); return x !== null && OPS_CHIFFRES[filter.op](x, Number(filter.value)); }
   const rowValue = normalizeText(row[filter.col]);
   const filterValue = normalizeText(filter.value);
@@ -784,7 +790,7 @@ function triggerBlobDownload(blob, filename) {
 
 function formatActionFilters(filters) {
   if (!filters || !filters.length) return 'Filtres appliqués : aucun — export de toute la table active.';
-  return 'Filtres appliqués : ' + filters.map(f => f.op === 'in' ? `${f.col} : ${f.label || f.value}` : `${f.col} ${({ neq: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤' })[f.op] || '='} "${f.value}"`).join(' ; ');
+  return 'Filtres appliqués : ' + filters.map(f => f.op === 'in' ? `${f.col} : ${f.label || f.value}` : f.op === 'contains_words' ? `${f.col} contient « ${f.label || f.value} »` : `${f.col} ${({ neq: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤' })[f.op] || '='} "${f.value}"`).join(' ; ');
 }
 
 

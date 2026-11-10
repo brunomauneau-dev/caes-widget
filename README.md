@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-42 fichiers, 1 930 tests. Depuis la racine du repo :
+43 fichiers, 1 999 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -106,6 +106,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 ### Réponses incorrectes et questions à revoir
 
 `js/test_tournures_libres.js` vérifie les **tournures libres** : formules de politesse et verbes d'intention (« Bonjour, pourriez-vous me dire… », « j'aimerais savoir… » ; avant, « savoir » était cherché dans les intitulés et donnait 0), fautes de frappe (« conbien »), « y a-t-il des… », numéros de département (« dans le 33 » = Gironde ; avant : tous les BTS), portée de la négation (« non sélectives dans l'académie de Bordeaux » ; avant : hors Bordeaux), et relances : « et par académie ? » / « et pour les CPGE ? » après une moyenne gardent la mesure, « et par académie ? » après des places donne des places, « lesquelles sont à Bordeaux ? » détaille par établissement, « et l'an dernier ? » reprend la question sur la session précédente.
+
+`js/test_fichier_candidats.js` vérifie l'**export académique de suivi des candidats** (une ligne = un candidat, 22 colonnes, données fictives aux mêmes en-têtes que l'export réel) : « a eu une proposition » ≠ « a accepté » (avant : tout le fichier), taux de proposition des boursiers, formation d'accueil plutôt que spécialités du lycée (« en droit » comptait « Droit et Économie »), bonne colonne de série (bac technologique, bac pro agricole, STMG), lieux de scolarité ou d'accueil (« scolarisés à Bordeaux » donnait 0, « candidats de Pau » tout le fichier, Paris par arrondissements), hors académie, lycée d'origine ou d'accueil, public / privé, lycées agricoles, spécialités suivies au lycée (SES, NSI…), critères Oui/Non cumulés (« apprentis admis en BTS » perdait le filtre apprenti), arrêt sur ce que le fichier ne contient pas.
 
 `js/test_taux_acces.js` vérifie les **questions sur le taux d'accès**. « Taux d'accès moyen par académie / par filière » donne une statistique par groupe (formations, moyenne, médiane, min, max ; avant : une seule moyenne nationale) ; la statistique demandée (médiane, minimum, maximum) est en titre ; « taux d'accès des PASS », « … au lycée Montaigne » sont calculés par le moteur (une seule formation : sa valeur et son nom). Les formations au taux d'accès de 0 (aucune proposition Parcoursup) sont écartées des moyennes comme des classements, et c'est écrit. La moyenne est simple (non pondérée), et c'est écrit aussi.
 

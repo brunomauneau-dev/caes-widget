@@ -248,6 +248,40 @@ function pickColumnValue(table, col, kind) {
   return vals[0];
 }
 
+const _MATIERES_LYCEE = [
+  [/\bses\b|sciences economiques et sociales/, ['economiques', 'sociales'], 'Sciences Economiques et Sociales', ['ses']],
+  [/\bsvt\b|sciences de la vie et de la terre/, ['vie', 'terre'], 'Sciences de la vie et de la Terre', ['svt']],
+  [/\bhggsp\b|geopolitique/, ['geopolitique'], 'Histoire-Géographie, Géopolitique et Sciences politiques', ['hggsp', 'geopolitique']],
+  [/\bhlp\b|humanites/, ['humanites'], 'Humanités, Littérature et Philosophie', ['hlp', 'humanites']],
+  [/\bllcer\b|langues litteratures et cultures/, ['langues', 'cultures'], 'Langues, littératures et cultures étrangères et régionales', ['llcer']],
+  [/\bnsi\b|numerique et sciences informatiques/, ['numerique', 'informatiques'], 'Numérique et Sciences Informatiques', ['nsi']],
+  [/\bamc\b|anglais monde/, ['anglais', 'monde'], 'Anglais, Monde Contemporain', ['amc']],
+  [/\bphysique ?chimie\b|\bphysique\b|\bpc\b/, ['physique'], 'Physique-Chimie', ['physique', 'chimie', 'pc']],
+  [/\bmaths?\b|\bmathematiques?\b/, ['mathematiques'], 'Mathématiques', ['maths', 'math', 'mathematiques', 'mathematique']],
+  [/\bsciences de l ingenieur\b|\bsi\b/, ['ingenieur'], "Sciences de l'ingénieur", ['si', 'ingenieur']],
+  [/\bdroit et economie\b/, ['droit', 'economie'], 'Droit et Economie', ['droit', 'economie']],
+  [/\bmercatique\b/, ['mercatique'], 'Mercatique', ['mercatique']],
+];
+// v27.5.53 — spécialités du lycée citées dans la question : filtres « contient » sur la colonne des enseignements
+// de spécialité, et mots de la question qu'elles expliquent (pour ne pas les chercher dans les formations d'accueil)
+function _specialitesLycee(table, q) {
+  const vide = { col: null, filtres: [], mots: new Set() };
+  const ensCol = (table?.headers || []).filter(Boolean).find(h => /enseignements? .*specialite|specialites? .*suivi/.test(normalizeText(h)));
+  if (!ensCol) return vide;
+  const sigle = /\b(ses|svt|hggsp|hlp|llcer|nsi|amc)\b/.test(q);
+  const contexteLycee = /\b(specialites?|enseignements? de specialite|doublettes?)\b/.test(q) && /\b(suivi|suivie|suivis|suivies|suivant|suivent|suit|ayant|ont pris|font|fait|lycee|terminale|doublettes?|enseignements?|avec)\b/.test(q);
+  if (!sigle && !contexteLycee) return vide;
+  const cache = table._motsEns || (table._motsEns = new Set(_distinctValues(table, ensCol).flatMap(v => normalizeText(v).split(' '))));
+  const out = { col: ensCol, filtres: [], mots: new Set() };
+  _MATIERES_LYCEE.forEach(([re, mots, nom, alias]) => {
+    if (!re.test(q) || !mots.every(w => cache.has(w))) return;
+    out.filtres.push({ col: ensCol, op: 'contains_words', terms: mots.map(w => [w]), value: nom, label: nom, source: 'specialite_lycee' });
+    alias.forEach(a => out.mots.add(a));
+    normalizeText(nom).split(' ').forEach(w => out.mots.add(w));
+  });
+  return out;
+}
+
 function strictFiltersFromQuestion(table, question) {
   const q = normalizeText(question || '');
   const out = [];
@@ -276,6 +310,33 @@ function strictFiltersFromQuestion(table, question) {
     if (col) add(col, 'Bordeaux', 'neq', 'Hors Bordeaux');
   }
 
+  // v27.5.53 — « partent hors académie », « restent dans l'académie » sans nommer l'académie : l'académie des candidats du
+  // fichier, c'est-à-dire l'académie d'accueil majoritaire (plus de la moitié des admis), nommée dans le périmètre.
+  // Avant : filtre perdu, tout le fichier. Si aucune académie n'est majoritaire, rien n'est supposé.
+  const _horsAca = /\b(hors|en dehors) (de )?(l |leur |notre |son )?academie\b|\b(quittent|quitter|quitte|sortent de|sortir de|partent de) (l |leur |notre |son )?academie\b|\b(une |d )?autres? academies?\b/.test(q);
+  const _dansAca = /\b(restent|reste|restant|rester|demeurent|restes|restees?) (dans|en) (l |leur |notre |son )?academie\b|\bdans (l |leur |notre |son )academie\b/.test(q);
+  if ((_horsAca || _dansAca) && !/\bacademies? (de|d) [a-z]/.test(q)) {
+    const col = findColumnByConceptStrict(table, 'academie_accueil');
+    if (col && !out.some(f => f.col === col)) {
+      const n = new Map();
+      (table.objects || []).forEach(r => { const v = String(r?.[col] ?? '').trim(); if (v) n.set(v, (n.get(v) || 0) + 1); });
+      const tot = [...n.values()].reduce((a, b) => a + b, 0);
+      const [ref, nb] = [...n.entries()].sort((a, b) => b[1] - a[1])[0] || [];
+      if (ref && nb > tot / 2) add(col, ref, _horsAca ? 'neq' : 'eq');
+    }
+  }
+
+  // v27.5.53 — « lycées agricoles », « enseignement agricole » : « Ministère de rattachement » = Agriculture
+  // (avant : « nom contenant lycée agricoles », un seul établissement)
+  if (/\b(lycees?|etablissements?|enseignement|eleves|candidats?) agricoles?\b|\bde l agriculture\b/.test(q)) {
+    const minCol = (table?.headers || Object.keys(table?.objects?.[0] || {})).filter(Boolean).find(h => /minist/.test(_hx(h)) && _distinctValues(table, h).some(v => /agricult/.test(normalizeText(v))));
+    if (minCol) add(minCol, _distinctValues(table, minCol).find(v => /agricult/.test(normalizeText(v))), 'eq');
+  }
+
+  // v27.5.53 — spécialités suivies au lycée (« ayant suivi la spécialité SES », « doublette maths-physique ») :
+  // colonne « Enseignement(s) de spécialité suivi(s) ». Avant : filtre perdu (SES) ou formation d'accueil « Mathématiques ».
+  out.push(..._specialitesLycee(table, q).filtres);
+
   // Grands groupes de formation (CPGE, BTS, L1, etc.)
   const formationCol = findColumnByConceptStrict(table, 'formation_groupe');
   if (formationCol) {
@@ -297,7 +358,9 @@ function strictFiltersFromQuestion(table, question) {
 
   // v27.8 — statut public / privé, sélectivité, région, « à <ville> » (open data et fichiers de formations)
   const headersS = (table?.headers || Object.keys(table?.objects?.[0] || {})).filter(Boolean);
-  const statutCol = headersS.find(h => /statut|secteur/.test(_hx(h)) && _distinctValues(table, h).some(v => /^public/.test(normalizeText(v))));
+  // v27.5.53 — fichier de candidats : « Type de contrat établissement de la scolarité » (Public / Privé sous contrat…)
+  const statutCol = headersS.find(h => /statut|secteur/.test(_hx(h)) && _distinctValues(table, h).some(v => /^public/.test(normalizeText(v))))
+    || headersS.find(h => /contrat/.test(_hx(h)) && _distinctValues(table, h).some(v => /^public/.test(normalizeText(v))));
   if (statutCol) {
     const vals = _distinctValues(table, statutCol);
     const pub = vals.find(v => /^public/.test(normalizeText(v)));
@@ -335,6 +398,28 @@ function strictFiltersFromQuestion(table, question) {
       const v = _distinctValues(table, col).filter(x => normalizeText(x).length >= 3).sort((a, b) => b.length - a.length)
         .find(x => new RegExp(`(^| )a ${normalizeText(x)}( |$)`).test(q));
       if (v) { out.push({ col, value: v, op: 'eq', label: null, source: 'commune_a' }); break; }
+      // v27.5.53 — « à Paris » : la commune est écrite par arrondissement (« Paris 11e Arrondissement ») → tous
+      const _arr = new Map();
+      _distinctValues(table, col).forEach(x => { const m = normalizeText(x).match(/^(.+?) \d+ ?(er|e|eme)? arrondissement$/); if (m) { if (!_arr.has(m[1])) _arr.set(m[1], []); _arr.get(m[1]).push(normalizeText(x)); } });
+      const base = [..._arr.keys()].find(b => new RegExp(`(^| )a ${b}( |$)`).test(q));
+      if (base) {
+        const nom = base.charAt(0).toUpperCase() + base.slice(1);
+        out.push({ col, op: 'in', values: _arr.get(base), value: nom, label: `${nom} (${_arr.get(base).length} arrondissements)`, source: 'commune_a' });
+        break;
+      }
+    }
+    // v27.5.53 — fichier de candidats : « candidats de Pau », « des lycées de Bordeaux », « scolarisés à Bordeaux » :
+    // la commune de SCOLARITÉ. « de X » seulement si X n'est pas une académie (« de Bordeaux » = l'académie, sauf
+    // « lycées de Bordeaux »). Avant : filtre perdu, « combien de candidats de Pau » donnait tout le fichier.
+    const comOrig = comCols.find(h => (typeof plannerColumnRole === 'function') && plannerColumnRole(h).origine);
+    if (comOrig && !out.some(f => f.col === comOrig)) {
+      const acaVals = new Set(headersS.filter(h => /acad[eé]mi/.test(_hx(h))).flatMap(h => _distinctValues(table, h).map(normalizeText)));
+      const v = _distinctValues(table, comOrig).filter(x => normalizeText(x).length >= 3).sort((a, b) => b.length - a.length).find(x => {
+        const n = normalizeText(x);
+        if (new RegExp(`\\b(lycees?|etablissements?|eleves|lyceens|scolarises?|scolarisees?|issus?|issues?|venant|originaires?|provenant)( (de la|de l|du|des|de|d|a|au|en))? ${n}( |$)`).test(q)) return true;
+        return !acaVals.has(n) && new RegExp(`\\b(candidats?|candidates?|bacheliers?|bachelieres?|boursiers?|boursieres?|apprenti(e)?s?|ceux|celles|jeunes) (de|d) ${n}( |$)`).test(q);
+      });
+      if (v) out.push({ col: comOrig, value: v, op: 'eq', label: null, source: 'commune_a' });
     }
   }
 
@@ -344,8 +429,11 @@ function strictFiltersFromQuestion(table, question) {
   if (_etablMatch) {
     const name = _etablMatch[1].trim();
     const origCol = findColumnByConceptStrict(table, 'etablissement_origine');
-    if (origCol) {
-      const stopWords = new Set(['du','de','des','le','la','les','et','au','aux','en','lycee','etablissement']);
+    // v27.5.53 — « scolarisés à Bordeaux » : une commune, pas le premier lycée dont le nom contient « Bordeaux »
+    // (avant : « Lycée agricole de Bordeaux Blanquefort », 0 candidat)
+    const _estCommune = comCols.some(h => _distinctValues(table, h).some(v => normalizeText(v) === normalizeText(name)));
+    if (origCol && !_estCommune) {
+      const stopWords = new Set(['du','de','des','le','la','les','et','au','aux','en','lycee','etablissement','public','publics','publique','publiques','prive','prives','privee','privees','agricole','agricoles']);
       const nameWords = normalizeText(name).split(/\s+/).filter(w => w.length > 2 && !stopWords.has(w));
       const vals = [...new Set((table.objects || []).map(r => String(r[origCol] ?? '')).filter(Boolean))];
       const match = nameWords.length ? vals.find(v => nameWords.every(w => normalizeText(v).includes(w))) : null;
@@ -371,7 +459,24 @@ function replaceConceptFiltersWithStrict(plan, question) {
   }
 
   const strictCols = new Set(strict.map(f => f.col));
-  const base = (plan.filters || []).filter(f => !strictCols.has(f.col));
+  // v27.5.53 — mot d'intitulé déjà traduit par un filtre exact (« agricoles » → Ministère = Agriculture) : retiré
+  const _pref = w => w.slice(0, 5);
+  const _motsStrict = new Set(strict.flatMap(f => normalizeText(f.value).split(/[^a-z0-9]+/).filter(w => w.length >= 5).map(_pref)));
+  plan.filters = (plan.filters || []).filter(f => {
+    if (!(f && f.op === 'contains_all' && f.source === 'termes_formation')) return true;
+    const i = (f.terms || []).map((t, k) => ({ t, l: String(f.label || '').split(' + ')[k] })).filter(x => ![].concat(x.t).some(w => w.length >= 5 && _motsStrict.has(_pref(w))));
+    if (i.length === (f.terms || []).length) return true;
+    if (!i.length) return false;
+    Object.assign(f, { terms: i.map(x => x.t), label: i.map(x => x.l).join(' + '), value: i.map(x => x.l).join(' + ') });
+    return true;
+  });
+  // v27.5.53 — « lycées de Bordeaux » : la commune de scolarité remplace l'académie (d'accueil) = Bordeaux lue dans le même mot
+  const _communes = new Set(strict.filter(f => f.source === 'commune_a').map(f => normalizeText(f.value)));
+  const _aca = f => f && f.op === 'eq' && /acad[eé]mi/.test(_hx(f.col)) && _communes.has(normalizeText(f.value)) && !/\bacademi/.test(q);
+  const _ensMots = _specialitesLycee(plan.table, q).mots;
+  const _formCols = new Set(formationTermsInfo(plan.table).cols);
+  const _matiere = f => f && f.op === 'eq' && _ensMots.size && _formCols.has(f.col) && normalizeText(f.value).split(' ').every(w => _ensMots.has(w));
+  const base = (plan.filters || []).filter(f => !strictCols.has(f.col) && !_aca(f) && !_matiere(f));
   plan.filters = mergeFiltersUnique(base, strict);
   plan.mentionedCols = Array.from(new Set([...(plan.mentionedCols || []), ...strict.map(f => f.col)]));
   return plan;
@@ -860,7 +965,12 @@ function formationTermsInfo(table) {
     if (typeof plannerColumnKind !== 'function' || typeof uniqueValues !== 'function') return false;
     try { return plannerColumnKind(h, uniqueValues(table, h, 200)) === 'formation'; } catch (e) { return false; }
   };
-  const cols = headers.filter(h => textual(h) && !NOT_FORMATION_COL_RE.test(_hx(h)) && (FORMATION_COL_RE.test(_hx(h)) || parContenu(h)));
+  let cols = headers.filter(h => textual(h) && !NOT_FORMATION_COL_RE.test(_hx(h)) && (FORMATION_COL_RE.test(_hx(h)) || parContenu(h)));
+  // v27.5.53 — fichier de candidats : « candidats en droit » vise la formation d'ACCUEIL. Les colonnes qui décrivent
+  // le lycée du candidat (« Spécialité » de bac pro, « Enseignement(s) de spécialité suivi(s) » : « Droit et Economie »)
+  // ne sont plus fouillées dès qu'une colonne de formation d'accueil existe (avant : 5 301 « en droit » au lieu de 1 987)
+  const _accueil = cols.filter(h => /accueil|accepte|affecte|affectation|admis/.test(_hx(h)));
+  if (_accueil.length) cols = _accueil;
   const geoCols = headers.filter(h => GEO_COL_RE.test(_hx(h)) && !cols.includes(h));
   const words = new Set(), geo = new Set();
   const seen = new Set();
@@ -906,11 +1016,23 @@ function formationTermsFromQuestion(table, question, otherFilters = []) {
   const forced = new Set();
   const reOpt = /\b(?:option|options|mention|mentions|specialite|specialites|parcours)\s+(?:(?:de|d|en|du|des|la|le|l)\s+)?([a-z0-9]{3,})/g;
   let m;
-  while ((m = reOpt.exec(q))) if (!FORMATION_TERM_STOP.has(m[1])) forced.add(m[1]);
+  const _ens = _specialitesLycee(table, q).mots;
+  while ((m = reOpt.exec(q))) if (!FORMATION_TERM_STOP.has(m[1]) && !_ens.has(m[1])) forced.add(m[1]);
   const originals = String(question || '').split(/[^A-Za-zÀ-ÿ0-9œŒæÆ]+/).filter(Boolean);
   const labelFor = tok => originals.find(w => normalizeText(w) === tok) || tok;
+  // v27.5.53 — mot d'un nom de colonne cité avec un autre mot de ce nom (« par académie d'accueil ») : la colonne, pas un
+  // mot d'intitulé (avant : « répartition par académie d'accueil » ne gardait que 13 lignes dont l'intitulé contient « accueil »)
+  const _motsQ = new Set(q.split(' '));
+  const _deColonne = new Set();
+  (table.headers || []).forEach(h => {
+    const mots = normalizeText(h).split(/[^a-z0-9]+/).filter(w => w.length >= 4);
+    const _dansQ = w => _motsQ.has(w) || _motsQ.has(w + 's') || _motsQ.has(w + 'x');
+    if (mots.filter(_dansQ).length >= 2) mots.forEach(w => { _deColonne.add(w); _deColonne.add(w + 's'); });
+  });
   q.split(' ').forEach(tok => {
     if (tok.length < 3 || /^\d+$/.test(tok) || FORMATION_TERM_STOP.has(tok) || covered.has(tok)) return;
+    if (_deColonne.has(tok) && !forced.has(tok)) return;
+    if (_ens.has(tok)) return; // « spécialité SES / maths » au lycée : pas une formation d'accueil
     const form = formationWordForm(tok, info);
     if (!form) { if (forced.has(tok)) out.missing.push(labelFor(tok)); return; }
     if (form.some(w => info.geo.has(w)) && !forced.has(tok)) return; // Bordeaux, Gironde… : des lieux, pas des formations
@@ -942,6 +1064,13 @@ function applyFormationTerms(plan) {
   const formFilters = (plan.filters || []).filter(f => isFormationFilter(f) && f.source !== 'termes_formation');
   const coveredByPlanner = formFilters.length && found.terms.every(t => formFilters.some(f => normalizeText(f.value).split(' ').some(w => t.includes(w))));
   if (coveredByPlanner) return plan;
+  // v27.5.53 — mot déjà traduit par un filtre du planner sur une catégorie (« licence » → « L1 - CUPGE - DEUST - DU »,
+  // « BUT » → « DUT », « prépa » → « CPGE - CPES ») : ce n'est plus un mot d'intitulé à chercher en plus
+  // (avant : « licence de droit » cherchait « licence » ET « droit » dans les intitulés → 0, critère non trouvé)
+  for (let i = found.terms.length - 1; i >= 0; i--) {
+    if (formFilters.some(f => f.op === 'eq' && _categorieTraduite(found.terms[i], f.value))) { found.terms.splice(i, 1); found.labels.splice(i, 1); }
+  }
+  if (!found.terms.length) return plan;
   // v27.22 — « licences de droit / STAPS » : « licence » est une catégorie officielle (Filière très agrégée = Licence),
   // distincte de « Licence_Las » (LAS, licences accès santé). Par l'intitulé, les LAS étaient comptées aussi
   // (licences STAPS : 134 au lieu de 93), alors que « combien de licences » les exclut. Quand plusieurs valeurs de la
@@ -975,6 +1104,36 @@ function applyFormationTerms(plan) {
       }
     }
   }
+  // v27.5.53 — un seul mot, qui désigne une seule grande catégorie (« écoles d'ingénieurs » → « Formations d'ingénieurs ») :
+  // la catégorie, pas tout intitulé contenant le mot (avant : + licences « Sciences pour l'ingénieur », BTS « Assistance
+  // technique d'ingénieur » : 1 158 au lieu de 1 050)
+  // (« écoles d'ingénieurs » : « écoles » est un mot générique, laissé de côté s'il n'apparaît pas dans cette catégorie)
+  const _GENERIQUES = new Set(['ecole', 'ecoles', 'formation', 'formations', 'etablissement', 'etablissements', 'cursus', 'filiere', 'filieres']);
+  if (!catFilter && found.terms.length >= 1 && found.terms.length <= 2 && !(plan.filters || []).some(f => f && formCols.has(f.col) && f.op === 'eq')) {
+    const cat = _colonneCategories(plan.table, info);
+    if (cat) {
+      const valeurs = new Map();
+      (plan.table.objects || []).forEach(r => { const v = r?.[cat]; if (v !== undefined && v !== null && String(v).trim()) valeurs.set(normalizeText(v), String(v).trim()); });
+      for (let i = 0; i < found.terms.length; i++) {
+        const formes = found.terms[i];
+        if (formes.some(w => _GENERIQUES.has(w))) continue;
+        const porteuses = [...valeurs.entries()].filter(([k]) => formes.some(w => k.split(/[^a-z0-9]+/).includes(w)));
+        if (porteuses.length !== 1) continue;
+        // seulement si le mot apparaît aussi hors de cette catégorie (sinon rien ne change : « PASS »)
+        const _f = makeFormationTermsFilter(plan.table, [formes], [found.labels[i]]);
+        const _cat = normalizeText(porteuses[0][1]);
+        if (!(plan.table.objects || []).some(r => normalizeText(r?.[cat]) !== _cat && applyLocalActionFilters([r], [_f]).length)) continue;
+        // les autres mots : gardés s'ils existent dans cette catégorie ; un mot générique absent est laissé de côté
+        const dansCat = (plan.table.objects || []).filter(r => normalizeText(r?.[cat]) === _cat);
+        const autres = found.terms.map((t, k) => ({ t, l: found.labels[k], k })).filter(x => x.k !== i);
+        const garder = autres.filter(x => !x.t.some(w => _GENERIQUES.has(w)) || dansCat.some(r => applyLocalActionFilters([r], [makeFormationTermsFilter(plan.table, [x.t], [x.l])]).length));
+        if (garder.length && found.terms.length > 1 && garder.length === autres.length) continue; // deux vrais mots : règle habituelle
+        catFilter = { col: cat, op: 'eq', value: porteuses[0][1], label: porteuses[0][1], source: 'categorie_formation' };
+        found.terms = garder.map(x => x.t); found.labels = garder.map(x => x.l);
+        break;
+      }
+    }
+  }
   if (catFilter && !found.terms.length) { plan.filters = [...others.filter(f => f !== catFilter), catFilter]; return plan; }
   const filtre = makeFormationTermsFilter(plan.table, found.terms, found.labels);
   // v27.8 — si une seule colonne contient tous les mots, on prend la plus précise (le moins de lignes) :
@@ -983,7 +1142,7 @@ function applyFormationTerms(plan) {
   // (v27.22 — aussi quand la catégorie a remplacé l'un des mots : « licences de droit » = Licence + « droit » dans la colonne précise)
   if (found.terms.length > 1 || catFilter) {
     let meilleure = null;
-    const objets = catFilter ? applyLocalActionFilters(plan.table.objects || [], [catFilter]) : (plan.table.objects || []);
+    const objets = _lignesAvecFormation(catFilter ? applyLocalActionFilters(plan.table.objects || [], [catFilter]) : (plan.table.objects || []), info.cols);
     // seulement les colonnes remplies (≥ 80 % des lignes) : une colonne presque vide (« très détaillée »)
     // ne contient les deux mots que pour quelques lignes et donnerait un compte trop petit
     const remplie = c => objets.filter(r => String(r?.[c] ?? '').trim() !== '').length >= objets.length * 0.8;
@@ -997,9 +1156,26 @@ function applyFormationTerms(plan) {
   plan.mentionedCols = Array.from(new Set([...(plan.mentionedCols || []), ...info.cols]));
   return plan;
 }
+const _CATEGORIES_TRADUITES = [
+  [/^licences?$/, /\bl1\b|\blicences?\b/], [/^(but|dut)s?$/, /\b(but|dut)\b|\biut\b/], [/^(prepas?|cpge)$/, /\bcpge\b|prepa/],
+  [/^bts$/, /\bbts\b/],
+];
+function _categorieTraduite(formes, valeur) {
+  const v = normalizeText(valeur);
+  const motsV = v.split(/[^a-z0-9]+/);
+  // le mot écrit tel quel dans la valeur (« Licence », « BTS ») : rien à traduire, les règles habituelles s'appliquent
+  if ((formes || []).some(w => motsV.includes(w) || motsV.includes(w.replace(/s$/, '')))) return false;
+  return (formes || []).some(w => _CATEGORIES_TRADUITES.some(([mot, val]) => mot.test(w) && val.test(v)));
+}
+// v27.5.53 — fichier de candidats : les colonnes de formation d'accueil sont vides pour les candidats sans admission
+// (35 % des lignes). « Remplie » se juge sur les lignes qui ont une formation, pas sur tout le fichier.
+function _lignesAvecFormation(objets, cols) {
+  const avec = objets.filter(r => cols.some(c => String(r?.[c] ?? '').trim() !== ''));
+  return avec.length ? avec : objets;
+}
 // Colonne des grandes catégories de formation (BTS, BUT, Licence…) : remplie, le moins de valeurs différentes (≥ 2)
 function _colonneCategories(table, info) {
-  const objets = table.objects || [];
+  const objets = _lignesAvecFormation(table.objects || [], info.cols);
   const remplie = c => objets.filter(r => String(r?.[c] ?? '').trim() !== '').length >= objets.length * 0.8;
   const nb = c => new Set(objets.slice(0, 5000).map(r => normalizeText(r?.[c]))).size;
   const cand = info.cols.filter(remplie).map(c => ({ c, n: nb(c) })).filter(x => x.n >= 2 && x.n <= 40).sort((a, b) => a.n - b.n);
@@ -1322,7 +1498,10 @@ function applyPart(plan) {
   if (d.mode === 'lignes') {
     // « proportion de formations privées en Gironde » : la condition est « formations privées », « en Gironde » est le périmètre ;
     // si la partie avant « en / à / dans… » ne donne aucun critère (« part des formations en apprentissage »), on garde toute la phrase
-    const courte = d.phrase.split(/\s+(?:en|a|au|aux|dans|sur|chez|pour|de l academie|du departement)\s+/)[0];
+    // v27.5.53 — « taux de proposition des boursiers » : la condition est « proposition », « des boursiers » est le périmètre
+    // (avant : la part des boursiers dans tout le fichier, 18 %, au lieu de la part des boursiers ayant eu une proposition)
+    const _deQui = /^taux\b/.test(normalizeText(plan.question || '').replace(/^.*?\b(?=taux\b)/, '')) ? d.phrase.split(/\s+(?:des|du|chez les|chez)\s+/)[0] : d.phrase;
+    const courte = _deQui.split(/\s+(?:en|a|au|aux|dans|sur|chez|pour|de l academie|du departement)\s+/)[0];
     let fx = courte !== d.phrase ? _filtresDePhrase(plan.table, courte) : [];
     if (fx.length) d.phrase = courte; else fx = _filtresDePhrase(plan.table, d.phrase);
     const cle = f => f.op === 'contains_all' ? `T::${(f.terms || []).map(t => [].concat(t)[0]).join('+')}` : `${f.col}`;
@@ -1701,8 +1880,10 @@ const CONCEPTS_A_FILTRER = [
   // v27.13 — « combien de refusés » sans colonne de statut comptait tout le fichier
   { re: /\brefus(e|es|ee|ees)?\b|\bliste d ?attente\b|\ben attente\b|\bdesist(e|es|ee|ees|ement)?\b/, mot: 'statut de candidature (refusé, liste d\'attente…)', ok: t => /refus|attente|desist|statut|admi|candidature/.test(t) },
   { re: /\bbasques?\b/, mot: 'Pays Basque', ok: t => /basque/.test(t) },
-  { re: /\bpubli(c|cs|que|ques)\b|\bprive(e|s|es)?\b/, mot: 'public / privé', ok: t => /publi|priv|statut|secteur/.test(t) },
+  { re: /\bpubli(c|cs|que|ques)\b|\bprive(e|s|es)?\b/, mot: 'public / privé', ok: t => /publi|priv|statut|secteur|contrat/.test(t) },
   { re: /\bselecti(f|fs|ve|ves)\b/, mot: 'sélective', ok: t => /selecti/.test(t) },
+  // v27.5.53 — « n'ont confirmé aucun vœu » : la colonne du nombre de vœux est vide, pas à 0 → arrêt, pas tout le fichier
+  { re: /\baucuns? v(oe|œ)?ux?\b|\bsans v(oe|œ)ux?\b|\bpas de v(oe|œ)ux?\b|\b0 v(oe|œ)ux?\b|\bzero v(oe|œ)ux?\b/, mot: 'aucun vœu', ok: (t, f) => f && f.source === 'condition_chiffree' && /v(oe|œ)u/.test(t) },
 ];
 const LIEUX_AMBIGUS = new Set('somme manche nord lot var ain cher orne oise eure gers aube aude gard jura tarn indre doubs loire marne meuse vienne creuse rhone yonne'.split(' '));
 /* v27.22 — Mot de la question qui n'a servi à rien : arrêt, au lieu de compter plus large.
@@ -1745,8 +1926,32 @@ function elaguerTermesCouverts(plan) {
   plan.filters = plan.filters.map(f => f === tf ? nv : f);
   return plan;
 }
+// v27.5.53 — fichiers de candidats : verbes et tournures qui décrivent le parcours sans être un critère
+const MOTS_FICHIER_CANDIDATS = new Set(`
+  vont va aller partent partis parties part partir restent reste restes restees rester restant demeurent quittent quitte quitter
+  sortent sortir etudier etudient etudie poursuivre poursuivent ayant eu eus recu recus recue obtenu obtenus issus issue issues
+  venant viennent provenant originaires originaire scolarises scolarisees scolarise scolarisee scolarite eleves eleve lyceens lyceennes
+  jeunes bacheliers bachelieres neo suivant suivent suivi suivie suivis ont confirme confirmes confirmee confirmees aucun aucune
+  autre autres dehors hors leurs notre nos son sa ses lycee lycees etudiants etudiante etudiantes etudiant
+  acceptee acceptees accepte acceptes acceptent accepter favorable favorables favorablement repondu reponse admise affectes affectees
+  choisi choisie choisis choisies choisissent prefere preferee preferees privilegiees
+`.split(/\s+/).filter(Boolean));
+// mots traduits par un filtre (« STMG » → « Sciences et Technologies du Management… », « licence » → « L1 - CUPGE… »)
+const _SIGLES_SERIES = [[/management.*gestion/, 'stmg'], [/industrie.*developpement durable/, 'sti2d'], [/design.*arts? appliqu/, 'std2a'],
+  [/laboratoire/, 'stl'], [/sante.*social/, 'st2s'], [/agronomie.*vivant/, 'stav'], [/theatre.*musique.*danse/, 's2tmd'], [/hotellerie.*restauration/, 'sthr']];
+function _motsTraduits(valeur) {
+  const v = normalizeText(valeur), out = [];
+  _SIGLES_SERIES.forEach(([re, x]) => { if (re.test(v)) out.push(x); });
+  _CATEGORIES_TRADUITES.forEach(([mot, val]) => { if (val.test(v)) out.push(...String(mot.source).replace(/[\^$()?]/g, '').split('|').map(w => w.replace(/s$/, ''))); });
+  if (/\binfirmier/.test(v)) out.push('ifsi');
+  _MATIERES_LYCEE.forEach(([, , nom, alias]) => { if (normalizeText(nom) === v) out.push(...alias); });
+  if (/\bprofessionnel/.test(v)) out.push('pro');
+  if (/\btechnologique/.test(v)) out.push('techno');
+  return out;
+}
 function motsNonReconnus(plan) {
-  if (!plan || !plan.table || plan.table.rowUnit !== 'formation') return [];
+  if (!plan || !plan.table) return [];
+  const _fichierCandidats = plan.table.rowUnit !== 'formation';
   if (!['count_rows', 'sum', 'stats', 'group_by', 'top', 'classement', 'part'].includes(plan.tool)) return [];
   if (plan.dimensionIntrouvable && !plan.targetCol) return []; // « par couleur » : message dédié plus loin
   const info = formationTermsInfo(plan.table);
@@ -1754,7 +1959,7 @@ function motsNonReconnus(plan) {
   const cols = [plan.targetCol, plan.targetCol2, plan.sumCol, plan.groupSumCol, plan.classement?.col, plan.classement?.entite?.col, plan.part?.num, plan.part?.den, ...filtres.map(f => f.col)].filter(Boolean);
   const connus = new Set();
   const ajouter = t => normalizeText(t).split(' ').forEach(w => { if (w) connus.add(w); });
-  filtres.forEach(f => { ajouter(f.value); ajouter(f.label || ''); (f.terms || []).forEach(t => (Array.isArray(t) ? t : [t]).forEach(ajouter)); });
+  filtres.forEach(f => { ajouter(f.value); ajouter(f.label || ''); (f.terms || []).forEach(t => (Array.isArray(t) ? t : [t]).forEach(ajouter)); (f.values || []).forEach(ajouter); (f.noms || []).forEach(ajouter); _motsTraduits(f.value).forEach(ajouter); });
   cols.forEach(c => ajouter(_hx(c)));
   (plan.table.headers || []).forEach(h => ajouter(h)); // un mot d'en-tête désigne une colonne (« taux d'accès »)
   const prefixe = w => w.slice(0, Math.min(5, w.length));
@@ -1763,8 +1968,9 @@ function motsNonReconnus(plan) {
   const manque = [];
   q.split(' ').forEach(w => {
     // mots de 2 lettres : seuls les mots outils sont ignorés (« Sciences Po », « BUT TC » : « po », « tc » comptent)
-    if (!w || /^\d/.test(w) || (w.length < 3 && MOTS_COURTS.has(w))) return;
+    if (!w || /^\d/.test(w) || (w.length < 3 && MOTS_COURTS.has(w)) || w.length === 1) return;
     if (FORMATION_TERM_STOP.has(w) || MOTS_QUESTION.has(w) || info.geo.has(w) || couvert(w)) return;
+    if (_fichierCandidats && MOTS_FICHIER_CANDIDATS.has(w)) return;
     manque.push(w);
   });
   return [...new Set(manque)];
@@ -1990,7 +2196,7 @@ const REFORMULATIONS = [
    - « les lycées de Bordeaux », « combien d'universités » : établissements dont le nom contient « lycée » / « université » ;
    - « combien d'établissements / de lycées … », « nombre d'établissements par académie » : établissements différents. */
 const NOM_ETAB_RE = /\b(lycees?|universites?|iut|etablissements?)\b/;
-const COUPURES_ETAB = new Set('dans en a au aux pour par avec sur proposent propose proposant offrent offre qui ou et sont est ont combien quel quels quelles ayant en'.split(' '));
+const COUPURES_ETAB = new Set('dans en a au aux pour par avec sur proposent propose proposant offrent offre qui ou et sont est ont combien quel quels quelles ayant en admis admises acceptes acceptees affectes inscrits boursiers boursieres apprentis sans'.split(' '));
 const MOTS_LIENS_ETAB = new Set('de du des la le les l d'.split(' '));
 function _colEtablissement(table) {
   const headers = (table?.headers || []).filter(Boolean);
@@ -2007,13 +2213,40 @@ function _nomsEtablissements(table, col) {
   return (cache[col] = m);
 }
 // { col, nom, phrase, valeurs[normalisées], noms[originaux], type, introuvable } ou null
+// v27.5.53 — fichier de candidats : deux colonnes d'établissement, celui de SCOLARITÉ (« Etablissement de la scolarité »)
+// et celui d'ACCUEIL (« Etablissement d'accueil accepté »). « candidats du lycée Montaigne » = lycée d'origine ;
+// « admis au lycée Montaigne » = lycée d'accueil. Avant : aucune des deux n'était cherchée (« critère non reconnu »).
+const _ETAB_ROLE_RE = /^etablissement|^lycee|^universite/;
+function _colEtablissementRole(table, role) {
+  return (table?.headers || []).filter(Boolean).find(h => {
+    const x = _hx(h);
+    if (!_ETAB_ROLE_RE.test(x) || /code|uai|statut|academie|commune|departement|region|ministere|contrat|type|specialite|mention|groupe/.test(x)) return false;
+    return role === 'accueil' ? /accueil|accepte|affect|admis/.test(x) : /scolarite|origine/.test(x);
+  }) || null;
+}
+const _VERBE_ACCUEIL_RE = /\b(admis|admises?|acceptes?|acceptees?|accueillis|accueillies|affectes?|affectees?|inscrits?|inscrites?|etudi\w*|vont|partent|rejoign\w*|integr\w*|poursui\w*)\b/;
+function _colEtablissementQuestion(table, q, idx) {
+  const acc = _colEtablissementRole(table, 'accueil'), ori = _colEtablissementRole(table, 'origine');
+  if (!acc || !ori) return acc || ori;
+  const avant = q.slice(0, idx).trim();
+  if (/^\S+ (d |de l |de |des )?(accueil|acceptes?|acceptees?|d accueil)\b/.test(q.slice(idx).trim())) return acc;
+  if (/\bscolaris\w*\s+(au|aux|a|en|dans)( l| le| la| les)?$|\b(du|de|des|d|issus?|issues?|venant|provenant|originaires?)( l| le| la| les)?$/.test(avant)) return ori;
+  if (_VERBE_ACCUEIL_RE.test(avant)) return acc;
+  return ori;
+}
 function etablissementDeLaQuestion(table, question) {
   if (!table || !Array.isArray(table.objects) || !table.objects.length) return null;
-  const col = _colEtablissement(table);
-  if (!col) return null;
   const q = normalizeText(question || '');
   const m = q.match(NOM_ETAB_RE);
   if (!m) return null;
+  const col = _colEtablissement(table) || _colEtablissementQuestion(table, q, m.index);
+  if (!col) return null;
+  const _roleCol = col !== _colEtablissement(table);
+  // v27.5.53 — « par lycée », « répartition des lycées » : une dimension, pas un filtre (avant : « nom contenant lycée »,
+  // puis répartition selon une autre colonne)
+  if (/\bpar$/.test(q.slice(0, m.index).trim())) return null;
+  // « lycées agricoles / privés / professionnels » : un qualificatif traité par une autre colonne, pas un nom
+  if (_roleCol && /^(agricoles?|prives?|privees?|publi(c|cs|que|ques)|professionnels?|generaux|general|generale|technologiques?|polyvalents?)\b/.test(q.slice(m.index + m[0].length).trim())) return null;
   const nom = m[1];
   const apres = q.slice(m.index + m[0].length).trim().split(' ').filter(Boolean);
   const suite = [];
@@ -2029,6 +2262,9 @@ function etablissementDeLaQuestion(table, question) {
   const singulier = nom.replace(/s$/, '');
   if (!contenu.length) {
     if (generique) return null; // « établissements » sans nom : tous
+    // v27.5.53 — fichier de candidats, établissement de SCOLARITÉ : « les lycées » = tous les établissements d'origine
+    // (« LPO Louis de Foix », CFA, MFR… n'ont pas « lycée » dans leur nom : « lycées de Bordeaux » en perdait 169)
+    if (col !== _colEtablissement(table) && singulier === 'lycee' && /scolarite|origine/.test(_hx(col))) return { col, tousLycees: true };
     // type d'établissement : nom contenant « lycée », « université », « IUT »
     const valeurs = [...noms.keys()].filter(k => _compacte(k).split(' ').includes(singulier));
     return { col, nom: singulier, type: true, phrase: singulier, valeurs, noms: valeurs.map(k => noms.get(k)) };
@@ -2063,14 +2299,20 @@ function unresolvedEtablissementExecution(plan, e) {
 }
 // Un établissement = un nom dans une commune (« Lycée Gustave Eiffel » existe dans plusieurs villes)
 function _cleEtablissement(table, col) {
-  const commune = (table?.headers || []).find(h => /^(commune|ville)/.test(_hx(h)) && !/code|insee|postal|origine/.test(_hx(h)));
+  // la commune qui va avec cet établissement (accueil ↔ accueil, scolarité ↔ scolarité)
+  const _role = /accueil|accepte|affect|admis/.test(_hx(col)) ? 'accueil' : /scolarite|origine/.test(_hx(col)) ? 'origine' : '';
+  const _communes = (table?.headers || []).filter(h => /^(commune|ville)/.test(_hx(h)) && !/code|insee|postal/.test(_hx(h)));
+  const commune = (_role === 'accueil' ? _communes.find(h => /accueil|accepte|affect|admis/.test(_hx(h)))
+    : _role === 'origine' ? _communes.find(h => /scolarite|origine/.test(_hx(h))) : null)
+    || _communes.find(h => !/origine/.test(_hx(h)));
   return r => { const n = normalizeText(r?.[col]); return n ? `${n}|${commune ? normalizeText(r?.[commune]) : ''}` : ''; };
 }
 const COMPTER_ETAB_RE = /\b(?:combien|nombre)\s+(?:d\s+|de\s+|des\s+)?(etablissements?|lycees|universites|iut)\b/;
 function applyEtablissements(plan) {
   if (!plan || !plan.table || ['compare', 'chart_current', 'export_current_excel', 'export_current_csv'].includes(plan.tool)) return plan;
   const q = normalizeText(plan.question || '');
-  const e = etablissementDeLaQuestion(plan.table, plan.question);
+  let e = etablissementDeLaQuestion(plan.table, plan.question);
+  if (e && e.tousLycees) { plan.lyceesTous = e.col; e = null; }
   if (e) {
     if (e.introuvable) { plan.etablissementIntrouvable = e; return plan; }
     const ACCENTS = { lycee: 'lycée', universite: 'université', iut: 'IUT', etablissement: 'établissement' };
@@ -2079,7 +2321,10 @@ function applyEtablissements(plan) {
       ? `nom contenant « ${joli(e.nom)} » (${e.noms.length.toLocaleString('fr-FR')} établissements)`
       : e.noms.length <= 4 ? e.noms.map(x => `« ${x} »`).join(', ') : `${e.noms.length} établissements dont le nom contient « ${joli(e.phrase)} »`;
     const filtre = { col: e.col, op: 'in', values: e.valeurs, value: e.type ? e.nom : e.phrase, label: libelle, source: 'etablissement', noms: e.noms };
-    let filtres = (plan.filters || []).filter(f => f && f.col !== e.col);
+    // v27.5.53 — le même nom lu par le planner sur l'AUTRE colonne d'établissement (accueil ↔ scolarité) : retiré
+    // (avant : « candidats du lycée Montaigne » = scolarisés ET admis au lycée Montaigne)
+    const _autreEtab = f => f && f.op === 'eq' && f.col !== e.col && /^(etablissement|lycee|universite)/.test(_hx(f.col)) && (e.valeurs || []).concat([e.phrase]).some(v => normalizeText(f.value) === v || ` ${normalizeText(f.value)} `.includes(` ${e.phrase} `));
+    let filtres = (plan.filters || []).filter(f => f && f.col !== e.col && !_autreEtab(f));
     // un nom d'établissement n'est pas un intitulé de formation (« université »), ni un lieu (« Bordeaux » de « université de Bordeaux »)
     const motsNom = new Set(e.type ? [e.nom, e.nom + 's'] : e.motsNom);
     filtres = filtres.filter(f => {
@@ -2096,7 +2341,8 @@ function applyEtablissements(plan) {
     plan.etablissement = e;
   }
   if (COMPTER_ETAB_RE.test(q)) {
-    const col = _colEtablissement(plan.table);
+    const _m = q.match(COMPTER_ETAB_RE);
+    const col = _colEtablissement(plan.table) || (e && e.col) || _colEtablissementQuestion(plan.table, q, _m.index + _m[0].length - _m[1].length);
     if (col) {
       if (['group_by', 'top'].includes(plan.tool) && plan.targetCol && plan.targetCol !== col) plan.distinctCol = col;
       else if (['count_rows', 'sum', 'group_by', 'top'].includes(plan.tool)) { plan.tool = 'count_rows'; plan.compterEtablissements = col; plan.sumCol = null; }
@@ -2232,7 +2478,7 @@ function inferMeasureIntent(question) {
     if (_uniteFormation && /^formations?$/.test(d1.trim())) return 'group_by';
     if ((_isF(d1) && _isA(d2)) || (_isA(d1) && _isF(d2)) || (_isF(d1) && _isS(d2)) || (_isS(d1) && _isF(d2))) return 'pivot';
   }
-  if (/moyen|moyenne|median|m[eé]diane|minimum|maximum|\bmin\b|\bmax\b/.test(q)) return 'stats';
+  if (/moyen|moyenne|median|m[eé]diane|minimum|maximum|\bmin\b|\bmax\b/.test(q.replace(/\b(lycees?|colleges?|etablissements?|universites?) (max|min)\b/g, ' '))) return 'stats';
   // v27.24 — « taux d'accès des PASS », « taux d'accès au lycée Montaigne » : statistiques du taux (pas un comptage)
   if (/\btaux d ?acces\b/.test(q) && !/\b(combien|nombre|plus|moins|classement|top)\b|\b(inferieur|superieur|egal)\b/.test(q)) return 'stats';
   if (/top|classement|principales?|plus frequentes?|plus fréquentes?|les plus/.test(q)) return 'top';
@@ -2588,11 +2834,19 @@ function resolveRoleDuplicates(plan) {
     groupes.get(k).push(f);
   });
   const retirer = new Set();
-  groupes.forEach(g => {
+  // v27.5.53 — doublon = même valeur sur deux colonnes du MÊME genre (académie d'accueil / de scolarité = Bordeaux),
+  // jamais deux colonnes d'état différentes (« Apprenti = Oui » et « A répondu favorablement = Oui » : l'une était
+  // retirée, « combien d'apprentis admis en BTS » perdait le filtre apprenti)
+  const genre = c => (typeof plannerColumnKind === 'function') ? String(plannerColumnKind(c)).replace(/_(accueil|origine_nom)$/, '') : '';
+  groupes.forEach(g0 => {
+    const parGenre = new Map();
+    g0.forEach(f => { const k = genre(f.col); if (!parGenre.has(k)) parGenre.set(k, []); parGenre.get(k).push(f); });
+    parGenre.forEach(g => {
     const cols = new Set(g.map(f => f.col));
     if (cols.size < 2) return;
     const voulu = g.find(f => veutOrigine ? role(f.col).origine : role(f.col).accueil) || g[0];
     g.forEach(f => { if (f !== voulu) retirer.add(f); });
+    });
   });
   plan.filters = filters.filter(f => !retirer.has(f));
   return plan;
@@ -2640,6 +2894,17 @@ function _finalSanitizeAnalysisPlanBase(plan) {
   // compris dans la question sont conservés. Aucune mémoire n'est fusionnée.
   if (explicitFresh && !dimensionFollowUp && !filterFollowUp && !bareAction) {
     const strictCols = new Set(strict.map(f => f.col));
+    // v27.5.53 — mot d'intitulé déjà traduit par un filtre exact (« agricoles » → Ministère = Agriculture) : retiré
+    const _pref = w => w.slice(0, 5);
+    const _motsStrict = new Set(strict.flatMap(f => normalizeText(f.value).split(/[^a-z0-9]+/).filter(w => w.length >= 5).map(_pref)));
+    plan.filters = (plan.filters || []).filter(f => {
+      if (!(f && f.op === 'contains_all' && f.source === 'termes_formation')) return true;
+      const i = (f.terms || []).map((t, k) => ({ t, l: String(f.label || '').split(' + ')[k] })).filter(x => ![].concat(x.t).some(w => w.length >= 5 && _motsStrict.has(_pref(w))));
+      if (i.length === (f.terms || []).length) return true;
+      if (!i.length) return false;
+      Object.assign(f, { terms: i.map(x => x.t), label: i.map(x => x.l).join(' + '), value: i.map(x => x.l).join(' + ') });
+      return true;
+    });
     const kept = (plan.filters || []).filter(f => {
       if (!f || !f.col) return false;
       if (f.source === 'termes_formation') return true; // v27.7 — mots cités dans la question
@@ -3158,8 +3423,10 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     const cle = _cleEtablissement(plan.table, col);
     const distinct = new Set(rows.map(cle).filter(Boolean)).size;
     const tous = new Set((plan.table.objects || []).map(cle).filter(Boolean)).size;
-    const result = { count: distinct, total: tous, formations: rows.length, totalFormations: (plan.table.objects || []).length, etablissements: true, col };
-    const exec = { kind: 'count', plan, result, text: `ÉTABLISSEMENTS DIFFÉRENTS = ${distinct} (${rows.length} formations)`, html: renderDataEngineResultHtml('count_rows', plan, result) };
+    // v27.5.53 — fichier de candidats : une ligne = un candidat, pas une formation
+    const parCandidat = plan.table.rowUnit !== 'formation' && /scolarite|origine|accueil|accepte/.test(_hx(col));
+    const result = { count: distinct, total: tous, formations: rows.length, totalFormations: (plan.table.objects || []).length, etablissements: true, col, parCandidat };
+    const exec = { kind: 'count', plan, result, text: `ÉTABLISSEMENTS DIFFÉRENTS = ${distinct} (${rows.length} ${parCandidat ? 'candidats' : 'formations'})`, html: renderDataEngineResultHtml('count_rows', plan, result) };
     rememberDataEngineExecution(exec);
     return exec;
   }
@@ -3425,7 +3692,7 @@ function dataEngineResultToContext(exec) {
   const _perim = perimetreResultat(exec.kind, p, exec.result).texte;
   if (_perim) out += `${_perim}\n`;
   if (exec.kind === 'count') out += exec.result.etablissements === true
-    ? `Résultat : ${exec.result.count} établissement(s) différent(s) (qui proposent ${exec.result.formations} formation(s)) — ce n'est pas un nombre de formations.\n`
+    ? (exec.result.parCandidat ? `Résultat : ${exec.result.count} établissement(s) différent(s) (pour ${exec.result.formations} candidat(s)) — ce n'est pas un nombre de candidats.\n` : `Résultat : ${exec.result.count} établissement(s) différent(s) (qui proposent ${exec.result.formations} formation(s)) — ce n'est pas un nombre de formations.\n`)
     : `Résultat : ${exec.result.count} ligne(s) sur ${exec.result.total}.\n`;
   if (exec.kind === 'sum') out += `Résultat : ${exec.result.sum} ${exec.result.unite} (somme de « ${exec.result.col} ») sur ${exec.result.count} formation(s).\n`;
   if (exec.kind === 'evolution_groupes') {
@@ -3508,6 +3775,7 @@ const _VALEURS_ETAT = { oui: 'oui', vrai: 'oui', true: 'oui', '1': 'oui', non: '
 function _filtreEnClair(f) {
   if (!f) return '';
   if (f.op === 'in') return `« ${f.col} » : ${f.label || f.value}`;
+  if (f.op === 'contains_words') return `« ${f.col} » contient « ${f.label || f.value} »`;
   if (f.op === 'contains_all') {
     const mots = String(f.label || f.value || '').split(' + ').filter(Boolean).map(t => `« ${t} »`);
     return `intitulé de formation contenant ${mots.join(' et ')}`;
@@ -3555,6 +3823,12 @@ function perimetreResultat(kind, plan, result) {
     notes.push(`chiffres = somme de « ${result.somme.col} » (${result.somme.unite}) par groupe, pas un nombre de ${mot(2)}`);
     if (result.somme.sansValeur > 0) notes.push(`${_nf(result.somme.sansValeur)} ${mot(result.somme.sansValeur)} sans valeur dans « ${result.somme.col} », non comptée${result.somme.sansValeur > 1 ? 's' : ''}`);
   }
+  // v27.5.53 — « pourcentage de candidats sans proposition par département » : la répartition donne la part de chaque
+  // département DANS le total retenu, pas le taux à l'intérieur de chaque département. Dit en clair, pour ne pas lire
+  // « Gironde : 50 % » comme « la moitié des candidats de Gironde ».
+  if ((kind === 'group_by' || kind === 'top') && !result.somme && !result.etablissements && PART_CUE.test(normalizeText(plan.question || '')) && /\bpar (?!rapport)\w/.test(normalizeText(plan.question || ''))) {
+    notes.push(`les pourcentages indiquent la part de chaque groupe dans les ${_nf(result.filled ?? result.total)} ${mot(2)} retenues, pas un taux calculé à l'intérieur de chaque groupe (pour un taux, demandez-le groupe par groupe : « … en Gironde »)`);
+  }
   if ((kind === 'group_by' || kind === 'top') && !plan.listMode) {
     const vides = (result.total || 0) - (result.filled ?? result.total ?? 0);
     if (vides > 0) notes.push(`${_nf(vides)} ${mot(vides)} sans valeur dans « ${plan.targetCol} »`);
@@ -3585,8 +3859,9 @@ function perimetreResultat(kind, plan, result) {
     }
   }
   // v27.23 — établissements
-  if (result.etablissements === true) notes.push(`le chiffre compte des établissements différents (${_nf(result.count)}), pas des formations (${_nf(result.formations)})`);
+  if (result.etablissements === true) notes.push(result.parCandidat ? `le chiffre compte des établissements différents (${_nf(result.count)}), pas des candidats (${_nf(result.formations)})` : `le chiffre compte des établissements différents (${_nf(result.count)}), pas des formations (${_nf(result.formations)})`);
   if (result.etablissements && result.etablissements !== true) notes.push(`chiffres = nombre d'établissements différents par groupe, pas un nombre de formations`);
+  if (plan.lyceesTous) notes.push(`« lycées » = tous les établissements de scolarité du fichier (colonne « ${plan.lyceesTous} » : lycées, mais aussi CFA, maisons familiales rurales…)`);
   const fe = filtres.find(f => f.op === 'in' && f.source === 'etablissement');
   if (fe && !plan.etablissement?.type) {
     // établissements réellement retenus : nom + commune (homonymes dans plusieurs villes)
@@ -3670,7 +3945,9 @@ function renderDataEngineResultHtml(tool, plan, result) {
     const clearTitle = (typeof extractBlockTitle === 'function') ? extractBlockTitle({ plan, result }, '') : 'Comptage';
     // v27.23 — établissements différents (« combien de lycées proposent des BTS »)
     const phrase = result.etablissements
-      ? `Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ${result.count > 1 ? 'établissements différents' : 'établissement'} correspondant à la demande, qui proposent <strong>${result.formations.toLocaleString('fr-FR')}</strong> formation${result.formations > 1 ? 's' : ''} (sur ${result.total.toLocaleString('fr-FR')} établissements dans les données).`
+      ? (result.parCandidat
+        ? `Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ${result.count > 1 ? 'établissements différents' : 'établissement'} correspondant à la demande, pour <strong>${result.formations.toLocaleString('fr-FR')}</strong> candidat${result.formations > 1 ? 's' : ''} (sur ${result.total.toLocaleString('fr-FR')} établissements dans le fichier).`
+        : `Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ${result.count > 1 ? 'établissements différents' : 'établissement'} correspondant à la demande, qui proposent <strong>${result.formations.toLocaleString('fr-FR')}</strong> formation${result.formations > 1 ? 's' : ''} (sur ${result.total.toLocaleString('fr-FR')} établissements dans les données).`)
       : `Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ${unit(result.count)} correspondant à la demande (${pct} du jeu de données).`;
     return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}${perim}<p>${phrase}</p><p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
   }

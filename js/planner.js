@@ -284,7 +284,8 @@
     if (['zone_basque', 'bac_series', 'boursier', 'apprentissage', 'sexe'].includes(k)) return k;
     if (k === 'academie') return entry.role?.accueil ? 'academie_accueil' : (entry.role?.origine ? 'academie_origine' : 'academie');
     if (k === 'formation') return entry.role?.accueil ? 'formation_accueil' : 'formation';
-    if (k === 'admission') return 'admission';
+    // v27.5.53 — « A eu une proposition » et « A répondu favorablement » : deux informations distinctes, deux filtres possibles
+    if (k === 'admission') return /proposition/.test(entry.norm || '') && !/repondu|favorabl|accept/.test(entry.norm || '') ? 'admission_proposition' : 'admission';
     return `${k}:${entry.column}`;
   }
 
@@ -359,7 +360,11 @@
       if (/general|generale|s[eé]rie generale/.test(v)) add('général','generale','générale','bac général','bac generale','voie générale','voie generale','serie generale','série générale','bac g');
       if (/professionnel|professionnelle|\bpro\b/.test(v)) add('professionnel','professionnelle','bac pro','bac professionnel','voie professionnelle','serie professionnelle');
       if (/technologique|techno|stmg|sti2d|std2a|stl|st2s|stav|s2tmd/.test(v)) add('technologique','techno','bac techno','bac technologique','voie technologique','serie technologique');
-      ['stmg','sti2d','std2a','stl','st2s','stav','s2tmd'].forEach(x => { if (v.includes(x)) add(x); });
+      ['stmg','sti2d','std2a','stl','st2s','stav','s2tmd','sthr'].forEach(x => { if (new RegExp(`\\b${x}\\b`).test(v)) add(x); });
+      // v27.5.53 — séries écrites en toutes lettres (« Sciences et Technologies du Management et de la Gestion ») : leur sigle
+      [[/management.*gestion/, 'stmg'], [/industrie.*developpement durable/, 'sti2d'], [/design.*arts? appliqu/, 'std2a'],
+       [/technologies? de laboratoire|technologie de laboratoire/, 'stl'], [/sante.*social/, 'st2s'], [/agronomie.*vivant/, 'stav'],
+       [/theatre.*musique.*danse/, 's2tmd'], [/hotellerie.*restauration/, 'sthr']].forEach(([re, x]) => { if (re.test(v)) add(x, `bac ${x}`, `serie ${x}`); });
     }
 
     if (entry.kind === 'formation') {
@@ -403,6 +408,8 @@
   function aliasMatchScore(q, alias) {
     const a = nrm(alias);
     if (!a || a.length < 2) return 0;
+    // v27.5.53 — alias court (sigle) : mot entier (« stav » est dans « Gustave », « but » dans « début »)
+    if (a.length <= 5 && !new RegExp(`(^|[^a-z0-9])${a.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}s?([^a-z0-9]|$)`).test(q)) return 0;
     if (q.includes(a)) {
       // bonus aux expressions exactes longues.
       return Math.min(120, 45 + a.length * 2);
@@ -412,6 +419,10 @@
     return 0;
   }
 
+  // v27.5.53 — une valeur de la colonne citée telle quelle (mots entiers, 4 lettres au moins)
+  function valeurCitee(entry, q) {
+    return (entry.values || []).some(v => { const n = nrm(v.value); return n.length >= 4 && ` ${q} `.includes(` ${n} `); });
+  }
   function contextScore(entry, q) {
     let s = columnPriority(entry, q) / 4;
     const k = entry.kind;
@@ -423,7 +434,7 @@
     if (k === 'admission' && /(admis|admission|accept|favorable|proposition acceptee|réponse favorable|reponse favorable)/.test(q)) s += 80;
     if (k === 'apprentissage' && /(apprenti|apprentissage)/.test(q)) s += 80;
     if (k === 'sexe' && /(sexe|genre|homme|femme|masculin|feminin|féminin|\bfilles?\b|gar[cç]ons?|\bcandidates\b)/.test(q)) s += 60;
-    if (k === 'departement' && /(departement|département|gironde|landes|pyrenees|pyrénées)/.test(q)) s += 60;
+    if (k === 'departement' && (/(departement|département|gironde|landes|pyrenees|pyrénées)/.test(q) || valeurCitee(entry, q))) s += 60;
     if (k === 'commune' && /(commune|ville)/.test(q)) s += 55;
     return s;
   }
@@ -463,7 +474,8 @@
     if (k === 'bac_series') return /(bac|serie|série|voie|general|generale|professionnel|technologique|techno|stmg|sti2d|std2a|stl|st2s|stav|s2tmd)/.test(q);
     if (k === 'formation') return /(formation|but|dut|bts|licence|cpge|prepa|pr[eé]pa|iut|filiere|filière|sp[eé]cialit[eé]|mention)/.test(q);
     if (k === 'academie') return /academie|académie|academique|bordeaux|toulouse|poitiers|limoges/.test(q);
-    if (k === 'departement') return /departement|département|gironde|landes|pyrenees|pyrénées/.test(q);
+    // v27.5.53 — tout département présent dans la colonne (« Dordogne », « Lot-et-Garonne » n'étaient pas reconnus)
+    if (k === 'departement') return /departement|département|gironde|landes|pyrenees|pyrénées/.test(q) || valeurCitee(entry, q);
     if (k === 'commune') return /commune|ville/.test(q);
     if (k === 'sexe') return /sexe|genre|homme|femme|masculin|feminin|féminin|fille|garcon|garçon|\bcandidates\b/.test(q);
     if (k === 'voeu') return /voeu|voeux|vœu|vœux/.test(q);
@@ -594,9 +606,29 @@
     }
 
     // Bac / série.
-    const bacRegex = /(bac\s+general|bac\s+g[eé]n[eé]ral|voie\s+generale|voie\s+g[eé]n[eé]rale|serie\s+generale|s[eé]rie\s+g[eé]n[eé]rale|bac\s+pro|bac\s+professionnel|professionnel|technologique|bac\s+techno|stmg|sti2d|std2a|stl|st2s|stav|s2tmd)/;
+    const bacRegex = /(bac\s+general|bac\s+g[eé]n[eé]ral|voie\s+generale|voie\s+g[eé]n[eé]rale|serie\s+generale|s[eé]rie\s+g[eé]n[eé]rale|bac\s+pro|bac\s+professionnel|professionnel|technologique|bac\s+techno|stmg|sti2d|std2a|stl|st2s|stav|s2tmd|sthr)/;
     if (bacRegex.test(q)) {
-      const e = bestColumn(schema, x => x.kind === 'bac_series', q);
+      // v27.5.53 — deux colonnes de série (« Type de la classe » : Générale / Technologique / Professionnelle, et
+      // « Série de la Classe » : STMG, STI2D…) : on prend celle qui a la valeur demandée, de préférence à l'identique
+      // (avant : « bac technologique » = la seule série STMG, 3 427 au lieu de 6 388 ; « STMG » perdait son filtre)
+      const _bacCols = schema.columns.filter(x => x.kind === 'bac_series')
+        .map(x => ({ x, s: columnPriority(x, q) + contextScore(x, q) })).sort((a, b) => b.s - a.s).map(o => o.x);
+      const _voulu = /(general|g[eé]n[eé]ral|generale|g[eé]n[eé]rale)/.test(q) ? ['generale','générale','general','bac general','serie generale']
+        : /professionnel|bac\s+pro/.test(q) ? ['professionnelle','professionnel','bac pro','serie professionnelle']
+        : /technologique|techno/.test(q) ? ['technologique','bac techno','serie technologique']
+        : [['stmg','sti2d','std2a','stl','st2s','stav','s2tmd','sthr'].find(x => new RegExp(`\\b${x}\\b`).test(q)) || '__'];
+      // à l'identique dans plusieurs colonnes (« Professionnelle ») : la plus large, celle qui a le moins de valeurs
+      // (« bac pro » = Type de la classe Professionnelle, bacs pro agricoles compris : 10 019, pas 8 507)
+      const _exacte = _bacCols.filter(x => (x.values || []).some(v => _voulu.includes(nrm(v.value))))
+        .sort((a, b) => (a.values || []).length - (b.values || []).length)[0];
+      const _avec = _bacCols.find(x => findValue(x, _voulu));
+      // une valeur de plusieurs mots citée telle quelle (« voie professionnelle agricole ») l'emporte
+      let _phrase = null;
+      // (masculin / féminin confondus : la question est réécrite « bac professionnel agricole »)
+      const _genre = t => t.replace(/\bbac pro\b/g, 'professionnel').replace(/professionnelle/g, 'professionnel').replace(/generale/g, 'general');
+      _bacCols.forEach(x => (x.values || []).forEach(v => { const n = nrm(v.value); if (n.includes(' ') && !/^serie /.test(n) && ` ${_genre(q)} `.includes(` ${_genre(n)} `) && (!_phrase || n.length > _phrase.n.length)) _phrase = { x, v, n }; }));
+      if (_phrase) upsertCandidateFilter(filters, { entry: _phrase.x, item: _phrase.v, alias: _phrase.n, op: 'eq', score: 270 }, reasons);
+      const e = _phrase ? null : (_exacte || _avec || _bacCols[0] || null);
       if (e) {
         let wanted = [];
         let label = '';
@@ -604,7 +636,7 @@
         else if (/professionnel|bac\s+pro/.test(q)) { wanted = ['professionnelle','professionnel','bac pro','serie professionnelle']; label = 'bac professionnel'; }
         else if (/technologique|techno/.test(q)) { wanted = ['technologique','bac techno','serie technologique']; label = 'bac technologique'; }
         else {
-          const short = ['stmg','sti2d','std2a','stl','st2s','stav','s2tmd'].find(x => q.includes(x));
+          const short = ['stmg','sti2d','std2a','stl','st2s','stav','s2tmd','sthr'].find(x => new RegExp(`\\b${x}\\b`).test(q));
           if (short) { wanted = [short]; label = short.toUpperCase(); }
         }
         const v = findValue(e, wanted);
@@ -671,6 +703,19 @@
       }
     }
 
+    // v27.5.53 — « ont eu une proposition », « sans proposition », « taux de proposition » : colonne « A eu une proposition
+    // au cours de la procédure (Oui/Non) », distincte de « A répondu favorablement à une proposition » (avant : filtre perdu,
+    // « combien de candidats ont eu une proposition » donnait tout le fichier)
+    // (« ont eu une proposition mais ne l'ont pas acceptée » : les deux colonnes)
+    if (/\bpropositions?\b/.test(q) && (!/(accept|favorabl|repondu|r[eé]pondu|\badmis)/.test(q) || /\b(eu|recu|recus|obtenu|obtenus)\b[^.]{0,15}\bpropositions?\b/.test(q))) {
+      const e = bestColumn(schema, x => x.kind === 'admission' && /proposition/.test(x.norm) && !/repondu|favorabl|accept/.test(x.norm), q);
+      if (e) {
+        const sans = /\b(sans|aucune|jamais)\b[^.]{0,20}\bpropositions?\b|\bpas (eu )?(de|d)\s+propositions?\b|\bn ont (pas|jamais|eu aucune|recu aucune)\b|\bpas (eu|recu|obtenu)\b/.test(q);
+        const v = booleanValue(e, !sans);
+        if (v) upsertCandidateFilter(filters, { entry: e, item: v, alias: sans ? 'sans proposition' : 'a eu une proposition', op: 'eq', score: 300 }, reasons);
+      }
+    }
+
     // Accepté / admis / réponse favorable.
     if (/(admis|admise|admission|accept[eé]|acceptee|réponse favorable|reponse favorable|proposition accept[eé]e|proposition acceptee)/.test(q)) {
       // Ne déclencher que si la question parle d'un statut candidat, pas seulement d'une colonne formation d'accueil acceptée.
@@ -691,7 +736,7 @@
     const q = nrm(question);
     if (/export|excel|xlsx|csv|telecharg|t[eé]l[eé]charg|liste|extraire|extrait|sors moi|sort moi/.test(q)) return /\bcsv\b/.test(q) ? 'export_csv' : 'export_excel';
     if (/croise|crois[eé]|tableau croise|pivot/.test(q)) return 'pivot';
-    if (/moyen|moyenne|median|m[eé]diane|minimum|maximum|\bmin\b|\bmax\b/.test(q)) return 'stats';
+    if (/moyen|moyenne|median|m[eé]diane|minimum|maximum|\bmin\b|\bmax\b/.test(q.replace(/\b(lycees?|colleges?|etablissements?|universites?) (max|min)\b/g, ' '))) return 'stats';
     if (/top|classement|principales?|principaux|plus frequentes?|plus fréquentes?|les plus/.test(q)) return 'top';
     if (/repartition|r[eé]partition|ventilation|par\s+|group[eé]|pourcentage|proportion/.test(q) && !/combien|nombre|effectif/.test(q)) return 'group_by';
     if (/combien|nombre|effectif|compte|compter|total/.test(q)) return 'count_rows';
@@ -719,7 +764,8 @@
         if (/academie|academique/.test(ph) && e.kind === 'academie') s += e.role.accueil ? 140 : 45;
         if (/serie|bac/.test(ph) && e.kind === 'bac_series') {
           // Si "cpge/prépa" est dans la question, "série" désigne les mentions CPGE, pas la série de bac
-          s += /cpge|prepa|pr[eé]pa/.test(q) ? 30 : 140;
+          // v27.5.53 — « les formations les plus demandées par les bac pro » : le bac est le filtre, la formation la colonne
+          s += /cpge|prepa|pr[eé]pa/.test(q) ? 30 : (!/serie/.test(ph) && /\bformations?\b|filieres?|mentions?/.test(ph)) ? 20 : 140;
         }
         // v27.10 — « Statut de l'établissement de la filière de formation (public, privé…) » n'est pas une colonne de formation
         if (/formation|filiere|specialite|mention|groupe|but|dut|bts|licence|cpge/.test(ph) && e.kind === 'formation' && !/^(statut|secteur)\b/.test(e.norm)) {
@@ -727,6 +773,13 @@
           s += (/serie/.test(ph) && /cpge|prepa|pr[eé]pa/.test(q)) ? 160 : 125;
         }
         if (/etablissement|universite|lycee|cfa|iut/.test(ph) && e.kind === 'etablissement') s += e.role.accueil ? 180 : 105;
+        // v27.5.53 — fichier de candidats : « par lycée » = lycée de scolarité ; « par établissement d'accueil » = accueil
+        if (/etablissement|universite|lycee|cfa|iut/.test(ph) && (e.kind === 'etablissement_origine_nom' || e.kind === 'etablissement_accueil')) {
+          const versAccueil = /accueil|accept|admis|affect|universite|iut/.test(ph);
+          s += (e.kind === 'etablissement_accueil') === versAccueil ? 190 : 100;
+        }
+        // une colonne dont le nom contient tous les mots demandés (« type de contrat ») passe devant une autre qui n'en a qu'un (« type de la classe »)
+        if (phraseTokens.length >= 2 && phraseTokens.every(t => ctoks.includes(t))) s += 200;
         if (/etablissement/.test(ph) && e.kind === 'academie') s -= 120;
         if (/departement/.test(ph) && e.kind === 'departement') s += 125;
         if (/commune|ville/.test(ph) && e.kind === 'commune') s += 110;
@@ -785,7 +838,8 @@
         .sort((a,b) => (columnPriority(b, q) + contextScore(b, q)) - (columnPriority(a, q) + contextScore(a, q)))[0];
       if (voeu) return voeu.column;
     }
-    const parMatch = q.match(/(?:par|selon|repartition par|répartition par|top\s+\d*\s*(?:des|de)?|principaux|principales)\s+([a-z0-9 ]{3,100})/);
+    // v27.5.53 — « demandées par les bac pro » : « par les / des … » désigne qui, pas une dimension (« par série »)
+    const parMatch = q.match(/(?:par(?!\s+(?:les|des|le|la|l)\s)|selon|repartition par|répartition par|top\s+\d*\s*(?:des|de)?|principaux|principales)\s+([a-z0-9 ]{3,100})/);
     const phrase = parMatch ? parMatch[1] : q;
     // v27.10 — « par couleur » : aucune colonne ne correspond → null (le moteur le dit), pas l'académie par défaut
     return targetColumnForPhrase(schema, phrase, q, tool, filters, [], !!parMatch && /^(?:.*\s)?(?:par|selon)\s/.test(q) && tool !== 'pivot');
@@ -841,6 +895,8 @@
       if (c.score < 95 && !valeurEntiere) return;
       // Ne pas ajouter un filtre si une règle sûre de même famille existe déjà.
       if (filters.some(f => f.semanticKey === semanticKey(c.entry))) return;
+      // « A eu une proposition » : seulement par la règle dédiée (« accepté une proposition » ne la vise pas)
+      if (semanticKey(c.entry) === 'admission_proposition') return;
       // Pour académie/commune/département, exiger un contexte suffisant.
       if (['academie','commune','departement','etablissement'].includes(c.entry.kind) && contextScore(c.entry, q) < 65) return;
       upsertCandidateFilter(filters, c, reasons);
