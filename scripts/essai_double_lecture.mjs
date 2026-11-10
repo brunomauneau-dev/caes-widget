@@ -185,17 +185,44 @@ export function ecartLecture(att, obt) {
   }
   return null;
 }
-// deux lectures (Albert / moteur) : même opération, même objet, même regroupement, mêmes familles de filtres
+// Alerte = désaccord IMPORTANT entre Albert et le moteur (ce qui serait montré à l'agent). Pas d'alerte quand le
+// moteur en dit plus (« admis en BTS » : il ajoute « a accepté » ; « lycées » : nom contenant lycée), ni pour la
+// condition d'une part ou le critère d'un classement (Albert les range parfois parmi les filtres).
+const GEO = /^(commune|departement|academie|region|etablissement)/;
+const _equiv = f => ({ specialite_lycee: 'formation' }[f.replace(/:(ori|acc)$/, '')] || f.replace(/:ori$/, ''));
+const _opsProches = (a, m) => a === m
+  || (a === 'liste' && m === 'repartition') || (a === 'repartition' && m === 'liste')
+  || (a === 'somme' && m === 'repartition') || (a === 'repartition' && m === 'somme')
+  || (a === 'repartition' && m === 'classement') || (a === 'classement' && m === 'repartition');
 export function desaccord(a, m) {
   if (!a || !m) return 'lecture manquante';
-  if (a.op !== m.op) return `opération : Albert ${a.op}, moteur ${m.op}`;
-  if ((a.objet || null) && (m.objet || null) && nrm(a.objet) !== nrm(m.objet)) return `objet : Albert ${a.objet}, moteur ${m.objet}`;
-  if ((a.groupe || '') !== (m.groupe || '') && !famillesEgales(a.groupe || '', m.groupe || '')) return `regroupement : Albert ${a.groupe || '—'}, moteur ${m.groupe || '—'}`;
-  const fams = o => Object.keys(o || {}).map(x => x.replace(/:ori$/, '')).sort().join(',');
-  if (!['comparaison', 'pdf', 'evolution'].includes(m.op)) {
-    if (fams(a.filtres) !== fams(m.filtres)) return `filtres : Albert {${fams(a.filtres)}}, moteur {${fams(m.filtres)}}`;
-    if (fams(a.exclus) !== fams(m.exclus)) return `exclusions : Albert {${fams(a.exclus)}}, moteur {${fams(m.exclus)}}`;
+  if (['arret', 'albert', 'erreur'].includes(m.op)) return null; // pas de chiffre donné : rien à signaler
+  // le moteur détaille davantage (répartition, taux par groupe) quand Albert ne voit qu'un total : pas d'alerte
+  const moteurDetaille = m.groupe && !a.groupe && ['compter', 'somme', 'statistique', 'part'].includes(a.op);
+  if (!_opsProches(a.op, m.op) && !moteurDetaille) return `opération : Albert ${a.op}, moteur ${m.op}`;
+  if (a.op === 'compter_distinct' && m.op === 'compter_distinct' && a.objet && m.objet && nrm(a.objet).replace(/s$/, '') !== nrm(m.objet).replace(/s$/, '')) return `objet : Albert ${a.objet}, moteur ${m.objet}`;
+  if (['comparaison', 'pdf', 'evolution', 'export'].includes(m.op)) return null;
+  if (m.op === 'part' || m.op === 'classement') {
+    // seulement un lieu / une formation de la question oubliés par le moteur
+    const fa = Object.keys(a.filtres || {}).map(_equiv).filter(f => GEO.test(f) || f === 'formation');
+    const fm = new Set(Object.keys(m.filtres || {}).map(_equiv));
+    const manque = fa.filter(f => !fm.has(f) && f !== _equiv(m.groupe || ''));
+    return manque.length ? `critère oublié par le moteur : ${manque.join(', ')}` : null;
   }
+  // critère cité par Albert, absent du moteur
+  const fm = new Set(Object.keys(m.filtres || {}).map(_equiv));
+  const manque = Object.keys(a.filtres || {}).map(_equiv).filter(f => !fm.has(f) && f !== _equiv(m.groupe || '') && f !== 'admission');
+  if (manque.length) return `critère oublié par le moteur : ${[...new Set(manque)].join(', ')}`;
+  // valeur de lieu / d'établissement oubliée (« à Bordeaux ou à Pau » : Pau)
+  for (const [f, vals] of Object.entries(a.filtres || {})) {
+    if (!GEO.test(_equiv(f))) continue;
+    const cle = Object.keys(m.filtres || {}).find(x => _equiv(x) === _equiv(f));
+    const texte = (m.filtres[cle] || []).flat().map(nrm).join(' | ');
+    const oubli = vals.flat().map(nrm).filter(v => v && !v.split(' ').some(w => w.length >= 3 && texte.includes(w)));
+    if (oubli.length) return `valeur oubliée par le moteur : ${oubli.join(', ')}`;
+  }
+  // exclusion vue par Albert, aucune exclusion dans le moteur
+  if (Object.keys(a.exclus || {}).length && !Object.keys(m.exclus || {}).length) return `exclusion oubliée par le moteur : ${Object.keys(a.exclus).join(', ')}`;
   return null;
 }
 
@@ -328,15 +355,15 @@ export function bilan(res) {
 }
 export function rapportDoubleLecture(res, b) {
   const pct = (a, n) => n ? `${Math.round(a / n * 100)} %` : '—';
-  const l = ['# Essai double lecture (Albert)', '',
+  const l = ['# Essai double lecture (Albert)', '', `Modèle : ${MODELE}`, '',
     `${b.questions} questions · Albert a répondu à ${b.albertRepond} (${b.albertErreurs} erreurs d'appel) · délai médian ${b.delaiMedianMs ?? '—'} ms, max ${b.delaiMaxMs ?? '—'} ms`, '',
     '## Résumé', '', '| | Chiffres faux du moteur (contresens) | … signalés par Albert (rattrapés) | Lectures justes du moteur | … signalées à tort (fausses alertes) | Arrêts / laissés à Albert |', '|---|---|---|---|---|---|'];
   if (b.ancien) l.push(`| Ancien moteur | ${b.ancien.faux} | ${b.ancien.rattrapes} (${pct(b.ancien.rattrapes, b.ancien.faux)}) | ${b.ancien.justes} | ${b.ancien.faussesAlertes} (${pct(b.ancien.faussesAlertes, b.ancien.justes)}) | ${b.ancien.sansChiffre} |`);
   l.push(`| Moteur actuel | ${b.actuel.faux} | ${b.actuel.rattrapes} (${pct(b.actuel.rattrapes, b.actuel.faux)}) | ${b.actuel.justes} | ${b.actuel.faussesAlertes} (${pct(b.actuel.faussesAlertes, b.actuel.justes)}) | ${b.actuel.sansChiffre} |`);
   l.push('', `Lecture d'Albert juste (comparée à l'attendu) : ${b.albertJuste} / ${b.albertRepond} (${pct(b.albertJuste, b.albertRepond)}).`, '',
-    '## Détail', '', '| Question | Ancien moteur | Moteur actuel | Albert | Alerte (actuel) |', '|---|---|---|---|---|');
+    '## Détail', '', '| Question | Ancien moteur | Alerte (ancien) | Moteur actuel | Albert | Alerte (actuel) |', '|---|---|---|---|---|---|');
   const c = s => String(s ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
-  res.forEach(r => l.push(`| ${c(r.question)} | ${r.ancien ? (r.ancien.ecart ? `❌ ${c(r.ancien.ecart)}` : '✅') : '—'} | ${r.actuel.ecart ? `❌ ${c(r.actuel.ecart)}` : '✅'} | ${r.albert.lecture ? (r.albert.ecart ? `❌ ${c(r.albert.ecart)}` : '✅') : `⚠️ ${c(r.albert.erreur)}`} | ${r.alerteActuel ? `🔔 ${c(r.alerteActuel)}` : ''} |`));
+  res.forEach(r => l.push(`| ${c(r.question)} | ${r.ancien ? (r.ancien.ecart ? `❌ ${c(r.ancien.ecart)}` : '✅') : '—'} | ${r.alerteAncien ? `🔔 ${c(r.alerteAncien)}` : ''} | ${r.actuel.ecart ? `❌ ${c(r.actuel.ecart)}` : '✅'} | ${r.albert.lecture ? (r.albert.ecart ? `❌ ${c(r.albert.ecart)}` : '✅') : `⚠️ ${c(r.albert.erreur)}`} | ${r.alerteActuel ? `🔔 ${c(r.alerteActuel)}` : ''} |`));
   return l.join('\n');
 }
 
@@ -352,4 +379,6 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   fs.writeFileSync('double_lecture.json', JSON.stringify({ bilan: b, resultats: res }, null, 1));
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, texte + '\n');
   console.log(texte);
+  // lectures d'Albert, une par ligne (pour l'analyse, sans télécharger l'artefact)
+  res.forEach(r => console.log(`LECTURE ${r.id} ${JSON.stringify({ albert: r.albert.lecture || r.albert.erreur, moteur: r.actuel.lecture })}`));
 }
