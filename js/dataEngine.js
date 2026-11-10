@@ -149,14 +149,19 @@ function isExplicitFreshDataQuestion(question) {
   if (!/^(combien|nombre|effectif|total|quelle est|quel est|moyenne|nombre moyen|top|classement|repartition|r[eé]partition|tableau crois[eé]|croise|pivot)/.test(q)) return false;
   // "combien sont-ils ?", "combien y en a-t-il ?" = bare count follow-up → hérite du contexte
   if (/^combien\s+(sont[- ]ils|y\s*(?:en\s+)?a[- ]?t[- ]?il|en tout|au total|maintenant|cela|ca|[cç]a)\s*\??$/.test(q)) return false;
+  if (RELANCE_SOUS_ENSEMBLE.test(q)) return false; // « combien ont eu une proposition ? » : les mêmes candidats
   return true;
 }
 
 const RELANCE_LESQUELS = /^(lesquel(?:le)?s|lesquels|quel(?:le)?s sont[- ]?(?:elles|ils)|ou sont[- ]?(?:elles|ils)|ou se trouvent[- ]?(?:elles|ils)|ou ca|lesquelles sont|lesquels sont)\b/;
 // v27.25 — « et l'an dernier ? », « et en 2024 ? » : la même question sur une autre session
 const RELANCE_SESSION = /^(?:et\s+)?(?:pour\s+|en\s+|a\s+|sur\s+)?(?:l an dernier|l annee derniere|l annee precedente|la session precedente|l an passe|l annee passee|20[12]\d|la session 20[12]\d)\s*\??$/;
+// v27.5.56 — « combien ont eu une proposition ? », « et parmi eux combien de boursiers ? », « dont combien de filles ? » :
+// une partie de la population précédente (avant : la question repartait de tout le fichier, ou « eux » était inconnu)
+const RELANCE_SOUS_ENSEMBLE = /^(?:et\s+)?(?:parmi\s+(?:eux|elles|ceux ci|celles ci|ces \w+)|dont|combien\s+(?:d\s+entre\s+(?:eux|elles)|parmi\s+(?:eux|elles)|ont|sont|avaient|etaient|n\s+ont)|ceux qui|celles qui|et combien)\b/;
 function isFilterOnlyFollowUp(question) {
   const q = normalizeText(question || '').trim();
+  if (RELANCE_SOUS_ENSEMBLE.test(q) && !/^combien\s+sont[- ]?(ils|elles)\s*\??$/.test(q)) return true;
   if (/^combien\s+(sont[- ]ils|y\s*(?:en\s+)?a[- ]?t[- ]?il|en tout|au total|maintenant|cela|ca|[cç]a)\s*\??$/.test(q)) return true;
   // v27.25 — « lesquelles sont à Bordeaux ? », « quels sont-ils ? », « où sont-elles ? » : les mêmes, détaillés
   if (RELANCE_LESQUELS.test(q)) return true;
@@ -654,6 +659,13 @@ function inheritConversationContext(plan, question) {
     } else if (dimensionFollowUp) {
       plan.tool = 'group_by';
       if (!plan.targetCol && prev.targetCol && !plan.dimensionIntrouvable) plan.targetCol = prev.targetCol;
+    } else if (filterFollowUp && RELANCE_SOUS_ENSEMBLE.test(q) && !['compare'].includes(prev.tool)) {
+      // v27.5.56 — sous-population : les filtres précédents + ceux de cette question ; l'outil est celui de la question
+      const _strict = strictFiltersFromQuestion(plan.table, question);
+      const _colsNouvelles = new Set([..._strict, ..._filtresPlanner].filter(f => f && f.op !== 'contains_all').map(f => f.col));
+      const _prevGardes = prevKept.filter(f => !(f && f.op !== 'contains_all' && _colsNouvelles.has(f.col)));
+      plan.filters = mergeFiltersUnique(mergeFiltersUnique(_prevGardes, _strict), _filtresPlanner);
+      plan.sousEnsemble = true;
     } else if (filterFollowUp && RELANCE_LESQUELS.test(q)) {
       // « lesquelles sont à Bordeaux ? » : les formations retenues, détaillées par établissement
       const etab = _colEtablissement(plan.table || prev.table);
@@ -1434,7 +1446,7 @@ const CLASSEMENT_ENTITES = [
   { re: /regions?/, col: h => /^region/.test(h) && !/code/.test(h), nom: 'régions' },
   { re: /departements?/, col: h => /^departement/.test(h) && !/code/.test(h), nom: 'départements' },
   { re: /communes?|villes?/, col: h => /^(commune|ville)/.test(h) && !/code|insee|postal/.test(h), nom: 'communes' },
-  { re: /etablissements?|lycees|universites|ecoles/, col: h => /^etablissement( d accueil)?$|^etablissement\b/.test(h) && !/code|uai|statut|academie|commune|departement|region/.test(h), nom: 'établissements' },
+  { re: /etablissements?|lycees?|universites?|ecoles?/, col: h => /^etablissement( d accueil)?$|^etablissement\b/.test(h) && !/code|uai|statut|academie|commune|departement|region/.test(h), nom: 'établissements' },
 ];
 const _estNumerique = (table, h) => { const st = numericStats((table.objects || []).slice(0, 400), h); return st.numericCount >= Math.max(3, Math.min(400, (table.objects || []).length) * 0.5); };
 function detecterClassement(table, question) {
@@ -1457,7 +1469,7 @@ function detecterClassement(table, question) {
     const croissant = m.inverse ? !moins : moins;
     // entité classée : formations (les lignes) par défaut, ou un regroupement nommé comme sujet (« les académies avec… »)
     let entite = null;
-    const sujet = q.match(/(?:^|\b(?:les|quel(?:le)?s?|top\s*\d*\s*(?:des)?|classement des)\s+(?:\d+\s+)?)(academies?|regions?|departements?|communes?|villes?|etablissements?|lycees|universites|ecoles)\b(?!\s+(?:de|d|du|des)\s)/);
+    const sujet = q.match(/(?:^|\b(?:les|quel(?:le)?s?|top\s*\d*\s*(?:des)?|classement des)\s+(?:\d+\s+)?)(academies?|regions?|departements?|communes?|villes?|etablissements?|lycees?|universites?|ecoles?)\b(?!\s+(?:de|d|du|des)\s(?!accueil|scolarite|origine))/);
     if (sujet) {
       const e = CLASSEMENT_ENTITES.find(x => x.re.test(sujet[1]));
       const ecol = e && headers.find(h => e.col(_hx(h)));
@@ -1469,10 +1481,18 @@ function detecterClassement(table, question) {
   }
   // « les communes avec le plus de formations », « les lycées avec le plus de candidats » (une ligne = un candidat) :
   // classement par nombre de lignes = répartition triée (outil top)
-  const sujet = q.match(/(?:^|\b(?:les|quel(?:le)?s?|top\s*\d*\s*(?:des)?|classement des)\s+(?:\d+\s+)?)(academies?|regions?|departements?|communes?|villes?|etablissements?|lycees|universites|ecoles)\b(?!\s+(?:de|d|du|des)\s)/);
-  if (sujet && /\b(le|les) plus de (formations?|lignes?|candidats?|eleves|dossiers?)\b|\b(le|les) plus (nombreu|represente)/.test(q)) {
+  const sujet = q.match(/(?:^|\b(?:les|quel(?:le)?s?|top\s*\d*\s*(?:des)?|classement des)\s+(?:\d+\s+)?)(academies?|regions?|departements?|communes?|villes?|etablissements?|lycees?|universites?|ecoles?)\b(?!\s+(?:de|d|du|des)\s(?!accueil|scolarite|origine))/);
+  // (« quels lycées proposent le plus de BTS » : le nombre de lignes retenues par le filtre BTS, par lycée)
+  if (sujet && /\b(le|les) plus de (formations?|lignes?|candidats?|eleves|dossiers?|bacheliers?|boursiers?|admis|[a-z0-9]{2,})\b|\b(le|les) plus (nombreu|represente|frequent)/.test(q)) {
     const e = CLASSEMENT_ENTITES.find(x => x.re.test(sujet[1]));
-    const ecol = e && headers.find(h => e.col(_hx(h)));
+    // v27.5.56 — fichier de candidats : lycée de scolarité ou établissement d'accueil (« les universités qui accueillent… »)
+    let ecol = e && headers.find(h => e.col(_hx(h)));
+    if (e && e.nom === 'établissements' && !_colEtablissement(table)) {
+      // l'établissement qui accueille (« qui accueillent », « d'accueil », universités…), pas « des candidats admis »
+      // (« quel lycée a le plus de candidats admis en CPGE » = le lycée d'origine de ces candidats)
+      const versAccueil = /\b(accueill\w*|d accueil|admettent|recrut\w*|universites?|iut|ecoles?)\b/.test(q) && !/\b(scolarite|origine|lycees? d origine)\b/.test(q);
+      ecol = _colEtablissementRole(table, versAccueil ? 'accueil' : 'origine') || ecol;
+    }
     const n = (q.match(/\b(?:top|les|des)\s+(\d{1,3})\b/) || [])[1];
     if (ecol) return { frequence: true, entite: { col: ecol, nom: e.nom }, limit: n ? Math.min(Number(n), 100) : 10, mot: /\b(formations?|lignes?|candidats?|eleves|dossiers?)\b/ };
   }
@@ -1552,6 +1572,15 @@ function applyConditionsChiffrees(plan) {
      jamais la moyenne des pourcentages de chaque formation ;
    - lignes (fichier de candidats, ou part de formations) : lignes qui remplissent la condition / lignes du périmètre.
    Le widget fait la division ; Albert ne calcule rien. */
+// v27.5.56 — « part des candidats admis en BTS » : « en BTS » fait partie de la condition (admis où ?), pas du périmètre
+// (avant : 100 %, les admis en BTS parmi les admis en BTS). « part des formations privées en Gironde » : périmètre.
+const _COUPE_PART = /(?<!\b(?:admis|admises|acceptes|acceptees|inscrits|inscrites|affectes|affectees|partis|parties|scolarises|scolarisees|etudient|poursuivent|orientes|orientees|reussi|reussis))\s+(?:en|a|au|aux|dans|sur|chez|pour|de l academie|du departement)\s+/;
+const _COUPE_PART_SIMPLE = /\s+(?:en|a|au|aux|dans|sur|chez|pour|de l academie|du departement)\s+/;
+// sujet générique (« candidats », « élèves ») : « admis en BTS » est la condition ; sujet précis (« boursiers ») :
+// « part des boursiers admis en CPGE » = boursiers parmi les admis en CPGE, comme le pourcentage officiel
+function _coupePart(phrase) {
+  return /^(candidats?|candidates?|eleves?|lyceens?|lyceennes?|jeunes|bacheliers?|bachelieres?|neo ?bacheliers?)\b/.test(String(phrase || '')) ? _COUPE_PART : _COUPE_PART_SIMPLE;
+}
 const PART_CUE = /\b(part|parts|pourcentage|proportion|ratio|pour ?cent|taux de (?!acces)[a-z]+|taux d (?!acces)[a-z]+)\b/;
 const PARTS_EFFECTIFS = [
   { re: /\bboursi/, num: /admis boursier/, den: /^effectif des admis neo bacheliers$/, quoi: 'admis boursiers', sur: 'admis néo-bacheliers', note: "même définition que la colonne officielle « % d'admis néo bacheliers boursiers »" },
@@ -1578,8 +1607,16 @@ function detecterPart(table, question) {
   // v27.5.54 — « pourcentage de candidats sans proposition par département » : un taux DANS chaque département
   // (avant : la répartition des candidats sans proposition entre départements, lue « Gironde : 50 % »)
   let groupe = null;
+  // v27.5.56 — « taux de proposition des boursiers et des non boursiers » : un taux pour chaque état (avant : seuls les
+  // non-boursiers, le premier filtre étant remplacé par le second)
+  const _etats = q.match(/\s*\b(?:des |les |chez les |pour les )?(boursiers|apprentis|basques)\s+et\s+(?:des |les |chez les |pour les )?non[- ]?\1\b/);
+  if (_etats) {
+    const concept = { boursiers: 'boursier', apprentis: 'apprenti', basques: 'basque' }[_etats[1]];
+    const col = findColumnByConceptStrict(table, concept);
+    if (col) { groupe = col; q = q.replace(_etats[0], ' ').replace(/\s+/g, ' ').trim(); }
+  }
   const PAR_GROUPE = /\s*\bpar (?!rapport\b)(?:type de |grande? )?[a-z0-9]+(?: (?:d|de|du|des|de la|de l) [a-z0-9]+)?/;
-  if (/\bpar (?!rapport\b)\w/.test(q)) {
+  if (!groupe && /\bpar (?!rapport\b)\w/.test(q)) {
     groupe = _dimensionPart(table, brut);
     if (!groupe) return null;
     q = q.replace(PAR_GROUPE, ' ').replace(/\s+/g, ' ').trim();
@@ -1591,7 +1628,7 @@ function detecterPart(table, question) {
   if (table.rowUnit === 'formation' || headers.some(h => /ayant accepte.*admis/.test(_hx(h)))) {
     // le sujet de la part est le début de la phrase (« boursiers », « filles », « candidats admis ») :
     // « la part de l'oral dans l'admission » ne devient pas un taux d'admission
-    const sujet = phrase.split(/\s+(?:en|a|au|aux|dans|sur|chez|pour|de l academie|du departement)\s+/)[0];
+    const sujet = phrase.split(_coupePart(phrase))[0];
     for (const sp of PARTS_EFFECTIFS) {
       const cible = /\btaux d(e)? ?(remplissage|proposition|admission)\b/.test(q) ? q : sujet;
       if (!sp.re.test(cible)) continue;
@@ -1604,7 +1641,7 @@ function detecterPart(table, question) {
     }
   }
   // lignes : seulement si la phrase donne un vrai critère dans les données (sinon : question pour Albert)
-  const courte = phrase.split(/\s+(?:en|a|au|aux|dans|sur|chez|pour|de l academie|du departement)\s+/)[0];
+  const courte = phrase.split(_coupePart(phrase))[0];
   // … sauf si la phrase cite un critère connu (apprentis, boursiers, filles…) absent des données : le garde-fou arrêtera le calcul
   if (!_filtresDePhrase(table, courte).length && !_filtresDePhrase(table, phrase).length && !CONCEPTS_A_FILTRER.some(c => c.re.test(phrase))) return null;
   return { mode: 'lignes', phrase, groupe, mot: new RegExp(`\\b(${phrase.split(' ').filter(w => w.length >= 3).map(w => w.replace(/[^a-z0-9]/g, '')).filter(Boolean).join('|') || 'zzz'})\\b`) };
@@ -1641,7 +1678,7 @@ function applyPart(plan) {
     // v27.5.53 — « taux de proposition des boursiers » : la condition est « proposition », « des boursiers » est le périmètre
     // (avant : la part des boursiers dans tout le fichier, 18 %, au lieu de la part des boursiers ayant eu une proposition)
     const _deQui = /^taux\b/.test(normalizeText(plan.question || '').replace(/^.*?\b(?=taux\b)/, '')) ? d.phrase.split(/\s+(?:des|du|chez les|chez)\s+/)[0] : d.phrase;
-    const courte = _deQui.split(/\s+(?:en|a|au|aux|dans|sur|chez|pour|de l academie|du departement)\s+/)[0];
+    const courte = _deQui.split(_coupePart(_deQui))[0];
     let fx = courte !== d.phrase ? _filtresDePhrase(plan.table, courte) : [];
     if (fx.length) d.phrase = courte; else fx = _filtresDePhrase(plan.table, d.phrase);
     const cle = f => f.op === 'contains_all' ? `T::${(f.terms || []).map(t => [].concat(t)[0]).join('+')}` : `${f.col}`;
@@ -1673,6 +1710,8 @@ function nettoyerPerimetrePart(plan) {
 function executerPart(plan) {
   const d = plan.part;
   nettoyerPerimetrePart(plan);
+  // la colonne des groupes n'est pas un filtre (« des boursiers et des non boursiers » : les deux groupes)
+  if (d.groupe) plan.filters = (plan.filters || []).filter(f => f && f.col !== d.groupe);
   if (d.manque) return unresolvedConceptExecution(plan, [], `les colonnes nécessaires pour calculer la part de ${d.manque} ne sont pas dans les données`);
   const base = applyLocalActionFilters(plan.table.objects || [], plan.filters || []);
   let result;
@@ -2075,6 +2114,7 @@ const LIEUX_AMBIGUS = new Set('somme manche nord lot var ain cher orne oise eure
    source où une ligne = une formation, chaque mot porteur de sens doit correspondre à un filtre, à une colonne
    utilisée ou à un mot connu (outils de la question, lieux, mesures). Sinon le moteur s'arrête et le nomme. */
 const MOTS_QUESTION = new Set(`
+  eux elles ceux celles entre parmi
   combien quel quelle quels quelles nombre nombres total totale totaux somme effectif effectifs compte compter
   formation formations filiere filieres ligne lignes dont avec sans pour par dans sur des les une aux leur
   est sont ont a y il elles ils ya existe existent propose proposent proposees proposes offert offerte offertes offerts
@@ -2120,7 +2160,8 @@ const MOTS_FICHIER_CANDIDATS = new Set(`
   autre autres dehors hors leurs notre nos son sa ses lycee lycees etudiants etudiante etudiantes etudiant
   acceptee acceptees accepte acceptes acceptent accepter favorable favorables favorablement repondu reponse admise affectes affectees
   choisi choisie choisis choisies choisissent prefere preferee preferees privilegiees terminale terminales premiere classe classes
-  fait faisaient pris
+  envoient envoie envoyes forment comptent accueillent accueille admettent recrutent
+  fait faisaient pris frequents frequentes frequent frequente representes representees eux elles ceux celles entre parmi dont
 `.split(/\s+/).filter(Boolean));
 // mots traduits par un filtre (« STMG » → « Sciences et Technologies du Management… », « licence » → « L1 - CUPGE… »)
 const _SIGLES_SERIES = [[/management.*gestion/, 'stmg'], [/industrie.*developpement durable/, 'sti2d'], [/design.*arts? appliqu/, 'std2a'],
@@ -2383,7 +2424,7 @@ const REFORMULATIONS = [
    - « les lycées de Bordeaux », « combien d'universités » : établissements dont le nom contient « lycée » / « université » ;
    - « combien d'établissements / de lycées … », « nombre d'établissements par académie » : établissements différents. */
 const NOM_ETAB_RE = /\b(lycees?|universites?|iut|etablissements?)\b/;
-const COUPURES_ETAB = new Set('dans en a au aux pour par avec sur proposent propose proposant offrent offre qui ou et sont est ont combien quel quels quelles ayant en admis admises acceptes acceptees affectes inscrits boursiers boursieres apprentis sans'.split(' '));
+const COUPURES_ETAB = new Set('dans en a au aux pour par avec sur proposent propose proposant offrent offre qui ou et sont est ont combien quel quels quelles ayant en admis admises acceptes acceptees affectes inscrits boursiers boursieres apprentis sans accueillent accueille admettent recrutent comptent envoient forment'.split(' '));
 const MOTS_LIENS_ETAB = new Set('de du des la le les l d'.split(' '));
 function _colEtablissement(table) {
   const headers = (table?.headers || []).filter(Boolean);
@@ -2416,6 +2457,7 @@ function _colEtablissementQuestion(table, q, idx) {
   const acc = _colEtablissementRole(table, 'accueil'), ori = _colEtablissementRole(table, 'origine');
   if (!acc || !ori) return acc || ori;
   const avant = q.slice(0, idx).trim();
+  if (/^\S+ (qui )?(accueill\w*|admett\w*|recrut\w*)\b/.test(q.slice(idx).trim())) return acc;
   if (/^\S+ (d |de l |de |des )?(accueil|acceptes?|acceptees?|d accueil)\b/.test(q.slice(idx).trim())) return acc;
   if (/\bscolaris\w*\s+(au|aux|a|en|dans)( l| le| la| les)?$|\b(du|de|des|d|issus?|issues?|venant|provenant|originaires?)( l| le| la| les)?$/.test(avant)) return ori;
   if (_VERBE_ACCUEIL_RE.test(avant)) return acc;
@@ -2432,6 +2474,8 @@ function etablissementDeLaQuestion(table, question) {
   // v27.5.53 — « par lycée », « répartition des lycées » : une dimension, pas un filtre (avant : « nom contenant lycée »,
   // puis répartition selon une autre colonne)
   if (/\bpar$/.test(q.slice(0, m.index).trim())) return null;
+  // « les établissements d'accueil les plus fréquents » : la colonne désignée, pas un nom d'établissement
+  if (/^(d |de l |de la |de )?(accueil|scolarite|origine)\b/.test(q.slice(m.index + m[0].length).trim())) return null;
   // « lycées agricoles / privés / professionnels » : un qualificatif traité par une autre colonne, pas un nom
   if (_roleCol && /^(agricoles?|prives?|privees?|publi(c|cs|que|ques)|professionnels?|generaux|general|generale|technologiques?|polyvalents?)\b/.test(q.slice(m.index + m[0].length).trim())) return null;
   const nom = m[1];
@@ -2453,7 +2497,16 @@ function etablissementDeLaQuestion(table, question) {
     // (« LPO Louis de Foix », CFA, MFR… n'ont pas « lycée » dans leur nom : « lycées de Bordeaux » en perdait 169)
     if (col !== _colEtablissement(table) && singulier === 'lycee' && /scolarite|origine/.test(_hx(col))) return { col, tousLycees: true };
     // type d'établissement : nom contenant « lycée », « université », « IUT »
-    const valeurs = [...noms.keys()].filter(k => _compacte(k).split(' ').includes(singulier));
+    let valeurs = [...noms.keys()].filter(k => _compacte(k).split(' ').includes(singulier));
+    // v27.5.56 — « les universités qui accueillent… » : aucune université parmi les lycées d'origine → l'accueil
+    if (!valeurs.length && _roleCol) {
+      const autre = [_colEtablissementRole(table, 'accueil'), _colEtablissementRole(table, 'origine')].find(c => c && c !== col);
+      if (autre) {
+        const n2 = _nomsEtablissements(table, autre);
+        const v2 = [...n2.keys()].filter(k => _compacte(k).split(' ').includes(singulier));
+        if (v2.length) return { col: autre, nom: singulier, type: true, phrase: singulier, valeurs: v2, noms: v2.map(k => n2.get(k)) };
+      }
+    }
     return { col, nom: singulier, type: true, phrase: singulier, valeurs, noms: valeurs.map(k => noms.get(k)) };
   }
   const phrase = [generique ? '' : singulier, ...suite].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
@@ -3141,7 +3194,7 @@ function _finalSanitizeAnalysisPlanBase(plan) {
     const _prevGardes = (prev.filters || []).filter(pf => pf && _clesEntrants.has(_cleFiltre(pf)) && !(pf.op !== 'contains_all' && _colsNouv.has(pf.col)));
     plan.filters = mergeFiltersUnique(mergeFiltersUnique(_prevGardes, strict), _nouveaux);
     // v27.25 — relance déjà résolue (mesure d'une moyenne gardée, somme par groupe, « lesquelles … ») : outil conservé
-    const _resolue = plan.statsCol || plan.lesquelles || (dimensionFollowUp && plan.groupSumCol) || (plan.tool === 'part' && plan.part && plan.part.groupe);
+    const _resolue = plan.statsCol || plan.lesquelles || plan.sousEnsemble || (dimensionFollowUp && plan.groupSumCol) || (plan.tool === 'part' && plan.part && plan.part.groupe);
     if (dimensionFollowUp && !_resolue) {
       plan.tool = 'group_by';
     }
@@ -3195,6 +3248,23 @@ function detectCompareGroups(table, question) {
   const groups = [];
   const addGroup = (label, filters) => groups.push({ label, filters: filters.filter(Boolean) });
   const yesNoValue = (col, yes) => pickColumnValue(table, col, yes ? 'oui' : 'non');
+
+  // v27.5.56 — deux établissements cités (« comparer le lycée Montaigne et le lycée Victor Louis ») : un groupe chacun
+  // (avant : pas de calcul, la question partait vers Albert)
+  const mE = q.match(/\b(lycees?|universites?|iut|etablissements?)\b/);
+  if (mE && /\s(et|avec|versus|vs)\s/.test(q.slice(mE.index))) {
+    const debut = q.slice(0, mE.index), suite = q.slice(mE.index);
+    const [a1, ...r] = suite.split(/\s+(?:et|avec|versus|vs)\s+(?:celui |ceux |celle |celles )?(?:du |de l |de la |de |le |la |l |des |au |a l )?/);
+    const b1 = r.join(' et ');
+    const b2 = NOM_ETAB_RE.test(b1.split(' ')[0] || '') ? b1 : `${mE[1].replace(/s$/, '')} ${b1}`;
+    const e1 = etablissementDeLaQuestion(table, debut + a1), e2 = etablissementDeLaQuestion(table, debut + b2);
+    if (e1 && e2 && !e1.tousLycees && !e2.tousLycees && !e1.introuvable && !e2.introuvable && !e1.type && !e2.type && e1.col === e2.col && e1.phrase !== e2.phrase) {
+      const g = e => ({ col: e.col, op: 'in', values: e.valeurs, value: e.phrase, label: e.noms.length <= 2 ? e.noms.join(', ') : `${e.noms.length} établissements « ${e.phrase} »`, source: 'etablissement', noms: e.noms });
+      addGroup(e1.noms.length <= 2 ? e1.noms.join(' / ') : e1.phrase, [g(e1)]);
+      addGroup(e2.noms.length <= 2 ? e2.noms.join(' / ') : e2.phrase, [g(e2)]);
+      return groups;
+    }
+  }
 
   // ── 1. Paires sémantiques hardcodées ──────────────────────────────────────
   if (/basque/.test(q) && /(non[- ]?basque|autres?|reste|hors|compare|versus)/.test(q)) {
