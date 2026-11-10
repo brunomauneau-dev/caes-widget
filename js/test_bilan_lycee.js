@@ -114,10 +114,23 @@ await describe('Comparer deux établissements', () => {
   const c = ask('comparer les candidats du lycée Montaigne et du lycée Victor Louis');
   const r = c?.result?.rows || [];
   assert(c?.kind === 'compare' && r.length === 2 && r[0].count === nb(M) && r[1].count === nb(x => x[ETAB] === 'Lycée Victor Louis'), `deux groupes : Montaigne et Victor Louis (avant : pas de calcul ; obtenu : ${c?.kind})`);
+  // v27.5.57 — taux de chaque groupe, calculés dans le groupe
+  const ind = run(ctx, 'compareIndicateurs')(c.plan.table, c.result.rows);
+  const tx = l => ind.find(i => i.label.startsWith(l))?.groupes || [];
+  const VL = x => x[ETAB] === 'Lycée Victor Louis';
+  assert(tx('A eu une proposition')[0]?.num === nb(r => M(r) && r[PROP] === 'Oui') && tx('A eu une proposition')[0]?.den === nb(M), 'taux de proposition du lycée Montaigne');
+  assert(tx('A accepté')[1]?.num === nb(r => VL(r) && r[ACC] === 'Oui'), "taux d'admission du lycée Victor Louis");
+  assert(tx('Boursiers')[0]?.num === nb(r => M(r) && B(r)), 'part de boursiers du lycée Montaigne');
+  const ACA = H[18];
+  const hors = tx('Admis hors académie')[0];
+  assert(hors && hors.num === nb(r => M(r) && r[ACA] && r[ACA] !== 'Bordeaux') && hors.den === nb(r => M(r) && r[ACA]), 'admis hors académie, parmi les admis du lycée');
+  assert(/Taux de chaque groupe/.test(c.html) && /calculés dans le groupe/.test(run(ctx, 'dataEngineResultToContext')(c)), 'affiché et transmis à Albert');
   const v = ask('lycée Max Linder versus lycée Louis Barthou');
   assert(v?.kind === 'compare' && v.result.rows[0].count === nb(x => x[ETAB] === 'Lycée Max Linder'), '« versus »');
   const bo = ask('comparer boursiers et non boursiers');
   assert(bo?.kind === 'compare' && bo.result.rows[0].count === nb(B), 'faux positif : comparaison boursiers / non-boursiers inchangée');
+  const ib = run(ctx, 'compareIndicateurs')(bo.plan.table, bo.result.rows);
+  assert(!ib.some(i => i.label === 'Boursiers') && ib.some(i => i.label === 'A eu une proposition'), 'la colonne qui fait les groupes (boursier) n\'est pas un indicateur');
 });
 
 await describe('Open data : mêmes relances et classements', () => {

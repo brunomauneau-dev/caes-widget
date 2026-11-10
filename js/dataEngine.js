@@ -3426,6 +3426,38 @@ function getCompareColumns(table) {
   };
 }
 
+// v27.5.57 — fichier de candidats : taux de chaque groupe comparé (proposition, admission, boursiers, apprentis, hors
+// académie), numérateur et dénominateur calculés dans le groupe. Seulement les colonnes présentes dans le fichier.
+function compareIndicateurs(table, groupRows) {
+  if (!table || table.rowUnit === 'formation' || !groupRows?.length) return [];
+  const hs = (table.headers || []).filter(Boolean);
+  const etat = (re, sauf) => hs.find(h => re.test(_hx(h)) && !(sauf && sauf.test(_hx(h))) && _isEtatCol(table, h));
+  const oui = c => r => /^(oui|o|1|vrai|true)$/.test(normalizeText(r?.[c]));
+  const out = [];
+  const prop = etat(/proposition/, /repondu|favorabl|accept/);
+  if (prop) out.push({ label: 'A eu une proposition', col: prop, test: oui(prop) });
+  const acc = etat(/repondu|favorabl|accept/, /academie|commune|etablissement|formation|groupe|specialite/);
+  if (acc) out.push({ label: 'A accepté une proposition', col: acc, test: oui(acc) });
+  const bours = findColumnByConceptStrict(table, 'boursier');
+  if (bours) { const v = normalizeText(pickColumnValue(table, bours, 'boursier_oui')); out.push({ label: 'Boursiers', col: bours, test: r => normalizeText(r?.[bours]) === v }); }
+  const app = findColumnByConceptStrict(table, 'apprenti');
+  if (app) out.push({ label: 'Apprentis', col: app, test: oui(app) });
+  const aca = findColumnByConceptStrict(table, 'academie_accueil');
+  if (aca) {
+    const n = new Map();
+    (table.objects || []).forEach(r => { const v = String(r?.[aca] ?? '').trim(); if (v) n.set(v, (n.get(v) || 0) + 1); });
+    const tot = [...n.values()].reduce((a, b) => a + b, 0);
+    const [ref, nb] = [...n.entries()].sort((a, b) => b[1] - a[1])[0] || [];
+    if (ref && nb > tot / 2) out.push({ label: `Admis hors académie de ${ref} (parmi les admis)`, col: aca, test: r => String(r?.[aca] ?? '').trim() !== ref, base: r => String(r?.[aca] ?? '').trim() !== '' });
+  }
+  const colsGroupes = new Set(groupRows.flatMap(g => (g.filters || []).map(f => f.col)));
+  return out.filter(ind => !colsGroupes.has(ind.col)).map(ind => ({ label: ind.label, col: ind.col, groupes: groupRows.map(g => {
+    const base = ind.base ? (g.rows || []).filter(ind.base) : (g.rows || []);
+    const num = base.filter(ind.test).length;
+    return { label: g.label, num, den: base.length, pct: base.length ? num / base.length * 100 : null };
+  }) }));
+}
+
 function topCountsForSpecificRows(rows, col, limit = 8) {
   if (!col) return [];
   const map = new Map();
@@ -3588,11 +3620,15 @@ function renderCompareHtml(plan, result) {
   const academieTable = renderCompareCategoryTable('Académie d’accueil', cols.academie, academieRows, rows);
   const serieTable = renderCompareCategoryTable('Série de bac', cols.serie, serieRows, rows);
   const statsTable = renderCompareStatsTable(cols.voeux, statsRows);
+  const _ind = compareIndicateurs(plan.table, rows);
+  const _th = 'text-align:left;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)';
+  const _td = 'padding:7px 10px;border-bottom:1px solid var(--gris1,#f3f4f6)';
+  const indicateursTable = _ind.length ? `<section class="de-section" style="margin:12px 0;padding:12px;border:1px solid var(--gris2,#e5e7eb);border-radius:10px;background:#fff"><div style="font-weight:800;margin-bottom:6px">Taux de chaque groupe</div><div style="overflow:auto"><table style="border-collapse:separate;border-spacing:0;width:100%;font-size:12px;min-width:300px"><tbody><tr><th style="${_th}">Indicateur</th>${rows.map(r => `<th style="${_th};text-align:right">${escapeHtml(r.label)}</th>`).join('')}</tr>${_ind.map(i => `<tr><td style="${_td}">${escapeHtml(i.label)}</td>${i.groupes.map(g => `<td style="${_td};text-align:right"><strong>${g.pct === null ? '—' : `${_pctFr(g.pct)} %`}</strong><br><span style="font-size:11px;color:var(--gris6,#6b7280)">${_nf(g.num)} / ${_nf(g.den)}</span></td>`).join('')}</tr>`).join('')}</tbody></table></div><p style="font-size:11px;color:var(--gris6,#6b7280);margin:6px 0 0">Chaque taux est calculé à l'intérieur du groupe.</p></section>` : '';
   const charts = plan.renderChart ? `<section class="de-section de-charts" style="margin:14px 0">${renderCompareCharts(plan, result)}</section>` : '';
   const detailsTables = `<details class="de-detail-tables" style="margin:16px 0;border:1px solid var(--gris2,#e5e7eb);border-radius:12px;background:#fff"><summary style="cursor:pointer;font-weight:800;padding:12px 14px">Afficher les tableaux détaillés</summary><div style="padding:0 14px 14px">${formationTable}${academieTable}${serieTable}</div></details>`;
   const debug = `<details class="msg-sources"><summary title="Détail technique du calcul (pour vérification ou support) — sans impact sur le résultat affiché ci-dessus">Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : compare<br><strong>Version</strong> : v27.6.0<br><strong>Source</strong> : ${escapeHtml(plan.table?.source || 'Données')} · ${escapeHtml(plan.table?.name || 'table')}<br><strong>Groupes</strong> : ${escapeHtml(rows.map(r => r.label).join(' / ') || '—')}</div></details>`;
   const clearTitle = (typeof extractBlockTitle === 'function') ? extractBlockTitle({ plan, result }, '') : 'Comparaison';
-  return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}${perim}<p>Base comparée : <strong>${baseTotal.toLocaleString('fr-FR')}</strong> lignes.</p><section class="de-section de-population" style="margin:12px 0;padding:12px;border:1px solid var(--gris2,#e5e7eb);border-radius:10px;background:#fff"><div style="overflow:auto"><table style="border-collapse:separate;border-spacing:0;width:100%;font-size:12px;min-width:360px"><tbody><tr><th style="text-align:left;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Population</th><th style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Nombre</th><th style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Part</th></tr>${tableRows}</tbody></table></div>${missingNote}</section>${filtersHtml}${insights}${charts}${statsTable}${detailsTables}${debug}`;
+  return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}${perim}<p>Base comparée : <strong>${baseTotal.toLocaleString('fr-FR')}</strong> lignes.</p><section class="de-section de-population" style="margin:12px 0;padding:12px;border:1px solid var(--gris2,#e5e7eb);border-radius:10px;background:#fff"><div style="overflow:auto"><table style="border-collapse:separate;border-spacing:0;width:100%;font-size:12px;min-width:360px"><tbody><tr><th style="text-align:left;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Population</th><th style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Nombre</th><th style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Part</th></tr>${tableRows}</tbody></table></div>${missingNote}</section>${indicateursTable}${filtersHtml}${insights}${charts}${statsTable}${detailsTables}${debug}`;
 }
 
 function runDataEnginePlan(plan, persistentFiltersOverride) {
@@ -4013,6 +4049,12 @@ function dataEngineResultToContext(exec) {
     out += `Comparaison de groupes — base : ${baseTotal} ligne(s)\n`;
     out += `Effectifs par groupe :\n${rows.map(r => `- ${r.label} : ${r.count} (${r.pct.toFixed(1).replace('.', ',')} %)`).join('\n')}\n`;
     const cols = (typeof getCompareColumns === 'function') ? getCompareColumns(p.table) : {};
+    // v27.5.57 — taux de chaque groupe (fichier de candidats)
+    const _ind = compareIndicateurs(p.table, rows);
+    if (_ind.length) {
+      out += `\nTaux de chaque groupe (calculés dans le groupe) :\n`;
+      _ind.forEach(i => { out += `- ${i.label} — ${i.groupes.map(g => `${g.label} : ${g.pct === null ? '—' : _pctFr(g.pct)} % (${g.num} / ${g.den})`).join(' · ')}\n`; });
+    }
     const catBlocks = [
       { label: 'Grands groupes de formation', col: cols.formation },
       { label: 'Académie d’accueil', col: cols.academie },
