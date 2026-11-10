@@ -102,6 +102,40 @@ export const LECTURES = [
   { id: 'c24', src: 'fichier', q: 'combien de candidats de Dordogne admis à Toulouse', op: 'compter', filtres: { departement: [['dordogne']], 'commune:acc': [['toulouse']], admission: [['oui']] } },
 ];
 
+// Questions NOUVELLES (jamais utilisées pour régler la règle d'alerte) : validation, pour mesurer honnêtement
+export const LECTURES_VALIDATION = [
+  { id: 'v1', src: 'od', q: 'combien de BUT en Nouvelle-Aquitaine', op: 'compter', filtres: { formation: [['but']], region: [['nouvelle aquitaine']] } },
+  { id: 'v2', src: 'od', q: 'combien de CPGE privées', op: 'compter', filtres: { formation: [['cpge']], statut: [['prive']] } },
+  { id: 'v3', src: 'od', q: 'nombre de places en licence à Toulouse', op: 'somme', filtres: { formation: [['licence']], commune: [['toulouse']] } },
+  { id: 'v4', src: 'od', q: 'combien de départements proposent un BTS MCO', op: 'compter_distinct', objet: 'departements', filtres: { formation: [['management commercial', 'mco']] } },
+  { id: 'v5', src: 'od', q: 'combien de lycées proposent une CPGE en Gironde', op: 'compter_distinct', objet: 'etablissements', filtres: { formation: [['cpge']], departement: [['gironde']], etablissement: [['lycee']] } },
+  { id: 'v6', src: 'od', q: 'quels établissements proposent une licence de psychologie à Bordeaux', op: 'liste', objet: 'etablissements', filtres: { formation: [['licence'], ['psychologie']], commune: [['bordeaux']] } },
+  { id: 'v7', src: 'od', q: 'combien de formations dans les Landes ou en Dordogne', op: 'compter', filtres: { departement: [['landes'], ['dordogne']] } },
+  { id: 'v8', src: 'od', q: 'combien de BTS hors académie de Bordeaux', op: 'compter', filtres: { formation: [['bts']] }, exclus: { academie: [['bordeaux']] } },
+  { id: 'v9', src: 'od', q: 'capacité moyenne des CPGE par académie', op: 'statistique', groupe: 'academie', filtres: { formation: [['cpge']] } },
+  { id: 'v10', src: 'od', q: 'part des formations privées en Gironde', op: 'part', filtres: { departement: [['gironde']] } },
+  { id: 'v11', src: 'od', q: 'les 5 licences les plus demandées', op: 'classement', filtres: { formation: [['licence']] } },
+  { id: 'v12', src: 'od', q: 'répartition des CPGE par statut', op: 'repartition', groupe: 'statut', filtres: { formation: [['cpge']] } },
+  { id: 'v13', src: 'od', conv: ['combien de PASS en France'], q: 'et en Gironde ?', op: 'compter', filtres: { formation: [['pass', 'acces specifique sante']], departement: [['gironde']] } },
+  { id: 'v14', src: 'od', conv: ['combien de licences de droit'], q: 'quels établissements ?', op: 'liste', objet: 'etablissements', filtres: { formation: [['licence'], ['droit']] } },
+  { id: 'v15', src: 'od', q: 'combien de communes de Gironde ont une CPGE', op: 'compter_distinct', objet: 'communes', filtres: { formation: [['cpge']], departement: [['gironde']] } },
+  { id: 'v16', src: 'od', q: 'combien de BTS en apprentissage à Pau', op: 'compter', filtres: { formation: [['bts'], ['apprentissage']], commune: [['pau']] } },
+  { id: 'v17', src: 'od', q: 'nombre de candidats en PASS par académie', op: ['somme', 'repartition'], groupe: 'academie', filtres: { formation: [['pass', 'acces specifique sante']] } },
+  { id: 'v18', src: 'od', q: 'exporte les CPGE de Bordeaux en Excel', op: 'export', filtres: { formation: [['cpge']], commune: [['bordeaux']] } },
+  { id: 'v19', src: 'fichier', q: 'combien de boursiers admis hors académie', op: 'compter', filtres: { boursier: [['boursier']], admission: [['oui']] }, exclus: { 'academie:acc': [['bordeaux']] } },
+  { id: 'v20', src: 'fichier', q: 'combien de candidats des Landes ont eu une proposition', op: 'compter', filtres: { departement: [['landes']], proposition: [['oui']] } },
+  { id: 'v21', src: 'fichier', q: 'combien de candidats de la spécialité SES admis en droit', op: 'compter', filtres: { specialite_lycee: [['economiques', 'ses']], formation: [['droit']], admission: [['oui']] } },
+  { id: 'v22', src: 'fichier', q: 'part des bac pro admis en BTS', op: 'part', filtres: { formation: [['bts']] } },
+  { id: 'v23', src: 'fichier', q: 'taux de proposition par série', op: 'part', groupe: 'serie' },
+  { id: 'v24', src: 'fichier', q: 'combien de candidats du lycée Victor Louis sans proposition', op: 'compter', filtres: { 'etablissement:ori': [['victor louis']], proposition: [['non']] } },
+  { id: 'v25', src: 'fichier', q: 'quels lycées envoient le plus de candidats en école de commerce', op: 'classement', groupe: 'etablissement:ori', filtres: { formation: [['commerce']] } },
+  { id: 'v26', src: 'fichier', q: 'combien de candidats admis à Paris ou à Toulouse', op: 'compter', filtres: { 'commune:acc': [['paris'], ['toulouse']], admission: [['oui']] } },
+  { id: 'v27', src: 'fichier', conv: ['combien de candidats de bac technologique'], q: 'dont combien de boursiers', op: 'compter', filtres: { serie: [['technologique']], boursier: [['boursier']] } },
+  { id: 'v28', src: 'fichier', q: 'combien de candidats du privé admis en CPGE', op: 'compter', filtres: { statut: [['prive']], formation: [['cpge']], admission: [['oui']] } },
+  { id: 'v29', src: 'fichier', q: 'combien d\'académies accueillent des candidats en licence', op: 'compter_distinct', objet: 'academies', filtres: { formation: [['licence', 'l1']] } },
+  { id: 'v30', src: 'fichier', q: 'nombre moyen de vœux des candidats de Gironde', op: 'statistique', filtres: { departement: [['gironde']] } },
+];
+
 // ─── Familles de colonnes (les deux moteurs, Albert et les lectures attendues parlent la même langue) ─────────
 export function famille(col) {
   const c = nrm(col);
@@ -363,7 +397,7 @@ export function bilan(res) {
 }
 export function rapportDoubleLecture(res, b) {
   const pct = (a, n) => n ? `${Math.round(a / n * 100)} %` : '—';
-  const l = ['# Essai double lecture (Albert)', '', `Modèle : ${MODELE}`, '',
+  const l = ['# Essai double lecture (Albert)', '', `Modèle : ${MODELE} · questions : ${process.env.JEU || 'réglage'}`, '',
     `${b.questions} questions · Albert a répondu à ${b.albertRepond} (${b.albertErreurs} erreurs d'appel) · délai médian ${b.delaiMedianMs ?? '—'} ms, max ${b.delaiMaxMs ?? '—'} ms`, '',
     '## Résumé', '', '| | Chiffres faux du moteur (contresens) | … signalés par Albert (rattrapés) | Lectures justes du moteur | … signalées à tort (fausses alertes) | Arrêts / laissés à Albert |', '|---|---|---|---|---|---|'];
   if (b.ancien) l.push(`| Ancien moteur | ${b.ancien.faux} | ${b.ancien.rattrapes} (${pct(b.ancien.rattrapes, b.ancien.faux)}) | ${b.ancien.justes} | ${b.ancien.faussesAlertes} (${pct(b.ancien.faussesAlertes, b.ancien.justes)}) | ${b.ancien.sansChiffre} |`);
@@ -380,7 +414,8 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   const tableOD = await chargerOpenData(globalThis.fetch);
   const ancienDir = process.env.ANCIEN_JS && fs.existsSync(process.env.ANCIEN_JS) ? process.env.ANCIEN_JS : null;
   const prec = await chargerSessionPrecedente(globalThis.fetch, Number(tableOD.session) - 1);
-  const res = await essaiDoubleLecture({ tableOD, autresSessions: [prec], ancienDir, albert: process.env.SANS_ALBERT !== '1' });
+  const lectures = process.env.JEU === 'validation' ? LECTURES_VALIDATION : process.env.JEU === 'tout' ? [...LECTURES, ...LECTURES_VALIDATION] : LECTURES;
+  const res = await essaiDoubleLecture({ tableOD, autresSessions: [prec], ancienDir, albert: process.env.SANS_ALBERT !== '1', lectures });
   const b = bilan(res);
   const texte = rapportDoubleLecture(res, b);
   fs.writeFileSync('double_lecture.md', texte);
