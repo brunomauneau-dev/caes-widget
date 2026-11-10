@@ -1,0 +1,48 @@
+name: Essai double lecture (Albert)
+
+# Étape 2 de fiabilité, essai MESURÉ : rien ne change dans le widget en service.
+# Lancement manuel : onglet Actions → « Essai double lecture (Albert) » → Run workflow.
+# Pour ~70 questions, compare la lecture attendue (écrite à la main) à celles de l'ancien moteur, du moteur
+# actuel et d'Albert (appelé par le proxy du widget : ~70 appels, sur le quota Albert). Résultat : combien de
+# contresens Albert aurait signalés, combien de fausses alertes, et son délai. Lecture seule.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ancien:
+        description: "Version de l'ancien moteur (commit ou étiquette git)"
+        required: false
+        default: '224ba11'
+
+permissions:
+  contents: read
+
+jobs:
+  essai:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Extraire l'ancien moteur
+        run: |
+          mkdir -p ancien
+          for f in config.js knowledge.js documents.js planner.js dataEngine.js sessions.js; do
+            git show "${{ inputs.ancien || '224ba11' }}:js/$f" > "ancien/$f"
+          done
+      - name: Poser les questions (ancien moteur, moteur actuel, Albert)
+        run: node scripts/essai_double_lecture.mjs
+        env:
+          ANCIEN_JS: ancien
+      - name: Garder le rapport
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: double-lecture
+          path: |
+            double_lecture.md
+            double_lecture.json
+          if-no-files-found: ignore

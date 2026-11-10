@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-50 fichiers, 2 167 tests. Depuis la racine du repo :
+51 fichiers, 2 187 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -120,6 +120,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 `js/test_coherence.js` vérifie les **garde-fous de cohérence** (étape 1 de fiabilité) : « J'ai compris : … » en tête de chaque réponse (l'opération calculée, en clair) ; objet demandé respecté (« combien d'académies proposent des PASS » compte des académies différentes, avant : le nombre de PASS ; sinon arrêt) ; un export juste après un résultat filtré garde ses filtres (sauf « toute la table ») ; « donne-moi la liste » sans contexte demande « la liste de quoi ? ».
 
 `js/test_pdf_demande.js` vérifie les demandes **« exporte cette liste en PDF »**, « imprime ce résultat » : la dernière réponse calculée est imprimée, comme avec le bouton « 🖨 PDF » (avant : un fichier Excel) ; « exporte en Excel » reste un export Excel.
+
+`js/test_essai_double_lecture.js` vérifie le script de l'**essai « double lecture par Albert »** (`scripts/essai_double_lecture.mjs`, Actions → « Essai double lecture (Albert) ») : pour ~70 questions, la lecture attendue est comparée à celles de l'ancien moteur, du moteur actuel et d'Albert (Albert simulé dans le test) ; le bilan compte les contresens qu'Albert aurait signalés, les fausses alertes et le délai.
 
 `js/test_part_groupes.js` vérifie les **taux par groupe** : « pourcentage de candidats sans proposition par département », « part des boursiers par académie », « taux de remplissage des BTS par académie » donnent un taux calculé **dans** chaque groupe (avant : la répartition du total entre groupes, lue à tort comme un taux), avec la ligne « Ensemble », l'export, le graphique et les relances (« taux de proposition des boursiers » puis « et par département ? »).
 
