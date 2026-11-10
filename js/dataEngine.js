@@ -265,32 +265,126 @@ const _MATIERES_LYCEE = [
 ];
 // v27.5.53 — spécialités du lycée citées dans la question : filtres « contient » sur la colonne des enseignements
 // de spécialité, et mots de la question qu'elles expliquent (pour ne pas les chercher dans les formations d'accueil)
-function _specialitesLycee(table, q) {
-  const vide = { col: null, filtres: [], mots: new Set() };
-  const ensCol = (table?.headers || []).filter(Boolean).find(h => /enseignements? .*specialite|specialites? .*suivi/.test(normalizeText(h)));
-  if (!ensCol) return vide;
-  // nom propre à une spécialité du lycée (« droit et économie » : la formation d'accueil s'appelle « Droit »)
-  const sigle = /\b(ses|svt|hggsp|hlp|llcer|nsi|amc)\b|\bdroit et eco(nomie)?\b|\bdroit eco\b/.test(q);
-  const contexteLycee = /\b(specialites?|enseignements? de specialite|doublettes?)\b/.test(q) && /\b(suivi|suivie|suivis|suivies|suivant|suivent|suit|ayant|ont pris|font|fait|lycee|terminale|doublettes?|enseignements?|avec)\b/.test(q);
-  if (!sigle && !contexteLycee) return vide;
-  const cache = table._motsEns || (table._motsEns = new Set(_distinctValues(table, ensCol).flatMap(v => normalizeText(v).split(' '))));
-  const out = { col: ensCol, filtres: [], mots: new Set() };
-  _MATIERES_LYCEE.forEach(([re, mots, nom, alias]) => {
-    if (!re.test(q) || !mots.every(w => cache.has(w))) return;
-    out.filtres.push({ col: ensCol, op: 'contains_words', terms: mots.map(w => [w]), value: nom, label: nom, source: 'specialite_lycee' });
-    out.res = (out.res || []).concat([new RegExp(re.source, 'g')]);
-    alias.forEach(a => out.mots.add(a));
-    normalizeText(nom).split(' ').forEach(w => out.mots.add(w));
+// v27.5.55 — colonnes qui décrivent le LYCÉE du candidat : enseignements de spécialité de terminale (« Mathématiques |
+// Physique-Chimie ») et spécialité de la classe (bac pro, STMG : « Mercatique », « Gestion et finance »). Distinctes de la
+// formation d'accueil (« Spécialité / mention formation d'accueil acceptée »), dont beaucoup de mots sont communs.
+function _colonnesLycee(table) {
+  const hs = (table?.headers || []).filter(Boolean);
+  const ens = hs.find(h => /enseignements? .*specialite|specialites? .*suivi/.test(normalizeText(h))) || null;
+  if (!ens) return { ens: null, spe: null, cols: [] };
+  const spe = hs.find(h => h !== ens && /^specialite( de la classe| du bac| de terminale)?$/.test(normalizeText(h).trim())) || null;
+  return { ens, spe, cols: [ens, spe].filter(Boolean) };
+}
+// Spécialités de la colonne (chaque enseignement d'une case « A | B », et chaque spécialité de classe), avec leurs mots
+function _sujetsLycee(table) {
+  if (table._sujetsLycee) return table._sujetsLycee;
+  const { ens, spe } = _colonnesLycee(table);
+  const m = new Map();
+  (table.objects || []).forEach(r => {
+    const parts = [...String(r?.[ens] ?? '').split('|'), ...(spe ? [String(r?.[spe] ?? '')] : [])].map(x => x.trim()).filter(Boolean);
+    parts.forEach(x => { const k = x.replace(/^Msgn\/\s*/, ''); if (!m.has(k)) m.set(k, { nom: k, mots: new Set(normalizeText(k).split(' ')), n: 0 }); m.get(k).n++; });
   });
-  return out;
+  return (table._sujetsLycee = [...m.values()]);
+}
+// sigles et abréviations des enseignements de spécialité → leurs mots
+const _SIGLES_LYCEE = [
+  [/\bses\b/g, 'sciences economiques et sociales'], [/\bsvt\b/g, 'sciences de la vie et de la terre'], [/\bhggsp\b/g, 'geopolitique'],
+  [/\bhlp\b/g, 'humanites litterature et philosophie'], [/\bllcer\b/g, 'langues litteratures et cultures etrangeres'],
+  [/\bnsi\b/g, 'numerique et sciences informatiques'], [/\beppcs\b/g, 'education physique pratiques et culture sportives'], [/\bamc\b/g, 'anglais monde contemporain'], [/\bmaths?\b/g, 'mathematiques'],
+  [/\bphysique chimie\b/g, 'physique chimie'], [/\bpc\b/g, 'physique chimie'], [/\bdroit eco\b/g, 'droit et economie'],
+  [/\bdroit et eco\b/g, 'droit et economie'],
+  // noms propres aux spécialités du lycée, reconnus même sans « spécialité » (la formation d'accueil s'appelle « Droit »)
+  [/\bdroit et economie\b/g, 'droit et economie'], [/\bphysique chimie\b/g, 'physique chimie'],
+  [/\bsciences economiques et sociales\b/g, 'sciences economiques et sociales'],
+];
+const _VIDES_SPE = new Set('de du des d la le les l et en a au aux un une option ou'.split(' '));
+const _VERBES_SPE = new Set('fait faisaient pris suivi suivie suivis suivies suivant suivent eu'.split(' '));
+const _COUPE_SPE = new Set('admis admise admises acceptes acceptees inscrits inscrites qui ayant dans pour par combien sont ont avec sans boursiers boursieres apprentis candidats candidates eleves terminale lycee premiere classe mais parmi chez'.split(' '));
+const _CUES_LYCEE = /\b(specialites?|enseignements? de specialites?|enseignements?|doublettes?)\b/g;
+// accueil juste avant « spécialité » (« admis en licence spécialité droit », « formation d'accueil spécialité ») : pas le lycée
+const _ACCUEIL_AVANT = /\b(admis|admise|admises|inscrits?|inscrites?|acceptes?|acceptees?|accueil|formations?|licences?|mentions?|bts|but|dut|cpge|master|ecoles?)\b(?: \S+){0,2}\s*$/;
+function _specialitesLycee(table, q) {
+  const vide = { col: null, filtres: [], mots: new Set(), spans: [] };
+  const L = _colonnesLycee(table);
+  if (!L.ens) return vide;
+  const cle = `${q}`;
+  table._speCache = table._speCache || new Map();
+  if (table._speCache.has(cle)) return table._speCache.get(cle);
+  const sujets = _sujetsLycee(table);
+  let qs = q;
+  const sigles = [];
+  _SIGLES_LYCEE.forEach(([re, mots]) => { if (re.test(qs)) { sigles.push(mots); qs = qs.replace(re, mots); } re.lastIndex = 0; });
+  const tokens = qs.split(' ');
+  const departs = [];
+  // après « spécialité(s) / enseignement(s) de spécialité » (sauf formation d'accueil juste avant)
+  let m; _CUES_LYCEE.lastIndex = 0;
+  while ((m = _CUES_LYCEE.exec(qs))) {
+    if (_ACCUEIL_AVANT.test(qs.slice(0, m.index))) continue;
+    departs.push(qs.slice(0, m.index + m[0].length).split(' ').filter(Boolean).length);
+  }
+  // avant « en terminale / au lycée » (« ayant fait maths en terminale »)
+  const t = qs.match(/^(.*?)\b(?:en|de) (?:classe de )?terminale\b|^(.*?)\bau lycee\b/);
+  if (t) {
+    const avant = (t[1] ?? t[2] ?? '').trim().split(' ').filter(Boolean);
+    let i = avant.length; while (i > 0 && !_COUPE_SPE.has(avant[i - 1]) && avant.length - i < 6) i--;
+    for (let j = i; j < avant.length; j++) departs.push(j); // « ayant fait histoire en terminale » : « fait » n'est pas une spécialité
+  }
+  // sigle cité seul (« les SVT admis en PASS »)
+  sigles.forEach(mots => { const w = mots.split(' ')[0]; const i = tokens.indexOf(w); if (i >= 0) departs.push(i); });
+  const out = { col: L.ens, cols: L.cols, filtres: [], mots: new Set(), spans: [] };
+  const contient = (suj, w) => suj.mots.has(w) || suj.mots.has(w + 's') || suj.mots.has(w.replace(/s$/, ''));
+  const vus = new Set();
+  const pris = new Set();
+  [...new Set(departs)].sort((a, b) => a - b).forEach(d0 => {
+    let i = d0;
+    const debut = d0;
+    while (i < tokens.length) {
+      while (i < tokens.length && (_VIDES_SPE.has(tokens[i]) || _VERBES_SPE.has(tokens[i]))) i++;
+      if (i >= tokens.length || _COUPE_SPE.has(tokens[i])) break;
+      let fait = null;
+      for (let k = Math.min(7, tokens.length - i); k >= 1 && !fait; k--) {
+        const seq = tokens.slice(i, i + k);
+        if (seq.some(w => _COUPE_SPE.has(w)) || _VIDES_SPE.has(seq[seq.length - 1])) continue;
+        const sig = seq.filter(w => !_VIDES_SPE.has(w) && w.length >= 2);
+        if (!sig.length) continue;
+        const phrase = seq.join(' ');
+        // le nom exact d'une spécialité (« mathématiques » = Mathématiques, pas « Physique-Chimie et Mathématiques ») ;
+        // sinon plusieurs mots : à la suite dans le nom (« maths et physique » = deux spécialités) ; un mot : contenu
+        const nomN = su => normalizeText(su.nom);
+        let ok = sujets.filter(su => nomN(su) === phrase || nomN(su) === phrase + 's');
+        // puis le nom qui commence par ces mots (« physique » = Physique-Chimie…, pas « Sciences physiques et chimiques »)
+        if (!ok.length) ok = sujets.filter(su => nomN(su).startsWith(phrase + ' ') || nomN(su).startsWith(phrase + 's '));
+        if (!ok.length) ok = k > 1 ? sujets.filter(su => ` ${nomN(su)} `.includes(` ${phrase} `)) : sujets.filter(su => sig.every(w => contient(su, w)));
+        if (ok.length) fait = { k, sig, ok };
+      }
+      if (!fait) break;
+      const cleF = fait.sig.join(' ');
+      if (!vus.has(cleF)) {
+        vus.add(cleF);
+        const noms = [...new Map(fait.ok.sort((a, b) => b.n - a.n).map(x => [normalizeText(x.nom), x.nom])).values()];
+        const label = noms.length <= 3 ? noms.join(' ou ') : `${noms.length} spécialités contenant « ${fait.sig.join(' ')} »`;
+        out.filtres.push({ col: L.ens, cols: L.cols, op: 'contains_words', sujets: noms.map(normalizeText), terms: fait.sig.map(w => [w, w + 's', w.replace(/s$/, '')]), value: label, label, source: 'specialite_lycee' });
+        fait.sig.forEach(w => out.mots.add(w));
+      }
+      for (let j = debut > 0 && /^(specialites?|enseignements?|doublettes?|specialite)$/.test(tokens[debut - 1]) ? debut - 1 : debut; j < i + fait.k; j++) pris.add(j);
+      i += fait.k;
+    }
+  });
+  if (out.filtres.length) {
+    // reste de la question (pour les formations d'accueil) : sans les spécialités du lycée ni « en terminale / au lycée »
+    out.reste = tokens.filter((w, j) => !pris.has(j)).join(' ').replace(/\b(?:en|de) (?:classe de )?terminale\b|\bau lycee\b|\b(enseignements? de )?specialites?\b/g, ' ').replace(/\s+/g, ' ').trim();
+    // ce qui est expliqué par la spécialité du lycée : retiré de la question pour la recherche des formations d'accueil
+    sigles.forEach(x => x.split(' ').forEach(w => out.mots.add(w)));
+    ['ses', 'svt', 'hggsp', 'hlp', 'llcer', 'nsi', 'amc', 'eppcs', 'maths', 'math', 'pc', 'eco'].forEach(w => { if (` ${q} `.includes(` ${w} `)) out.mots.add(w); });
+  }
+  const res = out.filtres.length ? out : vide;
+  table._speCache.set(cle, res);
+  return res;
 }
 // la question sans les spécialités du lycée qu'elle cite (« spécialité droit et économie admis en droit » → « … admis en droit »)
 function _horsSpecialitesLycee(table, q) {
   const sp = _specialitesLycee(table, q);
-  if (!sp.res) return q;
-  let r = q;
-  sp.res.forEach(re => { r = r.replace(re, ' '); });
-  return r.replace(/\b(specialites?|enseignements? de specialite|doublettes?)\b/g, ' ').replace(/\s+/g, ' ').trim();
+  return sp.filtres.length && sp.reste !== undefined ? sp.reste : q;
 }
 
 function strictFiltersFromQuestion(table, question) {
@@ -487,7 +581,8 @@ function replaceConceptFiltersWithStrict(plan, question) {
   const _ensMots = _specialitesLycee(plan.table, q).mots;
   const _qHors = new Set(_horsSpecialitesLycee(plan.table, q).split(' '));
   const _formCols = new Set(formationTermsInfo(plan.table).cols);
-  const _matiere = f => f && f.op === 'eq' && _ensMots.size && _formCols.has(f.col) && normalizeText(f.value).split(' ').every(w => _ensMots.has(w) && !_qHors.has(w));
+  const _colsLycee = new Set(_colonnesLycee(plan.table).cols);
+  const _matiere = f => f && f.op === 'eq' && _ensMots.size && ((_formCols.has(f.col) && normalizeText(f.value).split(' ').every(w => _ensMots.has(w) && !_qHors.has(w))) || _colsLycee.has(f.col));
   const base = (plan.filters || []).filter(f => !strictCols.has(f.col) && !_aca(f) && !_matiere(f));
   plan.filters = mergeFiltersUnique(base, strict);
   plan.mentionedCols = Array.from(new Set([...(plan.mentionedCols || []), ...strict.map(f => f.col)]));
@@ -1075,6 +1170,13 @@ function applyFormationTerms(plan) {
   const info = formationTermsInfo(plan.table);
   if (!info.cols.length) return plan;
   const formCols = new Set(info.cols);
+  // v27.5.55 — filtre du planner sur une formation d'accueil lu dans une spécialité du lycée (« spécialité
+  // physique-chimie admis en chimie » → mention « Physique, chimie ») : retiré, seuls les mots hors spécialité comptent
+  const _spl = _specialitesLycee(plan.table, normalizeText(plan.question || ''));
+  if (_spl.filtres.length) {
+    const hors = new Set(_horsSpecialitesLycee(plan.table, normalizeText(plan.question || '')).split(' '));
+    plan.filters = (plan.filters || []).filter(f => !(f && f.op === 'eq' && formCols.has(f.col) && normalizeText(f.value).split(' ').some(w => _spl.mots.has(w) && !hors.has(w))));
+  }
   const isFormationFilter = f => f && f.source !== 'categorie_formation' && (f.source === 'termes_formation' || (formCols.has(f.col) && f.op !== 'neq'));
   const others = (plan.filters || []).filter(f => !isFormationFilter(f));
   const found = formationTermsFromQuestion(plan.table, plan.question, others);
@@ -2018,6 +2120,7 @@ const MOTS_FICHIER_CANDIDATS = new Set(`
   autre autres dehors hors leurs notre nos son sa ses lycee lycees etudiants etudiante etudiantes etudiant
   acceptee acceptees accepte acceptes acceptent accepter favorable favorables favorablement repondu reponse admise affectes affectees
   choisi choisie choisis choisies choisissent prefere preferee preferees privilegiees terminale terminales premiere classe classes
+  fait faisaient pris
 `.split(/\s+/).filter(Boolean));
 // mots traduits par un filtre (« STMG » → « Sciences et Technologies du Management… », « licence » → « L1 - CUPGE… »)
 const _SIGLES_SERIES = [[/management.*gestion/, 'stmg'], [/industrie.*developpement durable/, 'sti2d'], [/design.*arts? appliqu/, 'std2a'],
@@ -2042,6 +2145,7 @@ function motsNonReconnus(plan) {
   const cols = [plan.targetCol, plan.targetCol2, plan.sumCol, plan.groupSumCol, plan.classement?.col, plan.classement?.entite?.col, plan.part?.num, plan.part?.den, plan.part?.groupe, ...filtres.map(f => f.col)].filter(Boolean);
   const connus = new Set();
   const ajouter = t => normalizeText(t).split(' ').forEach(w => { if (w) connus.add(w); });
+  if (filtres.some(f => f.source === 'specialite_lycee')) ['ses svt hggsp hlp llcer nsi amc eppcs maths math pc eco terminale lycee specialite specialites enseignement enseignements doublette'].forEach(ajouter);
   filtres.forEach(f => { ajouter(f.value); ajouter(f.label || ''); (f.terms || []).forEach(t => (Array.isArray(t) ? t : [t]).forEach(ajouter)); (f.values || []).forEach(ajouter); (f.noms || []).forEach(ajouter); _motsTraduits(f.value).forEach(ajouter); });
   cols.forEach(c => ajouter(_hx(c)));
   (plan.table.headers || []).forEach(h => ajouter(h)); // un mot d'en-tête désigne une colonne (« taux d'accès »)
@@ -3898,24 +4002,44 @@ function _sourceEnClair(table) {
 // Retourne { texte, html } ; texte sert aussi au contexte transmis à Albert
 function _noteSpecialiteLycee(plan, filtres) {
   const table = plan.table;
-  const ensCol = (table?.headers || []).filter(Boolean).find(h => /enseignements? .*specialite|specialites? .*suivi/.test(normalizeText(h)));
-  if (!ensCol || filtres.some(f => f.col === ensCol)) return '';
-  const formCols = new Set(formationTermsInfo(table).cols);
-  const mots = new Set();
+  const L = _colonnesLycee(table);
+  if (!L.ens) return '';
+  const formCols = formationTermsInfo(table).cols;
+  const formSet = new Set(formCols);
+  const spe = filtres.filter(f => f.source === 'specialite_lycee');
+  // v27.5.55 — sens inverse : la question visait la spécialité du lycée ; combien ont une formation d'accueil du même nom
+  if (spe.length) {
+    if (filtres.some(f => f.op === 'contains_all' || (f.op === 'eq' && formSet.has(f.col)))) return ''; // les deux sont demandés
+    const parts = spe.map(f => {
+      const mots = (f.terms || []).map(t => [].concat(t));
+      const n = (table.objects || []).filter(r => { const ws = new Set(normalizeText(formCols.map(c => r?.[c] ?? '').join(' ')).split(' ')); return mots.length && mots.every(t => t.some(w => ws.has(w))); }).length;
+      // mots écrits comme dans le nom de la spécialité (accents)
+      const orig = String(f.label || '').split(/[^A-Za-zÀ-ÿ0-9]+/).filter(Boolean);
+      const joli = w => orig.find(o => normalizeText(o) === w) || w;
+      return n ? { n, mots: mots.map(t => joli(t[0])).join(' ') } : null;
+    }).filter(Boolean);
+    if (!parts.length) return '';
+    return `le chiffre porte sur les enseignements de spécialité suivis au lycée ; ${parts.map(x => `${_nf(x.n)} candidat${x.n > 1 ? 's ont' : ' a'} été admis dans une formation d'accueil dont l'intitulé contient « ${x.mots} »`).join(', ')}, ce qui est autre chose (pour eux : « candidats admis en ${parts[0].mots} »)`;
+  }
+  // sens direct : un mot de formation d'accueil (« droit ») qui est aussi dans une spécialité du lycée (« Droit et Economie »)
+  // groupes de mots : chaque mot de la formation (« arts » ET « plastiques »), sous ses formes
+  // (pas la grande catégorie : « L1 - CUPGE - DEUST - DU » n'est pas une matière)
+  const _cat = _colonneCategories(table, formationTermsInfo(table));
+  const groupes = [];
   filtres.forEach(f => {
-    if (f.op === 'contains_all' && f.source === 'termes_formation') (f.terms || []).forEach(t => [].concat(t).forEach(w => mots.add(w)));
-    else if (f.op === 'eq' && formCols.has(f.col) && f.source !== 'categorie_formation') normalizeText(f.value).split(' ').forEach(w => w.length >= 4 && mots.add(w));
+    if (f.op === 'contains_all' && f.source === 'termes_formation') (f.terms || []).forEach(t => groupes.push([].concat(t)));
+    else if (f.op === 'eq' && formSet.has(f.col) && f.source !== 'categorie_formation' && f.col !== _cat) normalizeText(f.value).split(' ').filter(w => w.length >= 4).forEach(w => groupes.push([w, w + 's', w.replace(/s$/, '')]));
   });
-  if (!mots.size) return '';
-  const cache = table._ensSujets || (table._ensSujets = (() => {
-    const m = new Map();
-    (table.objects || []).forEach(r => String(r?.[ensCol] ?? '').split('|').map(x => x.trim()).filter(Boolean).forEach(x => m.set(x, (m.get(x) || 0) + 1)));
-    return m;
-  })());
-  const sujets = [...cache.keys()].filter(x => normalizeText(x).split(' ').some(w => mots.has(w)));
+  if (!groupes.length) return '';
+  const sujets = _sujetsLycee(table).filter(x => { const ws = new Set(normalizeText(x.nom).split(' ')); return groupes.every(g => g.some(w => ws.has(w))); });
   if (!sujets.length) return '';
-  const n = (table.objects || []).filter(r => { const v = String(r?.[ensCol] ?? ''); return sujets.some(x => v.includes(x)); }).length;
-  return `le chiffre porte sur la formation d'accueil ; ${_nf(n)} candidat${n > 1 ? 's' : ''} du fichier ${n > 1 ? 'ont' : 'a'} suivi au lycée l'enseignement de spécialité ${sujets.map(x => `« ${x} »`).join(', ')}, ce qui est autre chose (pour eux : « candidats ayant suivi la spécialité ${sujets[0].replace(/^Msgn\/\s*/, '')} »)`;
+  const noms = new Set(sujets.map(x => normalizeText(x.nom)));
+  const n = (table.objects || []).filter(r => L.cols.some(c => String(r?.[c] ?? '').split('|').some(x => noms.has(normalizeText(x.replace(/^\s*Msgn\/\s*/i, '')))))).length;
+  if (!n) return '';
+  // suggestion : le nom le plus proche du mot (le plus court), pas le plus fréquent
+  const proche = sujets.slice().sort((a, b) => a.nom.length - b.nom.length)[0];
+  const affiches = sujets.sort((a, b) => b.n - a.n).slice(0, 3).map(x => `« ${x.nom} »`).join(', ') + (sujets.length > 3 ? ` et ${sujets.length - 3} autre${sujets.length > 4 ? 's' : ''}` : '');
+  return `le chiffre porte sur la formation d'accueil ; ${_nf(n)} candidat${n > 1 ? 's' : ''} du fichier ${n > 1 ? 'ont' : 'a'} suivi au lycée une spécialité dont le nom contient ce mot (${affiches}), ce qui est autre chose (pour eux : « candidats ayant suivi la spécialité ${proche.nom} »)`;
 }
 function perimetreResultat(kind, plan, result) {
   if (!plan || !result) return { texte: '', html: '' };

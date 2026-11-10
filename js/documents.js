@@ -588,8 +588,13 @@ function rowMatchesFilter(row, filter) {
   if (filter && filter.op === 'in') return (filter.values || []).includes(normalizeText(row[filter.col]));
   // v27.5.53 — mots présents dans une seule colonne (« Enseignement(s) de spécialité suivi(s) » contient « Sciences
   // Economiques et Sociales » parmi « SES | Mathématiques ») : chaque terme, sous l'une de ses formes
+  if (filter && filter.op === 'contains_words' && Array.isArray(filter.sujets) && filter.sujets.length) {
+    // v27.5.55 — spécialités du lycée nommées : une des valeurs de la case (« A | B ») est l'une d'elles
+    const parts = (filter.cols || [filter.col]).flatMap(c => String(row[c] ?? '').split('|')).map(x => normalizeText(x.replace(/^\s*Msgn\/\s*/i, '')));
+    return parts.some(x => filter.sujets.includes(x));
+  }
   if (filter && filter.op === 'contains_words') {
-    const mots = new Set(normalizeText(row[filter.col]).split(' '));
+    const mots = new Set(normalizeText((filter.cols || [filter.col]).map(c => row[c] ?? '').join(' ')).split(' '));
     return (filter.terms || []).every(t => [].concat(t).some(w => mots.has(w)));
   }
   if (filter && OPS_CHIFFRES[filter.op]) { const x = _chiffreCellule(row[filter.col]); return x !== null && OPS_CHIFFRES[filter.op](x, Number(filter.value)); }

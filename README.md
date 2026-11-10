@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-44 fichiers, 2 035 tests. Depuis la racine du repo :
+45 fichiers, 2 065 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -108,6 +108,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 `js/test_tournures_libres.js` vérifie les **tournures libres** : formules de politesse et verbes d'intention (« Bonjour, pourriez-vous me dire… », « j'aimerais savoir… » ; avant, « savoir » était cherché dans les intitulés et donnait 0), fautes de frappe (« conbien »), « y a-t-il des… », numéros de département (« dans le 33 » = Gironde ; avant : tous les BTS), portée de la négation (« non sélectives dans l'académie de Bordeaux » ; avant : hors Bordeaux), et relances : « et par académie ? » / « et pour les CPGE ? » après une moyenne gardent la mesure, « et par académie ? » après des places donne des places, « lesquelles sont à Bordeaux ? » détaille par établissement, « et l'an dernier ? » reprend la question sur la session précédente.
 
 `js/test_fichier_candidats.js` vérifie l'**export académique de suivi des candidats** (une ligne = un candidat, 22 colonnes, données fictives aux mêmes en-têtes que l'export réel) : « a eu une proposition » ≠ « a accepté » (avant : tout le fichier), taux de proposition des boursiers, formation d'accueil plutôt que spécialités du lycée (« en droit » comptait « Droit et Économie »), bonne colonne de série (bac technologique, bac pro agricole, STMG), lieux de scolarité ou d'accueil (« scolarisés à Bordeaux » donnait 0, « candidats de Pau » tout le fichier, Paris par arrondissements), hors académie, lycée d'origine ou d'accueil, public / privé, lycées agricoles, spécialités suivies au lycée (SES, NSI…), critères Oui/Non cumulés (« apprentis admis en BTS » perdait le filtre apprenti), arrêt sur ce que le fichier ne contient pas. « Droit » : la formation d'accueil est comptée, et le périmètre dit combien de candidats ont suivi au lycée l'enseignement de spécialité « Droit et Économie » ; « spécialité droit et économie » compte ces derniers.
+
+`js/test_specialites_lycee.js` vérifie la règle **spécialité du lycée ≠ spécialité / mention de la formation d'accueil**, sur le modèle du droit, pour toutes les spécialités : « candidats en X » vise la formation d'accueil et le périmètre signale les spécialités de terminale qui contiennent X ; « spécialité X », « X en terminale », les sigles (SES, SVT, NSI, EPPCS…) et les noms propres au lycée (« droit et économie ») visent la spécialité du lycée (enseignements de spécialité et spécialité de bac pro / STMG), et le périmètre signale les formations d'accueil du même nom ; nom exact d'abord (« mathématiques » ≠ « Physique-Chimie et Mathématiques »), « maths et physique » = deux spécialités.
 
 `js/test_part_groupes.js` vérifie les **taux par groupe** : « pourcentage de candidats sans proposition par département », « part des boursiers par académie », « taux de remplissage des BTS par académie » donnent un taux calculé **dans** chaque groupe (avant : la répartition du total entre groupes, lue à tort comme un taux), avec la ligne « Ensemble », l'export, le graphique et les relances (« taux de proposition des boursiers » puis « et par département ? »).
 

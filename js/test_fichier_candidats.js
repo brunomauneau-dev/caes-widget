@@ -153,14 +153,17 @@ await describe('Établissement de scolarité ou d\'accueil', () => {
 
 await describe('Spécialités suivies au lycée', () => {
   compte('combien de candidats suivant la spécialité SES', nb(r => mots(r[ENS]).has('economiques') && mots(r[ENS]).has('sociales')), 'avant : filtre perdu');
-  compte('combien de candidats ayant suivi les spécialités maths et physique', nb(r => mots(r[ENS]).has('mathematiques') && mots(r[ENS]).has('physique')));
+  // v27.5.55 — « maths et physique » = la spécialité Mathématiques ET une spécialité dont le nom commence par Physique
+  // (Physique-Chimie), pas n'importe quelle case contenant les deux mots (« Physique-Chimie et Mathématiques » de STI2D)
+  const sujets = r => String(r[ENS]).split('|').map(x => x.trim());
+  compte('combien de candidats ayant suivi les spécialités maths et physique', nb(r => sujets(r).includes('Mathématiques') && sujets(r).some(x => x.startsWith('Physique'))));
   compte('combien de candidats avec la spécialité NSI admis en BUT', nb(r => mots(r[ENS]).has('numerique') && r[ACC] === 'Oui' && r[GRP] === 'DUT'));
 });
 
 await describe('« Droit » : formation d\'accueil ou enseignement de spécialité « Droit et Economie » du lycée', () => {
   const DE = r => /Droit et Economie/.test(r[ENS]);
   const d = compte('combien de candidats en droit', nb(r => mots(r[MENT]).has('droit')), 'formation d\'accueil');
-  assert(new RegExp(`${nb(DE)} candidats du fichier ont suivi au lycée l'enseignement de spécialité « Droit et Economie »`).test(perim(d)), `le périmètre dit qu'il s'agit de la formation d'accueil et combien ont la spécialité du lycée (${nb(DE)})`);
+  assert(new RegExp(`${nb(DE)} candidats du fichier ont suivi au lycée une spécialité dont le nom contient ce mot \\(« Droit et Economie »\\)`).test(perim(d)), `le périmètre dit qu'il s'agit de la formation d'accueil et combien ont la spécialité du lycée (${nb(DE)})`);
   compte('combien de candidats ayant la spécialité droit et économie', nb(DE), 'spécialité du lycée');
   compte('combien de candidats en droit et économie', nb(DE), '« Droit et Économie » est le nom de la spécialité du lycée');
   compte('combien de candidats ayant suivi la spécialité droit en terminale', nb(DE));
