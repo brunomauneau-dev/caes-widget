@@ -223,3 +223,90 @@ export function tableOpenData(lignes, nom = 'Parcoursup 2025 — France entière
 
 // Comptage de vérité
 export const compter = (lignes, pred) => lignes.filter(pred).length;
+
+// ─── Export académique « BDD candidats » (22 colonnes, une ligne = un candidat) ─────────────────
+// Mêmes en-têtes que l'export de suivi réel de l'académie (anonymisé : sans numéro de dossier, d'où une colonne
+// sans titre), valeurs FICTIVES. Deux établissements (scolarité / accueil), deux communes, deux colonnes de série,
+// deux colonnes Oui/Non (proposition / réponse favorable), enseignements de spécialité du lycée, accueil vide pour
+// les candidats sans admission, communes par arrondissement (Paris).
+export const EXPORT_ACADEMIQUE_ENTETES = [
+  "Département de l'établissement de la scolarité", 'Code UAI établissement de la scolarité', "Commune de l'établissement de la scolarité",
+  'Zone du Pays Basque', 'Etablissement de la scolarité', '', 'A eu une proposition au cours de la procédure Parcoursup (Oui/Non)',
+  'A actuellement répondu favorablement à une proposition (Oui/Non)', 'Apprenti', 'Boursier des lycées',
+  'Ministère de rattachement établissement de la scolarité', 'Type de contrat établissement de la scolarité', 'Type de la classe',
+  'Série de la Classe', 'Spécialité', 'Enseignement(s) de spécialité suivi(s)', 'Nb total de vœux confirmés en phase principale',
+  "Grands groupes de formation d'accueil acceptée", "Académie de l'établissement d'accueil acceptée",
+  "Spécialité / mention formation d'accueil acceptée", "Etablissement d'accueil accepté", "Commune de l'établissement d'accueil accepté",
+];
+const EA_LYCEES = [
+  // nom, commune, département, UAI, ministère, contrat
+  ['Lycée Montaigne', 'Bordeaux', 'Gironde', '0330021U', "Ministère De L'éducation nationale", 'Public'],
+  ['Lycée Gustave Eiffel', 'Bordeaux', 'Gironde', '0330028B', "Ministère De L'éducation nationale", 'Public'],
+  ['Lycée Victor Louis', 'Talence', 'Gironde', '0330126H', "Ministère De L'éducation nationale", 'Public'],
+  ['Lycée agricole de Bordeaux Blanquefort', 'Blanquefort', 'Gironde', '0331424X', 'Agriculture', 'Public'],
+  ['LPO Louis De Foix', 'Bayonne', 'Pyrénées-Atlantiques', '0640001A', "Ministère De L'éducation nationale", 'Public'],
+  ['Lycée Saint-Joseph', 'Bordeaux', 'Gironde', '0331501F', "Ministère De L'éducation nationale", "Privé sous contrat d'association"],
+  ['MAISON FAMILIALE RURALE', 'Pau', 'Pyrénées-Atlantiques', '0641555P', 'Agriculture', "Privé sous contrat d'association"],
+  ['Lycée Louis Barthou', 'Pau', 'Pyrénées-Atlantiques', '0640055M', "Ministère De L'éducation nationale", 'Public'],
+  ['Lycée Max Linder', 'Libourne', 'Gironde', '0330088S', "Ministère De L'éducation nationale", 'Public'],
+  ['Lycée Bertran de Born', 'Périgueux', 'Dordogne', '0240024W', "Ministère De L'éducation nationale", 'Public'],
+  ['Lycée Bernard Palissy', 'Agen', 'Lot-et-Garonne', '0470001W', "Ministère De L'éducation nationale", 'Public'],
+  ['Lycée Victor Duruy', 'Mont-de-Marsan', 'Landes', '0400017B', "Ministère De L'éducation nationale", 'Public'],
+  ['Lycée Gustave Eiffel', 'Pau', 'Pyrénées-Atlantiques', '0640099K', "Ministère De L'éducation nationale", 'Public'],
+  ['Porte du Lot Lycée des métiers des engins de travaux publics', 'Clairac', 'Lot-et-Garonne', '0470009E', "Ministère De L'éducation nationale", 'Public'],
+];
+const EA_CLASSES = [
+  // type, série, spécialité (bac pro / STMG), enseignements
+  ['Générale', 'Série Générale', '', 'Mathématiques | Physique-Chimie'],
+  ['Générale', 'Série Générale', '', 'Histoire-Géographie, Géopolitique et Sciences politiques | Sciences Economiques et Sociales'],
+  ['Générale', 'Série Générale', '', 'Physique-Chimie | Sciences de la vie et de la Terre'],
+  ['Générale', 'Série Générale', '', 'Mathématiques | Sciences Economiques et Sociales'],
+  ['Générale', 'Série Générale', '', 'Mathématiques | Numérique et Sciences Informatiques'],
+  ['Technologique', 'Sciences et Technologies du Management et de la Gestion', 'Mercatique', 'Droit et Economie | Msgn/ Mercatique'],
+  ['Technologique', "Sciences et Technologies de l'Industrie et du Développement Durable", 'Innovation technologique et eco conception', 'Ingénierie, innovation et développement durable | Physique-Chimie et Mathématiques'],
+  ['Technologique', 'Sciences et technologies de la santé et du social', '', 'Chimie, biologie et physiopathologie humaines | Sciences et techniques sanitaires et sociales'],
+  ['Technologique', "Sciences et Technologies de l'agronomie et du vivant", '', 'Gestion des ressources et alimentation | Territoires et technologie'],
+  ['Professionnelle', 'Professionnelle', "Métiers du commerce et de la  vente option a : animation et gestion d'espace commercial", ''],
+  ['Professionnelle', 'Professionnelle', 'Accompagnement soins et services à la personne', ''],
+  ['Professionnelle', 'Professionnelle Agricole', 'Services aux personnes et animation dans les territoires', ''],
+];
+const EA_ACCUEIL = [
+  // grand groupe, mention, établissement, commune, académie
+  ['L1 - CUPGE - DEUST - DU', 'Droit', 'Université de Bordeaux - Bordeaux Métropole', 'Pessac', 'Bordeaux'],
+  ['L1 - CUPGE - DEUST - DU', 'Droit', 'Université Toulouse Capitole', 'Toulouse', 'Toulouse'],
+  ['L1 - CUPGE - DEUST - DU', "Parcours d'Accès Spécifique Santé (PASS)", 'Université de Bordeaux - Bordeaux Métropole', 'Talence', 'Bordeaux'],
+  ['L1 - CUPGE - DEUST - DU', 'Mathématiques', 'Université de Bordeaux - Bordeaux Métropole', 'Talence', 'Bordeaux'],
+  ['L1 - CUPGE - DEUST - DU', "Sciences pour l'ingénieur", 'Université de Pau et des pays de l\'Adour - Collège STEE (Pau)', 'Pau', 'Bordeaux'],
+  ['L1 - CUPGE - DEUST - DU', 'Sciences et Techniques des Activités Physiques et Sportives', 'Université de Bordeaux - Bordeaux Métropole', 'Pessac', 'Bordeaux'],
+  ['L1 - CUPGE - DEUST - DU', 'Langues étrangères appliquées', 'Université Paris Cité', 'Paris 13e  Arrondissement', 'Paris'],
+  ['BTS - BTSA - DTS - DMA', 'Management commercial opérationnel', 'Lycée Gustave Eiffel', 'Bordeaux', 'Bordeaux'],
+  ['BTS - BTSA - DTS - DMA', "Assistance technique d'ingénieur", 'Lycée Louis Barthou', 'Pau', 'Bordeaux'],
+  ['BTS - BTSA - DTS - DMA', 'Développement, animation des territoires ruraux', 'Lycée agricole de Bordeaux Blanquefort', 'Blanquefort', 'Bordeaux'],
+  ['DUT', 'Gestion des entreprises et des administrations', 'I.U.T de Bordeaux - Site de Gradignan', 'Gradignan', 'Bordeaux'],
+  ['DUT', 'Informatique', 'IUT de Toulouse', 'Toulouse', 'Toulouse'],
+  ['CPGE - CPES', 'MPSI', 'Lycée Montaigne', 'Bordeaux', 'Bordeaux'],
+  ['CPGE - CPES', 'Lettres', 'Lycée Henri IV', 'Paris  5e  Arrondissement', 'Paris'],
+  ["Formations d'ingénieurs", "Formation d'ingénieur Bac + 5", 'Bordeaux INP', 'Talence', 'Bordeaux'],
+  ['Secteur sanitaire et social', 'D.E Infirmier', 'IFSI du CHU de Bordeaux', 'Bordeaux', 'Bordeaux'],
+  ['Ecoles de commerce', 'Bachelor', 'KEDGE Business School', 'Talence', 'Bordeaux'],
+  ['CPGE - CPES', 'CPES', 'Université de Bordeaux - Bordeaux Métropole / Lycée Montaigne', 'Bordeaux', 'Bordeaux'],
+];
+export function exportAcademique(n = 4000, graine = 21) {
+  const h = hasard(graine);
+  const rows = [EXPORT_ACADEMIQUE_ENTETES.slice()];
+  for (let i = 0; i < n; i++) {
+    const L = h.choix(EA_LYCEES, [12, 10, 9, 5, 5, 6, 4, 8, 7, 7, 6, 6, 4, 3]);
+    const agricole = L[4] === 'Agriculture';
+    const C = agricole ? h.choix(EA_CLASSES.filter(c => /agricole|agronomie/i.test(c[1])).concat([EA_CLASSES[0]])) : h.choix(EA_CLASSES, [14, 10, 10, 8, 5, 8, 5, 4, 1, 6, 5, 1]);
+    const prop = h.r() < 0.79 ? 'Oui' : 'Non';
+    const acc = prop === 'Oui' && h.r() < 0.84 ? 'Oui' : 'Non';
+    const pro = C[0] === 'Professionnelle';
+    const A = acc === 'Oui' ? h.choix(EA_ACCUEIL, pro ? [1, 0, 0, 0, 0, 1, 0, 9, 4, 3, 1, 0, 0, 0, 0, 2, 0, 0] : [9, 3, 6, 3, 2, 4, 2, 3, 1, 1, 4, 2, 3, 1, 4, 3, 2, 1]) : ['', '', '', '', ''];
+    rows.push([
+      L[2], L[3], L[1], L[1] === 'Bayonne' ? 'oui' : 'non', L[0], '', prop, acc,
+      h.r() < 0.04 ? 'Oui' : 'Non', h.r() < 0.18 ? 'Boursier des lycées' : 'Non boursier du secondaire', L[4], L[5],
+      C[0], C[1], C[2], C[3], h.r() < 0.16 ? '' : h.entier(1, 40), A[0], A[4], A[1], A[2], A[3],
+    ]);
+  }
+  return rows;
+}
