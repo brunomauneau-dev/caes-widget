@@ -962,14 +962,15 @@ async function sendMessage() {
     removeLoadingMessage(loadingId);
     // v27.7 — « Formation non trouvée » : rien à exporter ni à mettre en infographie
     const _introuvable = dataExecution.kind === 'unresolved';
-    addMessage('assistant', dataExecution.html, { dataExecution, question, noActions: _introuvable });
+    // v27.5.62 — message « impression en PDF » : pas de boutons (il n'y a rien à exporter de plus)
+    addMessage('assistant', dataExecution.html, { dataExecution, question, noActions: _introuvable || dataExecution.kind === 'pdf' });
     // v27.17 — question non comprise : notée dans « À revoir » (reste dans le navigateur)
     if (_introuvable && typeof enregistrerRetour === 'function') enregistrerRetour({ type: 'non_compris', question, outil: 'arrêt', perimetre: String(dataExecution.text || '').slice(0, 300) });
     chatHistory.push({ role: 'user', content: question });
     const deCtx = dataEngineResultToContext(dataExecution);
     chatHistory.push({ role: 'assistant', content: deCtx });
     // Enregistre le bloc pour le compositeur d'infographie
-    const _skipTools = ['chart_current', 'export_excel', 'export_csv'];
+    const _skipTools = ['chart_current', 'export_excel', 'export_csv', 'export_pdf'];
     const sDE = getCurrentSession();
     if (sDE && deCtx && deCtx.length > 20 && !_introuvable && !_skipTools.includes(dataExecution.plan?.tool)) {
       try {
