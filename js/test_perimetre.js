@@ -77,7 +77,8 @@ await describe('Périmètre affiché sous le titre de chaque résultat calculé'
   const ctx = ctxOpenData(OD);
   neuf(ctx); const c = ask(ctx, 'combien de BTS').exec;
   const p = perimetre(c);
-  assert(c.kind === 'count' && /^📌 Sur quoi porte ce calcul/.test(p), 'comptage : bloc « Sur quoi porte ce calcul »');
+  // règle changée (v27.5.61) : le bloc commence par « 🧭 J'ai compris : … » (l'opération calculée), puis le périmètre
+  assert(c.kind === 'count' && /^🧭 J'ai compris : nombre de formations\. \| 📌 Sur quoi porte ce calcul/.test(p), 'comptage : « J\'ai compris », puis bloc « Sur quoi porte ce calcul »');
   assert(p.includes(`${nf(BTS)} formations retenues sur ${nf(OD.length)}`), `nombre retenu sur le total (${nf(BTS)} sur ${nf(OD.length)})`);
   assert(p.includes('open data Parcoursup 2025, France entière') && p.includes('une ligne = une formation, pas un candidat'), 'source, session et unité dites en clair');
   assert(p.includes('filtre : « Filière de formation très agrégée » = BTS'), 'filtre en clair : colonne et valeur');

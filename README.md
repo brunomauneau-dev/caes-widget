@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-48 fichiers, 2 131 tests. Depuis la racine du repo :
+49 fichiers, 2 155 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -116,6 +116,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 `js/test_plusieurs_valeurs.js` vérifie les questions qui citent **plusieurs valeurs d'une même information** : « à Bordeaux ou à Pau » (avant : Bordeaux seul), « en Gironde et dans les Landes », « BTS et BUT », « admis en CPGE ou en école d'ingénieurs » (avant : 0), « hors Bordeaux et hors Toulouse » (les deux exclusions), sur l'open data et sur l'export de candidats ; « maths et physique », « boursiers et apprentis », « Droit et Économie » gardent leur sens « les deux à la fois ».
 
 `js/test_listes.js` vérifie **« donne-moi la liste »** après un comptage (avant : export de toute la table, sans filtre) et **« quels établissements proposent… »** (avant : liste des intitulés) : les établissements retenus, avec leur commune et leur nombre de formations (ou de candidats), tous affichés.
+
+`js/test_coherence.js` vérifie les **garde-fous de cohérence** (étape 1 de fiabilité) : « J'ai compris : … » en tête de chaque réponse (l'opération calculée, en clair) ; objet demandé respecté (« combien d'académies proposent des PASS » compte des académies différentes, avant : le nombre de PASS ; sinon arrêt) ; un export juste après un résultat filtré garde ses filtres (sauf « toute la table ») ; « donne-moi la liste » sans contexte demande « la liste de quoi ? ».
 
 `js/test_part_groupes.js` vérifie les **taux par groupe** : « pourcentage de candidats sans proposition par département », « part des boursiers par académie », « taux de remplissage des BTS par académie » donnent un taux calculé **dans** chaque groupe (avant : la répartition du total entre groupes, lue à tort comme un taux), avec la ligne « Ensemble », l'export, le graphique et les relances (« taux de proposition des boursiers » puis « et par département ? »).
 
