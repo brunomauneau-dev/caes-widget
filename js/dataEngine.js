@@ -156,7 +156,7 @@ function isExplicitFreshDataQuestion(question) {
 const RELANCE_LESQUELS = /^(lesquel(?:le)?s|lesquels|quel(?:le)?s sont[- ]?(?:elles|ils)|ou sont[- ]?(?:elles|ils)|ou se trouvent[- ]?(?:elles|ils)|ou ca|lesquelles sont|lesquels sont)\b/;
 // v27.5.60 — « donne-moi la liste », « la liste des établissements », « quels sont les établissements ? » après un
 // comptage : les mêmes lignes, détaillées (avant : export de tout le fichier, 14 252 lignes sans aucun filtre)
-const RELANCE_LISTE = /^(?:(?:et |alors |ok |d accord )?(?:donne|donnez|affiche|affichez|montre|montrez|fais|faites|sors|sortez|peux tu me donner|pouvez vous me donner|je veux|je voudrais|j aimerais)(?: moi| nous)? )?(?:la |une |leur )?liste(?: des| de ces)? ?(etablissements?|lycees?|formations?|ecoles?|universites?|iut|intitules?)?(?: concernee?s?| correspondante?s?| en question)?\s*\??$|^(?:quel(?:le)?s sont (?:les|ces) (etablissements|lycees|formations|ecoles|universites)|(?:et )?(?:les|ces) (etablissements|lycees|formations)\s*\?)\s*\??$/;
+const RELANCE_LISTE = /^(?:(?:et |alors |ok |d accord )?(?:donne|donnez|affiche|affichez|montre|montrez|fais|faites|sors|sortez|peux tu me donner|pouvez vous me donner|je veux|je voudrais|j aimerais)(?: moi| nous)? )?(?:la |une |leur )?liste(?: des| de ces)? ?(etablissements?|lycees?|formations?|ecoles?|universites?|iut|intitules?)?(?: concernee?s?| correspondante?s?| en question)?\s*\??$|^(?:quel(?:le)?s sont (?:les|ces) (etablissements|lycees|formations|ecoles|universites)|(?:et )?(?:les|ces) (etablissements|lycees|formations)\s*\?)\s*\??$|^(?:et )?(?:dans )?quel(?:le)?s (etablissements|lycees|formations|ecoles|universites)(?: (?:sont[- ]?ils|sont[- ]?elles|exactement|concernes|concernees|precisement))?\s*\??$/;
 // question qui demande des établissements (« quels établissements proposent… », « liste des lycées qui… »)
 const LISTE_ETAB_RE = /\b(?:quel(?:le)?s|liste(?: des)?|lister|nommer|citer)\s+(?:les |des )?(etablissements|lycees|universites|ecoles|iut)\b/;
 // v27.25 — « et l'an dernier ? », « et en 2024 ? » : la même question sur une autre session
@@ -2983,6 +2983,11 @@ function _gardeRelances(plan, question) {
   }
   if (!plan) return plan;
   let prev = null; try { prev = getDataEngineState().lastPlan; } catch (e) { prev = null; }
+  // « quels établissements ? » sans question précédente ni critère : « lesquels ? »
+  if (!/^export/.test(plan.tool || '') && RELANCE_LISTE.test(q) && !(plan.filters || []).length) {
+    let prev0 = null; try { prev0 = getDataEngineState().lastPlan; } catch (e) { prev0 = null; }
+    if (!prev0) plan.clarification = 'quels établissements, pour quelle formation et quel lieu ? Précisez (par exemple « quels établissements proposent un BTS MCO en Gironde ? »)';
+  }
   if (/^export/.test(plan.tool || '')) {
     const tout = /\b(tout|toute|toutes|tous|entier|entiere|complet|complete|integral|integrale|ensemble du|la table|le fichier entier|toutes les lignes)\b/.test(q);
     if (tout && prev && (plan.filters || []).length && (plan.filters || []).every(f => (prev.filters || []).some(g => _cleFiltre(g) === _cleFiltre(f)))) {

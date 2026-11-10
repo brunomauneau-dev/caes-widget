@@ -70,6 +70,12 @@ await describe('« donne-moi la liste » après un comptage : les mêmes lignes,
   assert(!/\(\d+,\d %\)/.test(l.html.replace(/<details[\s\S]*?<\/details>/g, '')), 'pas de pourcentages dans une liste');
   const e = qo('donne moi la liste des établissements', true);
   assert(e?.kind === 'group_by' && /Établissements/.test(e.html) && (e.plan.filters || []).length === 2, '« la liste des établissements » : idem');
+  // v27.5.63 — trouvé par l'essai de double lecture : « quels établissements ? » en relance perdait les filtres
+  qo('combien de BTS MCO en gironde ?');
+  const qe = qo('quels établissements ?', true);
+  assert(qe?.kind === 'group_by' && (qe.plan.filters || []).length === 2 && /Établissements/.test(qe.html), '« quels établissements ? » en relance : filtres gardés (avant : tous les établissements)');
+  const sans = qo('quels établissements ?');
+  assert(sans?.kind === 'unresolved' && /pour quelle formation/.test(sans.text), '« quels établissements ? » sans question précédente : le widget demande de préciser');
   const x = qo('exporte la liste des BTS en Gironde');
   assert(x?.kind === 'export', 'faux positif : « exporte … » reste un export Excel');
 });

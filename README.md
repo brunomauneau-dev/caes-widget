@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-51 fichiers, 2 200 tests. Depuis la racine du repo :
+52 fichiers, 2 218 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -122,6 +122,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 `js/test_pdf_demande.js` vérifie les demandes **« exporte cette liste en PDF »**, « imprime ce résultat » : la dernière réponse calculée est imprimée, comme avec le bouton « 🖨 PDF » (avant : un fichier Excel) ; « exporte en Excel » reste un export Excel.
 
 `js/test_essai_double_lecture.js` vérifie le script de l'**essai « double lecture par Albert »** (`scripts/essai_double_lecture.mjs`, Actions → « Essai double lecture (Albert) ») : pour ~70 questions, la lecture attendue est comparée à celles de l'ancien moteur, du moteur actuel et d'Albert (Albert simulé dans le test) ; le bilan compte les contresens qu'Albert aurait signalés, les fausses alertes et le délai.
+
+`js/test_verification_lecture.js` vérifie la **double lecture par Albert** dans le widget (`js/verification.js`, mode prudent) : le moteur répond tout de suite ; un modèle Albert rapide (Mistral Small) relit la question en arrière-plan ; en cas de désaccord important (autre chose compté, critère, lieu ou exclusion oubliés, liste au lieu d'export…), un avertissement « ⚠️ Vérification » s'ajoute sous la réponse et l'alerte est notée dans « À revoir » ; accord, Albert indisponible ou lent : rien ne s'affiche. Mesuré avant activation (`scripts/essai_double_lecture.mjs`) : 0 fausse alerte, 71 à 73 % des contresens signalés, 1,5 à 2 s.
 
 `js/test_part_groupes.js` vérifie les **taux par groupe** : « pourcentage de candidats sans proposition par département », « part des boursiers par académie », « taux de remplissage des BTS par académie » donnent un taux calculé **dans** chaque groupe (avant : la répartition du total entre groupes, lue à tort comme un taux), avec la ligne « Ensemble », l'export, le graphique et les relances (« taux de proposition des boursiers » puis « et par département ? »).
 

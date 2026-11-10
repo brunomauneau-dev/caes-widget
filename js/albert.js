@@ -963,7 +963,14 @@ async function sendMessage() {
     // v27.7 — « Formation non trouvée » : rien à exporter ni à mettre en infographie
     const _introuvable = dataExecution.kind === 'unresolved';
     // v27.5.62 — message « impression en PDF » : pas de boutons (il n'y a rien à exporter de plus)
-    addMessage('assistant', dataExecution.html, { dataExecution, question, noActions: _introuvable || dataExecution.kind === 'pdf' });
+    const _msgEl = addMessage('assistant', dataExecution.html, { dataExecution, question, noActions: _introuvable || dataExecution.kind === 'pdf' });
+    // v27.6.25 — double lecture par Albert (en arrière-plan, ne fait pas attendre) : avertissement si désaccord important
+    if (typeof verifierLecture === 'function' && _msgEl) {
+      // questions précédentes seulement pour une relance (une question complète n'hérite de rien)
+      const _relance = ((dataExecution.plan && dataExecution.plan.filtresRepris) || []).length > 0 || (typeof isFollowUpQuestion === 'function' && isFollowUpQuestion(question));
+      const _precedentes = _relance ? chatHistory.filter(m => m.role === 'user').slice(-2).map(m => String(m.content || '')) : [];
+      verifierLecture({ exec: dataExecution, questions: [..._precedentes, question], bubble: _msgEl.querySelector ? _msgEl.querySelector('.msg-bubble') : null });
+    }
     // v27.17 — question non comprise : notée dans « À revoir » (reste dans le navigateur)
     if (_introuvable && typeof enregistrerRetour === 'function') enregistrerRetour({ type: 'non_compris', question, outil: 'arrêt', perimetre: String(dataExecution.text || '').slice(0, 300) });
     chatHistory.push({ role: 'user', content: question });

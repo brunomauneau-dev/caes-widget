@@ -21,10 +21,19 @@ import * as D from '../js/fixtures/donnees_simulees.mjs';
 const ICI = path.dirname(fileURLToPath(import.meta.url));
 const JS_DIR = path.join(ICI, '..', 'js');
 const MODULES = ['config.js', 'knowledge.js', 'documents.js', 'planner.js', 'dataEngine.js', 'sessions.js'];
+// Logique partagée avec le widget (js/verification.js), chargée dans un contexte isolé : ce qui est mesuré ici
+// est exactement ce qui tourne dans le widget
+const V = (() => {
+  const ctx = vm.createContext({ console, setTimeout, clearTimeout, AbortController, Date, JSON });
+  vm.runInContext(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'js', 'verification.js'), 'utf8'), ctx, { filename: 'verification.js' });
+  const get = n => vm.runInContext(n, ctx);
+  return { nrm: get('_nrmVerif'), famille: get('familleVerif'), famillesEgales: get('famillesEgalesVerif'), lectureMoteur: get('lectureMoteurVerif'), desaccord: get('desaccordVerif'), schemaPourAlbert: get('schemaPourAlbertVerif'), demanderLectureAlbert: get('demanderLectureAlbert'), lireLectureAlbert: get('lireLectureAlbert') };
+})();
+const nrm = V.nrm, famillesEgales = V.famillesEgales, lectureMoteur = V.lectureMoteur;
+export const famille = V.famille, desaccord = V.desaccord, schemaPourAlbert = V.schemaPourAlbert;
 const ENDPOINT = process.env.ALBERT_ENDPOINT || 'https://albert-proxy.bruno-mauneau.workers.dev/v1/chat/completions';
 const MODELE = process.env.ALBERT_MODELE || 'openweight-large';
 
-const nrm = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/œ/g, 'oe').toLowerCase().replace(/[^a-z0-9%<>=.]+/g, ' ').trim();
 
 // ─── Lectures attendues (écrites à la main) ──────────────────────────────────
 // op : compter | compter_distinct | somme | statistique | liste | repartition | classement | part | comparaison |
@@ -105,7 +114,7 @@ export const LECTURES = [
 // Questions NOUVELLES (jamais utilisées pour régler la règle d'alerte) : validation, pour mesurer honnêtement
 export const LECTURES_VALIDATION = [
   { id: 'v1', src: 'od', q: 'combien de BUT en Nouvelle-Aquitaine', op: 'compter', filtres: { formation: [['but']], region: [['nouvelle aquitaine']] } },
-  { id: 'v2', src: 'od', q: 'combien de CPGE privées', op: 'compter', filtres: { formation: [['cpge']], statut: [['prive']] } },
+  { id: 'v2', src: 'od', q: 'combien de CPGE privées', op: 'compter', filtres: { formation: [['cpge']] }, exclus: { statut: [['public']] } }, // « privé » = non public
   { id: 'v3', src: 'od', q: 'nombre de places en licence à Toulouse', op: 'somme', filtres: { formation: [['licence']], commune: [['toulouse']] } },
   { id: 'v4', src: 'od', q: 'combien de départements proposent un BTS MCO', op: 'compter_distinct', objet: 'departements', filtres: { formation: [['management commercial', 'mco']] } },
   { id: 'v5', src: 'od', q: 'combien de lycées proposent une CPGE en Gironde', op: 'compter_distinct', objet: 'etablissements', filtres: { formation: [['cpge']], departement: [['gironde']], etablissement: [['lycee']] } },
@@ -121,7 +130,7 @@ export const LECTURES_VALIDATION = [
   { id: 'v15', src: 'od', q: 'combien de communes de Gironde ont une CPGE', op: 'compter_distinct', objet: 'communes', filtres: { formation: [['cpge']], departement: [['gironde']] } },
   { id: 'v16', src: 'od', q: 'combien de BTS en apprentissage à Pau', op: 'compter', filtres: { formation: [['bts'], ['apprentissage']], commune: [['pau']] } },
   { id: 'v17', src: 'od', q: 'nombre de candidats en PASS par académie', op: ['somme', 'repartition'], groupe: 'academie', filtres: { formation: [['pass', 'acces specifique sante']] } },
-  { id: 'v18', src: 'od', q: 'exporte les CPGE de Bordeaux en Excel', op: 'export', filtres: { formation: [['cpge']], commune: [['bordeaux']] } },
+  { id: 'v18', src: 'od', q: 'exporte les CPGE de Bordeaux en Excel', op: 'export', filtres: { formation: [['cpge']], academie: [['bordeaux']] } }, // « de Bordeaux » = l'académie (convention)
   { id: 'v19', src: 'fichier', q: 'combien de boursiers admis hors académie', op: 'compter', filtres: { boursier: [['boursier']], admission: [['oui']] }, exclus: { 'academie:acc': [['bordeaux']] } },
   { id: 'v20', src: 'fichier', q: 'combien de candidats des Landes ont eu une proposition', op: 'compter', filtres: { departement: [['landes']], proposition: [['oui']] } },
   { id: 'v21', src: 'fichier', q: 'combien de candidats de la spécialité SES admis en droit', op: 'compter', filtres: { specialite_lycee: [['economiques', 'ses']], formation: [['droit']], admission: [['oui']] } },
@@ -135,61 +144,6 @@ export const LECTURES_VALIDATION = [
   { id: 'v29', src: 'fichier', q: 'combien d\'académies accueillent des candidats en licence', op: 'compter_distinct', objet: 'academies', filtres: { formation: [['licence', 'l1']] } },
   { id: 'v30', src: 'fichier', q: 'nombre moyen de vœux des candidats de Gironde', op: 'statistique', filtres: { departement: [['gironde']] } },
 ];
-
-// ─── Familles de colonnes (les deux moteurs, Albert et les lectures attendues parlent la même langue) ─────────
-export function famille(col) {
-  const c = nrm(col);
-  if (!c) return '';
-  const role = /accueil|accepte|affect/.test(c) ? ':acc' : /scolarite|origine/.test(c) ? ':ori' : '';
-  if (/enseignement.*specialite|specialites? suivi/.test(c)) return 'specialite_lycee';
-  if (/pays basque|basque/.test(c)) return 'basque';
-  if (/boursier/.test(c) && !/effectif|%|taux|dont/.test(c)) return 'boursier';
-  if (/apprenti/.test(c)) return 'apprenti';
-  if (/a eu une proposition/.test(c)) return 'proposition';
-  if (/repondu|favorabl/.test(c)) return 'admission';
-  if (/^statut|^type de contrat|public|prive/.test(c)) return 'statut';
-  if (/selectiv/.test(c)) return 'selectivite';
-  if (/serie|type de la classe|^bac\b/.test(c)) return 'serie';
-  if (/taux d acces/.test(c)) return 'taux_acces';
-  if (/capacit|places?$/.test(c)) return 'capacite';
-  if (/voeux/.test(c)) return 'voeux';
-  if (/^academie|academie/.test(c) && !/admis issus/.test(c)) return 'academie' + role;
-  if (/departement/.test(c)) return 'departement' + (role === ':acc' ? ':acc' : '');
-  if (/commune|ville/.test(c)) return 'commune' + role;
-  if (/region/.test(c)) return 'region';
-  if (/^etablissement|^lycee|^universite|etablissement d accueil|etablissement de la scolarite/.test(c)) return 'etablissement' + role;
-  if (/filiere|formation|specialite|mention|intitule|groupe|diplome/.test(c)) return 'formation';
-  return c;
-}
-// fichier de candidats : département et commune « d'origine » quand le rôle n'est pas précisé
-const famillesEgales = (a, b) => a === b || a.replace(/:ori$/, '') === b.replace(/:ori$/, '');
-
-// ─── Lecture du moteur, ramenée à la même forme ─────────────────────────────
-function lectureMoteur(exec) {
-  if (!exec) return { op: 'albert', filtres: {}, exclus: {} };
-  const p = exec.plan || {};
-  const k = exec.kind;
-  const op = k === 'count' ? (p.compterEtablissements || p.compterValeurs ? 'compter_distinct' : 'compter')
-    : k === 'sum' ? 'somme' : (k === 'stats' || k === 'stats_groupes') ? 'statistique'
-    : k === 'group_by' ? ((p.lesquelles || p.listMode) ? 'liste' : (exec.result?.somme ? 'somme' : 'repartition'))
-    : (k === 'top' || k === 'classement') ? 'classement' : (k === 'part' || k === 'part_groupes') ? 'part'
-    : k === 'compare' ? 'comparaison' : k === 'export' ? 'export' : k === 'pdf' ? 'pdf' : k === 'unresolved' ? 'arret'
-    : (k === 'evolution' || k === 'evolution_groupes') ? 'evolution' : k === 'pivot' ? 'tableau_croise' : String(k);
-  const objet = p.compterEtablissements ? 'etablissements' : p.compterValeurs ? nrm(p.compterValeurs.nom).replace(/s$/, '') + 's'
-    : (op === 'liste' && /^(etablissement|lycee|universite)/.test(nrm(p.targetCol))) ? 'etablissements' : null;
-  const groupeCol = p.part?.groupe || p.classement?.entite?.col || (['repartition', 'classement', 'statistique', 'somme'].includes(op) ? (p.targetCol && op !== 'statistique' ? p.targetCol : (exec.result?.dim || null)) : null);
-  const filtres = {}, exclus = {};
-  const ajoute = (cible, fam, vals) => { if (!fam) return; (cible[fam] = cible[fam] || []).push(vals.map(nrm).filter(Boolean)); };
-  (p.filters || []).forEach(f => {
-    if (!f) return;
-    if (f.op === 'contains_all') (f.terms || []).forEach(t => ajoute(filtres, 'formation', [].concat(t)));
-    else if (f.op === 'or') { const g = (f.groupes || []).flat(); const fam = famille(g[0]?.col || f.col); filtres[fam] = filtres[fam] || []; (f.groupes || []).forEach(gr => filtres[fam].push(gr.flatMap(x => x.op === 'contains_all' ? (x.terms || []).flat() : [x.value, ...(x.values || [])]).map(nrm))); }
-    else if (f.op === 'neq') ajoute(exclus, famille(f.col), [f.value]);
-    else if (f.op === 'contains_words') ajoute(filtres, famille(f.col), [f.value, ...(f.terms || []).flat()]);
-    else ajoute(filtres, famille(f.col), [f.value, f.label, ...(f.values || [])].filter(Boolean));
-  });
-  return { op, objet, groupe: groupeCol ? famille(groupeCol) : null, filtres, exclus };
-}
 
 // ─── Comparaison d'une lecture à l'attendu (ou de deux lectures) ─────────────
 function valeursCouvrent(attendues, obtenues) {
@@ -219,55 +173,6 @@ export function ecartLecture(att, obt) {
   }
   return null;
 }
-// Alerte = désaccord IMPORTANT entre Albert et le moteur (ce qui serait montré à l'agent). Pas d'alerte quand le
-// moteur en dit plus (« admis en BTS » : il ajoute « a accepté » ; « lycées » : nom contenant lycée), ni pour la
-// condition d'une part ou le critère d'un classement (Albert les range parfois parmi les filtres).
-const GEO = /^(commune|departement|academie|region|etablissement)/;
-const _equiv = f => ({ specialite_lycee: 'formation' }[f.replace(/:(ori|acc)$/, '')] || f.replace(/:ori$/, ''));
-const _opsProches = (a, m) => a === m
-  || (a === 'liste' && m === 'repartition') || (a === 'repartition' && m === 'liste')
-  || (a === 'somme' && m === 'repartition') || (a === 'repartition' && m === 'somme')
-  || (a === 'repartition' && m === 'classement') || (a === 'classement' && m === 'repartition')
-  || (a === 'compter_distinct' && m === 'repartition'); // « quelles académies… » : la répartition les nomme et les compte
-export function desaccord(a, m) {
-  if (!a || !m) return 'lecture manquante';
-  if (['arret', 'albert', 'erreur'].includes(m.op)) return null; // pas de chiffre donné : rien à signaler
-  // le moteur détaille davantage (répartition, taux par groupe) quand Albert ne voit qu'un total : pas d'alerte
-  const moteurDetaille = m.groupe && !a.groupe && ['compter', 'somme', 'statistique', 'part'].includes(a.op);
-  // « compter, regroupé par académie » (Albert) = répartition par académie (moteur)
-  const memeRegroupement = a.groupe && m.groupe && famillesEgales(_equiv(a.groupe), _equiv(m.groupe)) && ['compter', 'somme', 'repartition', 'classement', 'liste'].includes(a.op) && ['repartition', 'somme', 'classement', 'liste'].includes(m.op);
-  if (memeRegroupement && !Object.keys(a.filtres || {}).map(_equiv).some(f => !Object.keys(m.filtres || {}).map(_equiv).includes(f) && f !== _equiv(m.groupe) && f !== 'admission')) return null;
-  if (!_opsProches(a.op, m.op) && !moteurDetaille) return `opération : Albert ${a.op}, moteur ${m.op}`;
-  if (a.op === 'compter_distinct' && m.op === 'compter_distinct' && a.objet && m.objet && nrm(a.objet).replace(/s$/, '') !== nrm(m.objet).replace(/s$/, '')) return `objet : Albert ${a.objet}, moteur ${m.objet}`;
-  if (['comparaison', 'pdf', 'evolution', 'export'].includes(m.op)) return null;
-  if (m.op === 'part' || m.op === 'classement') {
-    // seulement un lieu / une formation de la question oubliés par le moteur
-    const fa = Object.keys(a.filtres || {}).map(_equiv).filter(f => GEO.test(f) || f === 'formation');
-    const fm = new Set(Object.keys(m.filtres || {}).map(_equiv));
-    const manque = fa.filter(f => !fm.has(f) && f !== _equiv(m.groupe || ''));
-    return manque.length ? `critère oublié par le moteur : ${manque.join(', ')}` : null;
-  }
-  // critère cité par Albert, absent du moteur (une exclusion du moteur compte : « hors académie »)
-  const fm = new Set([...Object.keys(m.filtres || {}), ...Object.keys(m.exclus || {})].map(_equiv));
-  // même lieu à un autre niveau (« à Bordeaux » : commune pour le moteur, académie pour Albert) : convention, pas un oubli
-  const valeursMoteur = Object.values(m.filtres || {}).flat(2).map(nrm).join(' | ');
-  const memeLieu = f => GEO.test(f) && (a.filtres[Object.keys(a.filtres).find(x => _equiv(x) === f)] || []).flat().map(nrm).every(v => v && valeursMoteur.includes(v));
-  const manque = Object.keys(a.filtres || {}).map(_equiv).filter(f => !fm.has(f) && f !== _equiv(m.groupe || '') && f !== 'admission' && !memeLieu(f));
-  if (manque.length) return `critère oublié par le moteur : ${[...new Set(manque)].join(', ')}`;
-  // valeur de lieu / d'établissement oubliée (« à Bordeaux ou à Pau » : Pau)
-  for (const [f, vals] of Object.entries(a.filtres || {})) {
-    if (!GEO.test(_equiv(f))) continue;
-    const cle = Object.keys(m.filtres || {}).find(x => _equiv(x) === _equiv(f));
-    if (!cle) continue; // famille absente du moteur : déjà traitée (même lieu, ou exclusion)
-    const texte = (m.filtres[cle] || []).flat().map(nrm).join(' | ');
-    const oubli = vals.flat().map(nrm).filter(v => v && !v.split(' ').some(w => w.length >= 3 && texte.includes(w)));
-    if (oubli.length) return `valeur oubliée par le moteur : ${oubli.join(', ')}`;
-  }
-  // exclusion vue par Albert, aucune exclusion dans le moteur
-  if (Object.keys(a.exclus || {}).length && !Object.keys(m.exclus || {}).length) return `exclusion oubliée par le moteur : ${Object.keys(a.exclus).join(', ')}`;
-  return null;
-}
-
 // ─── Moteurs ────────────────────────────────────────────────────────────────
 function creerCtx(dir) {
   const noopEl = () => null;
@@ -311,47 +216,8 @@ function poser(ctx, questions) {
 }
 
 // ─── Albert ─────────────────────────────────────────────────────────────────
-export function schemaPourAlbert(table) {
-  const objets = table.objects || [];
-  const lignes = (table.headers || []).filter(Boolean).map(h => {
-    const vals = new Map();
-    let num = 0, vide = 0;
-    objets.forEach(r => { const v = String(r?.[h] ?? '').trim(); if (!v) { vide++; return; } if (/^-?\d+([.,]\d+)?$/.test(v)) num++; vals.set(v, (vals.get(v) || 0) + 1); });
-    const n = objets.length - vide;
-    if (n && num >= n * 0.8) return `- « ${h} » : nombre`;
-    const top = [...vals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([v]) => v);
-    return `- « ${h} » : texte, ${vals.size} valeurs${vals.size <= 60 ? ` (ex. : ${top.join(' ; ')})` : ` (ex. : ${top.slice(0, 5).join(' ; ')})`}`;
-  });
-  return `Une ligne = ${table.rowUnit === 'formation' ? 'une formation' : 'un candidat'}. Colonnes :\n${lignes.join('\n')}`;
-}
-const CONSIGNE = `Tu traduis une question d'un agent d'orientation en plan de calcul, pour vérifier la lecture d'un moteur de calcul.
-Tu ne calcules rien. Réponds UNIQUEMENT par un objet JSON, sans texte autour :
-{"operation": "...", "objet": "...", "filtres": [{"colonne": "...", "valeurs": ["..."]}], "exclusions": [{"colonne": "...", "valeurs": ["..."]}], "regroupement": "..."}
-- operation : compter (nombre de lignes) | compter_distinct (nombre d'établissements, d'académies, de communes… différents) | somme | statistique (moyenne, médiane…) | liste (lister des établissements ou des intitulés) | repartition (effectifs par valeur d'une colonne) | classement (les plus / les moins, top N) | part (pourcentage, taux, proportion) | comparaison (comparer deux groupes) | evolution (entre années) | export (fichier Excel/CSV) | pdf (impression)
-- objet : seulement pour compter_distinct et liste : etablissements | academies | departements | communes | regions | formations
-- colonne : nom EXACT d'une colonne de la liste ; pour un mot d'intitulé de formation (BTS, MCO, droit, PASS…), utilise "formation"
-- valeurs : telles qu'on les trouve dans la colonne, ou les mots de la question ; plusieurs valeurs = l'une ou l'autre
-- exclusions : valeurs exclues (« hors », « sauf », « non »)
-- regroupement : colonne du « par … », du classement, ou des groupes du taux ; sinon null
-- une question de relance (« et pour… », « combien ont… », « la liste », « parmi eux ») reprend les filtres des questions précédentes`;
 export async function lectureAlbert(fetchImpl, table, questions) {
-  const conv = questions.length > 1 ? `Questions précédentes de la conversation :\n${questions.slice(0, -1).map(x => `- ${x}`).join('\n')}\n\n` : '';
-  const debut = Date.now();
-  const r = await fetchImpl(ENDPOINT, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: MODELE, temperature: 0, messages: [{ role: 'system', content: `${CONSIGNE}\n\n${schemaPourAlbert(table)}` }, { role: 'user', content: `${conv}Question : ${questions[questions.length - 1]}` }] }) });
-  const ms = Date.now() - debut;
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const texte = (await r.json())?.choices?.[0]?.message?.content || '';
-  const m = texte.match(/\{[\s\S]*\}/);
-  if (!m) throw new Error('réponse sans JSON');
-  const j = JSON.parse(m[0]);
-  const filtres = {}, exclus = {};
-  const fam = c => /^formation$/i.test(String(c || '').trim()) ? 'formation' : famille(c);
-  (j.filtres || []).forEach(f => { const k = fam(f.colonne); if (k) (filtres[k] = filtres[k] || []).push(...[].concat(f.valeurs || []).map(v => [nrm(v)])); });
-  (j.exclusions || []).forEach(f => { const k = fam(f.colonne); if (k) (exclus[k] = exclus[k] || []).push(...[].concat(f.valeurs || []).map(v => [nrm(v)])); });
-  const op = nrm(j.operation).replace(/ /g, '_');
-  const objet = j.objet && ['compter_distinct', 'liste'].includes(op) ? nrm(j.objet) : null;
-  return { lecture: { op, objet, groupe: j.regroupement && j.regroupement !== 'null' ? fam(j.regroupement) : null, filtres, exclus }, ms, brut: m[0] };
+  return V.demanderLectureAlbert(questions, table, { fetchImpl, endpoint: ENDPOINT, modele: MODELE, delaiMaxMs: 60000 });
 }
 
 // ─── Essai ──────────────────────────────────────────────────────────────────

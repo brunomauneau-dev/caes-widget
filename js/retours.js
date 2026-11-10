@@ -10,6 +10,7 @@ const RETOURS_TYPES = {
   signalement: 'Signalée par un agent',
   non_compris: 'Non comprise par le widget',
   chiffres_douteux: 'Chiffres d’Albert non vérifiés',
+  alerte_lecture: 'Lecture de la question à vérifier (double lecture par Albert)',
 };
 
 const OUTILS_FR = { count: 'comptage', sum: 'somme', stats: 'moyenne', part: 'part', classement: 'classement', evolution: 'évolution', group_by: 'répartition', top: 'top', pivot: 'tableau croisé', compare: 'comparaison', export: 'export', albert: 'réponse d’Albert' };
