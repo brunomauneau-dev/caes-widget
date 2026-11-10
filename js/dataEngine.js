@@ -152,9 +152,14 @@ function isExplicitFreshDataQuestion(question) {
   return true;
 }
 
+const RELANCE_LESQUELS = /^(lesquel(?:le)?s|lesquels|quel(?:le)?s sont[- ]?(?:elles|ils)|ou sont[- ]?(?:elles|ils)|ou se trouvent[- ]?(?:elles|ils)|ou ca|lesquelles sont|lesquels sont)\b/;
+// v27.25 — « et l'an dernier ? », « et en 2024 ? » : la même question sur une autre session
+const RELANCE_SESSION = /^(?:et\s+)?(?:pour\s+|en\s+|a\s+|sur\s+)?(?:l an dernier|l annee derniere|l annee precedente|la session precedente|l an passe|l annee passee|20[12]\d|la session 20[12]\d)\s*\??$/;
 function isFilterOnlyFollowUp(question) {
   const q = normalizeText(question || '').trim();
   if (/^combien\s+(sont[- ]ils|y\s*(?:en\s+)?a[- ]?t[- ]?il|en tout|au total|maintenant|cela|ca|[cç]a)\s*\??$/.test(q)) return true;
+  // v27.25 — « lesquelles sont à Bordeaux ? », « quels sont-ils ? », « où sont-elles ? » : les mêmes, détaillés
+  if (RELANCE_LESQUELS.test(q)) return true;
   // v27.14 — « et à Bordeaux ? », « et en Gironde ? », « et dans l'académie de Toulouse ? », « et sur Pau ? »
   return /^(seulement|uniquement|avec|sans|sauf|hors|excluant|en excluant|les boursiers|les non boursiers|non boursiers|boursiers|et pour|et les|et chez|parmi les|pour les|chez les|uniquement les|notamment les|en particulier|et parmi|et a |et au |et aux |et en |et dans |et sur |et hors |et sauf )/.test(q);
 }
@@ -420,9 +425,28 @@ function inheritConversationContext(plan, question) {
     const _clesQuestion = new Set([...(plan.filters || []), ...newStrictFilters].map(_cleFiltre));
     plan.filters = mergeFiltersUnique(prevKept, [...newFilters, ...newTerms]);
 
-    if (dimensionFollowUp) {
+    // v27.25 — après une moyenne (« taux d'accès moyen des BTS »), « et par académie ? » / « et pour les CPGE ? »
+    // gardent la mesure (avant : nombre de formations par académie, ou arrêt)
+    const _prevStats = prev.tool === 'stats' || prev.tool === 'stats_groupes';
+    if (dimensionFollowUp && _prevStats) {
+      plan.tool = 'stats'; plan.statsCol = prev.statsCol || prev.targetCol; plan.statsDemandee = prev.statsDemandee;
+    } else if (dimensionFollowUp && (prev.tool === 'sum' || prev.groupSumCol)) {
+      // « combien de places en BTS » puis « et par académie ? » : places par académie (somme), pas des formations
+      plan.tool = 'group_by'; plan.groupSumCol = prev.groupSumCol || prev.sumCol; plan.sumUnit = prev.sumUnit;
+    } else if (dimensionFollowUp) {
       plan.tool = 'group_by';
       if (!plan.targetCol && prev.targetCol && !plan.dimensionIntrouvable) plan.targetCol = prev.targetCol;
+    } else if (filterFollowUp && RELANCE_LESQUELS.test(q)) {
+      // « lesquelles sont à Bordeaux ? » : les formations retenues, détaillées par établissement
+      const etab = _colEtablissement(plan.table || prev.table);
+      plan.tool = 'group_by'; plan.targetCol = etab || prev.targetCol; plan.limit = 50; plan.lesquelles = true;
+    } else if (filterFollowUp && _prevStats) {
+      plan.tool = 'stats'; plan.statsCol = prev.statsCol || prev.targetCol; plan.statsDim = prev.statsDim; plan.statsDemandee = prev.statsDemandee;
+      // filtres : comme toute relance de filtre (« et pour les CPGE ? » remplace BTS)
+      const _strict = strictFiltersFromQuestion(plan.table, question);
+      const _colsNouvelles = new Set([..._strict, ..._filtresPlanner].filter(f => f && f.op !== 'contains_all').map(f => f.col));
+      const _prevGardes = prevKept.filter(f => !(f && f.op !== 'contains_all' && _colsNouvelles.has(f.col)));
+      plan.filters = mergeFiltersUnique(mergeFiltersUnique(_prevGardes, _strict), _filtresPlanner);
     } else if (filterFollowUp) {
       plan.tool = prev.tool || plan.tool;
       if (prev.tool === 'classement' && prev.classement && !plan.classement) plan.classement = prev.classement; // « et à Bordeaux ? »
@@ -809,6 +833,11 @@ const FORMATION_TERM_STOP = new Set(`
   progression progresse recul variation compare comparee comparaison rapport relativement dernier derniere passe passee precedente
   svp merci peux pouvez voudrais aimerais veux montre montrer affiche afficher selective selectives selectif selectifs
   demande demandes demandee demandees exporte exporter export excel csv superieur superieure inferieur inferieure egal
+  bonjour bonsoir salut pourriez pourrais pourrait pourrions voudrais voudrait voudrions aimerais aimerait souhaiterais souhaite souhaiterait
+  savoir connaitre dire indiquer indiquez preciser precisez aider aide besoin cherche chercher trouver plait sil please
+  est-ce estce y-a-t-il connais sais
+  situe situee situes situees localise localisee localises localisees implante implantee implantes implantees trouve trouvent
+  lesquelles lesquels laquelle lequel elles ils
 `.trim().split(/\s+/));
 const FORMATION_COL_RE = /fili[eè]re|formation|sp[eé]cialit[eé]|mention|parcours|dipl[oô]me|intitul[eé]/i;
 const NOT_FORMATION_COL_RE = /statut|[eé]tablissement|contrat|session|acad[eé]mi|d[eé]partement|r[eé]gion|commune|ville|s[eé]lectiv|capacit|effectif|nombre|\bnb\b|pourcentage|%|taux|rang|\bdont\b|uai|code|lyc[eé]e|candidat|v[oœ]eux?|boursier|sexe/i;
@@ -1925,8 +1954,17 @@ function unresolvedPrecisionExecution(plan, pp) {
    Ne change pas le sens : abréviations (« nb de »), négations (« qui ne sont pas boursiers »),
    « dans chaque académie » (= par académie), « bacheliers généraux » (= bac général),
    « sur la commune de Bordeaux » (= à Bordeaux). */
+// v27.25 — numéros de département → noms (« combien de BTS dans le 33 » comptait tous les BTS)
+const DEPARTEMENTS_FR = { '01': 'Ain', '02': 'Aisne', '03': 'Allier', '04': 'Alpes-de-Haute-Provence', '05': 'Hautes-Alpes', '06': 'Alpes-Maritimes', '07': 'Ardèche', '08': 'Ardennes', '09': 'Ariège', '10': 'Aube', '11': 'Aude', '12': 'Aveyron', '13': 'Bouches-du-Rhône', '14': 'Calvados', '15': 'Cantal', '16': 'Charente', '17': 'Charente-Maritime', '18': 'Cher', '19': 'Corrèze', '2a': 'Corse-du-Sud', '2b': 'Haute-Corse', '21': "Côte-d'Or", '22': "Côtes-d'Armor", '23': 'Creuse', '24': 'Dordogne', '25': 'Doubs', '26': 'Drôme', '27': 'Eure', '28': 'Eure-et-Loir', '29': 'Finistère', '30': 'Gard', '31': 'Haute-Garonne', '32': 'Gers', '33': 'Gironde', '34': 'Hérault', '35': 'Ille-et-Vilaine', '36': 'Indre', '37': 'Indre-et-Loire', '38': 'Isère', '39': 'Jura', '40': 'Landes', '41': 'Loir-et-Cher', '42': 'Loire', '43': 'Haute-Loire', '44': 'Loire-Atlantique', '45': 'Loiret', '46': 'Lot', '47': 'Lot-et-Garonne', '48': 'Lozère', '49': 'Maine-et-Loire', '50': 'Manche', '51': 'Marne', '52': 'Haute-Marne', '53': 'Mayenne', '54': 'Meurthe-et-Moselle', '55': 'Meuse', '56': 'Morbihan', '57': 'Moselle', '58': 'Nièvre', '59': 'Nord', '60': 'Oise', '61': 'Orne', '62': 'Pas-de-Calais', '63': 'Puy-de-Dôme', '64': 'Pyrénées-Atlantiques', '65': 'Hautes-Pyrénées', '66': 'Pyrénées-Orientales', '67': 'Bas-Rhin', '68': 'Haut-Rhin', '69': 'Rhône', '70': 'Haute-Saône', '71': 'Saône-et-Loire', '72': 'Sarthe', '73': 'Savoie', '74': 'Haute-Savoie', '75': 'Paris', '76': 'Seine-Maritime', '77': 'Seine-et-Marne', '78': 'Yvelines', '79': 'Deux-Sèvres', '80': 'Somme', '81': 'Tarn', '82': 'Tarn-et-Garonne', '83': 'Var', '84': 'Vaucluse', '85': 'Vendée', '86': 'Vienne', '87': 'Haute-Vienne', '88': 'Vosges', '89': 'Yonne', '90': 'Territoire de Belfort', '91': 'Essonne', '92': 'Hauts-de-Seine', '93': 'Seine-Saint-Denis', '94': 'Val-de-Marne', '95': "Val-d'Oise", '971': 'Guadeloupe', '972': 'Martinique', '973': 'Guyane', '974': 'La Réunion', '976': 'Mayotte' };
 const REFORMULATIONS = [
   [/\b(?:nb|nbre|nbr)\.?\s+(?=de\b|d['’]|des\b|total\b)/gi, 'nombre '],
+  // v27.25 — fautes de frappe courantes (« conbien de BTS » partait vers Albert)
+  [/\b(?:conbien|combein|cobien|combiens|conbiens|cmbien|comben|combie)\b/gi, 'combien'],
+  // « y a-t-il des BTS au lycée X ? », « existe-t-il des … » : un comptage (0 = non)
+  [/\b(?:est[- ]ce\s+qu['’]\s*)?(?:il\s+)?y\s+a[- ]?t[- ]?il\s+(?:des|un|une|du|de\s+la|de\s+l['’]|de)\s+/gi, 'combien de '],
+  [/\bexiste[- ]?t[- ]?il\s+(?:des|un|une|du|de\s+la|de\s+l['’]|de)\s+/gi, 'combien de '],
+  [/\b(?:dans\s+le|du|le\s+d[eé]partement(?:\s+du|\s+de\s+la|\s+des)?|d[eé]partement(?:\s+du|\s+de\s+la|\s+des)?)\s+(\d{2,3}|2[ab])\b(?!\s*(?:%|places?|formations?|candidats?|admis|premi|derni|e\b|ème))/gi,
+    (m, code) => { const nom = DEPARTEMENTS_FR[String(code).toLowerCase()]; return nom ? `en ${nom}` : m; }],
   // négations : « qui ne sont pas dans l'académie de X » → « hors … » ; « qui ne sont pas boursiers » → « non boursiers »
   [/\b(?:qui\s+)?(?:ne\s+|n['’]\s*)(?:sont|est|soient|soit)\s+pas\s+(?:dans|du|de\s+la|de\s+l['’]|des|en|issus?\s+du|originaires?\s+du)\s*/gi, 'hors '],
   [/\b(?:qui\s+)?(?:ne\s+|n['’]\s*)(?:sont|est|soient|soit)\s+pas\s+/gi, 'non '],
@@ -2153,6 +2191,7 @@ function reformulerQuestion(question) {
 function isDataEngineQuestion(question) {
   const q = normalizeText(reformulerQuestion(question || ''));
   if (!q) return false;
+  try { if (getDataEngineState().lastPlan && RELANCE_SESSION.test(q)) return true; } catch (e) { /* pas d'état */ }
   // Exclusion : demandes de synthèse/résumé général → répondre via Albert narratif, pas Data Engine
   if (/^(fais |donne|produis |r[eé]dige )?(une? )?(synth[eè]se|r[eé]sum[eé]|bilan|vue d'ensemble|portrait|analyse globale)/.test(q)) return false;
   // v27.14 — classement selon un chiffre (« les formations les plus demandées »)
@@ -2272,6 +2311,15 @@ function buildCurrentResultPlan(question, table) {
 
 function detectDataEnginePlan(question, filterContextText = question) {
   question = reformulerQuestion(question);
+  // v27.25 — « et l'an dernier ? », « et en 2024 ? » : la question précédente, sur l'autre session
+  const _prevPlan = getDataEngineState().lastPlan;
+  if (_prevPlan && _prevPlan.table && RELANCE_SESSION.test(normalizeText(question)) && !['compare', 'chart_current', 'export_current_excel', 'export_current_csv'].includes(_prevPlan.tool)) {
+    const base = _prevPlan.questionSansSession || _prevPlan.question || '';
+    const p = { ..._prevPlan, filters: (_prevPlan.filters || []).map(f => ({ ...f })), sessionsDemandees: null, sessionUnique: null, blockId: null,
+      question: `${base} ${question}`, questionSansSession: base, filtresRepris: (_prevPlan.filters || []).map(_cleFiltre), createdAt: new Date().toISOString() };
+    if (p.tool === 'stats_groupes') p.tool = 'stats';
+    return applySessions(p);
+  }
   if (!isDataEngineQuestion(question)) return null;
   const tables = getActiveQueryTables();
   if (!tables.length) return null;
@@ -2628,10 +2676,12 @@ function _finalSanitizeAnalysisPlanBase(plan) {
     const _clesEntrants = new Set(_entrants.map(_cleFiltre));
     const _prevGardes = (prev.filters || []).filter(pf => pf && _clesEntrants.has(_cleFiltre(pf)) && !(pf.op !== 'contains_all' && _colsNouv.has(pf.col)));
     plan.filters = mergeFiltersUnique(mergeFiltersUnique(_prevGardes, strict), _nouveaux);
-    if (dimensionFollowUp) {
+    // v27.25 — relance déjà résolue (mesure d'une moyenne gardée, somme par groupe, « lesquelles … ») : outil conservé
+    const _resolue = plan.statsCol || plan.lesquelles || (dimensionFollowUp && plan.groupSumCol);
+    if (dimensionFollowUp && !_resolue) {
       plan.tool = 'group_by';
     }
-    if (filterFollowUp) {
+    if (filterFollowUp && !_resolue) {
       const inheritTool = prev.tool || plan.tool;
       if (inheritTool === 'compare') {
         const newGroups = plan.table ? detectCompareGroups(plan.table, plan.question || '') : [];
@@ -3200,7 +3250,7 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     const precise = normalizeText(plan.question || '').split(' ').some(w => w.length >= 4 && !STATS_MOTS_VIDES.has(w) && !/^(candidat|candidats|formation|formations|eleves|lignes)$/.test(w));
     const repli = precise ? null : [plan.targetCol, ...(plan.mentionedCols || [])].find(c => c && !_isIdentifiantCol(c, plan.table)
       && numericStats(plan.table.objects || [], c).numericCount >= Math.max(5, (plan.table.objects || []).length * 0.1));
-    const col = inferredStatsCol || repli;
+    const col = plan.statsCol || inferredStatsCol || repli; // v27.25 — relance : la colonne de la question précédente
     if (!col) return unresolvedConceptExecution(plan, [], 'aucune colonne numérique ne correspond à la question');
     // v27.24 — taux d'accès de 0 : aucune proposition faite par Parcoursup (pas une formation très sélective) → écartés,
     // comme dans les classements ; le nombre est dit dans le périmètre
@@ -3208,16 +3258,16 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     const tauxNuls = tauxAcces ? rows.filter(r => _nombreCellule(r?.[col]) === 0).length : 0;
     const lignes = tauxNuls ? rows.filter(r => _nombreCellule(r?.[col]) !== 0) : rows;
     const qn = normalizeText(plan.question || '');
-    const demandee = /\bmedian/.test(qn) ? 'median' : /\bminimum\b|\bmin\b|\ble plus bas\b|\bplus faible\b/.test(qn) ? 'min' : /\bmaximum\b|\bmax\b|\ble plus (haut|eleve)\b/.test(qn) ? 'max' : 'avg';
+    const demandee = plan.statsDemandee && !/\b(median|minimum|maximum|min|max|moyen|moyenne)\b/.test(qn) ? plan.statsDemandee : /\bmedian/.test(qn) ? 'median' : /\bminimum\b|\bmin\b|\ble plus bas\b|\bplus faible\b/.test(qn) ? 'min' : /\bmaximum\b|\bmax\b|\ble plus (haut|eleve)\b/.test(qn) ? 'max' : 'avg';
     // « … par académie / par filière » : une statistique par groupe
-    const dim = _colonneDimension(plan.table, qn, col);
+    const dim = _colonneDimension(plan.table, qn, col) || plan.statsDim || null;
     if (dim) {
       const groupes = new Map();
       lignes.forEach(r => { const v = String(r?.[dim] ?? '').trim(); if (!v) return; if (!groupes.has(v)) groupes.set(v, []); groupes.get(v).push(r); });
       const lignesG = [...groupes.entries()].map(([valeur, rs]) => ({ valeur, ...numericStats(rs, col) })).filter(g => g.numericCount > 0)
         .sort((a, b) => (b[demandee] ?? -Infinity) - (a[demandee] ?? -Infinity) || a.valeur.localeCompare(b.valeur, 'fr'));
       const result = { col, dim, demandee, groupes: lignesG, total: rows.length, tauxNuls, ensemble: numericStats(lignes, col) };
-      const p2 = { ...plan, tool: 'stats_groupes', targetCol: col };
+      const p2 = { ...plan, tool: 'stats_groupes', targetCol: col, statsCol: col, statsDim: dim, statsDemandee: demandee };
       const exec = { kind: 'stats_groupes', plan: p2, result, text: `Stats ${col} par ${dim} :\n` + lignesG.slice(0, 40).map(g => `${g.valeur} : moyenne ${g.avg}, médiane ${g.median} (${g.numericCount})`).join('\n') };
       exec.html = renderStatsGroupesHtml(p2, result);
       rememberDataEngineExecution(exec);
@@ -3231,7 +3281,7 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     }
     const exec = {
       kind: 'stats',
-      plan: { ...plan, targetCol: col },
+      plan: { ...plan, targetCol: col, statsCol: col, statsDemandee: demandee },
       result: stats,
       text: `Stats ${col}: ${({ avg: 'moyenne', median: 'médiane', min: 'minimum', max: 'maximum' })[demandee]} ${stats[demandee]} (moyenne ${stats.avg}, médiane ${stats.median}, min ${stats.min}, max ${stats.max})`,
       html: renderDataEngineResultHtml('stats', { ...plan, targetCol: col }, stats)
@@ -3513,7 +3563,7 @@ function perimetreResultat(kind, plan, result) {
   }
   // v27.17 — 0 dans la commune de Bordeaux, mais des formations dans l'académie de Bordeaux (PASS à Talence) :
   // le 0 est exact, mais l'agent pensait sans doute à l'académie ou au département → on le dit
-  if (['count', 'count_rows', 'sum'].includes(kind) && retenues === 0) {
+  if (['count', 'count_rows', 'sum', 'group_by', 'top'].includes(kind) && retenues === 0) {
     const fc = filtres.find(f => f.op !== 'neq' && f.op !== 'contains_all' && !SYMBOLES_OPS[f.op] && /^(commune|ville)/.test(_hx(f.col)));
     if (fc) {
       const v = normalizeText(fc.value);
@@ -3549,7 +3599,7 @@ function perimetreResultat(kind, plan, result) {
     if (!lignes.length) {
       const seul = applyLocalActionFilters(table.objects || [], [fe]);
       const ou = [...new Set(seul.map(r => `${r?.[fe.col]}${commune && r?.[commune] ? ` (${r[commune]})` : ''}`))];
-      if (ou.length) notes.push(`aucune formation avec ces critères, mais ${ou.length > 1 ? 'les établissements de ce nom existent' : 'l\'établissement existe'} ailleurs : ${ou.slice(0, 8).join(' ; ')}${ou.length > 8 ? ' …' : ''} (${_nf(seul.length)} formation${seul.length > 1 ? 's' : ''})`);
+      if (ou.length) notes.push(`aucune formation avec ces critères ; ${ou.length > 1 ? 'les établissements de ce nom figurent' : 'l\'établissement figure'} dans les données avec d'autres formations ou ailleurs : ${ou.slice(0, 8).join(' ; ')}${ou.length > 8 ? ' …' : ''} (${_nf(seul.length)} formation${seul.length > 1 ? 's' : ''} en tout)`);
     }
   }
   // v27.22 — catégorie exacte (« Licence ») : formations d'une catégorie voisine (« Licence_Las ») laissées de côté

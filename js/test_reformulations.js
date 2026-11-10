@@ -123,7 +123,11 @@ const GROUPES_OD = [
     'combien de formations dans la ville de Bordeaux'] },
   { nom: 'formations en Gironde', type: 'count', v: m(o => o.dep === 'Gironde'), variantes: [
     'combien de formations en Gironde', 'nombre de formations en Gironde', 'combien de formations dans la Gironde', 'combien de formations dans le département de la Gironde',
-    'combien de formations en gironde'] },
+    'combien de formations en gironde', 'combien de formations dans le 33', 'nombre de formations du 33'] }, // v27.25 — numéro de département
+  // v27.25 — le « non » de « non sélectives » ne nie pas l'académie (open data réel : 3 088 hors Bordeaux)
+  { nom: 'formations non sélectives de l\'académie de Bordeaux', type: 'count', v: m(o => o.selectivite === 'formation non sélective' && o.aca === 'Bordeaux'), variantes: [
+    "combien de formations non sélectives dans l'académie de Bordeaux", "combien de formations ne sont pas sélectives dans l'académie de Bordeaux",
+    "combien de formations qui ne sont pas sélectives dans l'académie de Bordeaux", "j'aimerais savoir combien de formations non sélectives il y a dans l'académie de Bordeaux"] },
   { nom: 'formations en Nouvelle-Aquitaine', type: 'count', v: m(o => o.region === 'Nouvelle-Aquitaine'), variantes: [
     'combien de formations en Nouvelle-Aquitaine', 'nombre de formations en Nouvelle Aquitaine', 'combien de formations dans la région Nouvelle-Aquitaine',
     'combien de formations en nouvelle-aquitaine'] },
