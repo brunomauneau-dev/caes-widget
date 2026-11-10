@@ -1482,7 +1482,8 @@ function detecterClassement(table, question) {
   // « les communes avec le plus de formations », « les lycées avec le plus de candidats » (une ligne = un candidat) :
   // classement par nombre de lignes = répartition triée (outil top)
   const sujet = q.match(/(?:^|\b(?:les|quel(?:le)?s?|top\s*\d*\s*(?:des)?|classement des)\s+(?:\d+\s+)?)(academies?|regions?|departements?|communes?|villes?|etablissements?|lycees?|universites?|ecoles?)\b(?!\s+(?:de|d|du|des)\s(?!accueil|scolarite|origine))/);
-  if (sujet && /\b(le|les) plus de (formations?|lignes?|candidats?|eleves|dossiers?|bacheliers?|boursiers?|admis)\b|\b(le|les) plus (nombreu|represente|frequent)/.test(q)) {
+  // (« quels lycées proposent le plus de BTS » : le nombre de lignes retenues par le filtre BTS, par lycée)
+  if (sujet && /\b(le|les) plus de (formations?|lignes?|candidats?|eleves|dossiers?|bacheliers?|boursiers?|admis|[a-z0-9]{2,})\b|\b(le|les) plus (nombreu|represente|frequent)/.test(q)) {
     const e = CLASSEMENT_ENTITES.find(x => x.re.test(sujet[1]));
     // v27.5.56 — fichier de candidats : lycée de scolarité ou établissement d'accueil (« les universités qui accueillent… »)
     let ecol = e && headers.find(h => e.col(_hx(h)));
@@ -2113,6 +2114,7 @@ const LIEUX_AMBIGUS = new Set('somme manche nord lot var ain cher orne oise eure
    source où une ligne = une formation, chaque mot porteur de sens doit correspondre à un filtre, à une colonne
    utilisée ou à un mot connu (outils de la question, lieux, mesures). Sinon le moteur s'arrête et le nomme. */
 const MOTS_QUESTION = new Set(`
+  eux elles ceux celles entre parmi
   combien quel quelle quels quelles nombre nombres total totale totaux somme effectif effectifs compte compter
   formation formations filiere filieres ligne lignes dont avec sans pour par dans sur des les une aux leur
   est sont ont a y il elles ils ya existe existent propose proposent proposees proposes offert offerte offertes offerts

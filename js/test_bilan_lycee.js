@@ -120,5 +120,26 @@ await describe('Comparer deux établissements', () => {
   assert(bo?.kind === 'compare' && bo.result.rows[0].count === nb(B), 'faux positif : comparaison boursiers / non-boursiers inchangée');
 });
 
+await describe('Open data : mêmes relances et classements', () => {
+  const OD = D.openData(3000, 17);
+  const co = makeCtx();
+  co.__t = D.tableOpenData(OD);
+  run(co, "defaultOpenDataTable = __t; defaultOpenDataState = 'ready';");
+  const q = (x, suite) => { if (!suite) run(co, 'window.__DATA_ENGINE_STATE = { lastPlan: null, lastExecution: null, history: [] }'); co.__q = x; const p = run(co, 'isDataEngineQuestion(__q)') ? run(co, 'detectDataEnginePlan(__q)') : null; return p ? run(co, 'runDataEnginePlan')(p, []) : null; };
+  q('combien de BTS');
+  const pub = q('combien sont publics', true);
+  assert(cnt(pub) === OD.filter(o => o.fili === 'BTS' && o.statut === 'Public').length, 'combien de BTS >> combien sont publics');
+  const sel = q('et parmi eux combien sont sélectifs', true);
+  assert(cnt(sel) === OD.filter(o => o.fili === 'BTS' && o.statut === 'Public' && o.selectivite === 'formation sélective').length, `>> « et parmi eux combien sont sélectifs » (avant : « eux » inconnu ; obtenu : ${sel?.kind})`);
+  const ly = q('quels lycées proposent le plus de BTS');
+  const att = Object.entries(OD.filter(o => o.fili === 'BTS' && /^Lycée/.test(o.etab)).reduce((m, o) => (m[o.etab] = (m[o.etab] || 0) + 1, m), {})).sort((x, y) => y[1] - x[1])[0];
+  assert(ly?.kind === 'top' && ly.result.rows[0].count === att[1], `quels lycées proposent le plus de BTS (avant : Albert ; obtenu : ${ly?.kind})`);
+  const ac = q('les académies qui ont le plus de BTS');
+  const aa = Object.entries(OD.filter(o => o.fili === 'BTS').reduce((m, o) => (m[o.aca] = (m[o.aca] || 0) + 1, m), {})).sort((x, y) => y[1] - x[1])[0];
+  assert(ac?.kind === 'top' && ac.result.rows[0].value === aa[0] && ac.result.rows[0].count === aa[1], 'les académies qui ont le plus de BTS');
+  const pl = q('les académies avec le plus de places');
+  assert(pl?.kind === 'classement', 'faux positif : « le plus de places » reste un classement par somme de places');
+});
+
 console.log(`\nRésultat : ${passed} ✓  ${failed} ✗  (${passed + failed} tests)`);
 if (failed) process.exit(1);
