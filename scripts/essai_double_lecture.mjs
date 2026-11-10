@@ -224,6 +224,7 @@ export function desaccord(a, m) {
   for (const [f, vals] of Object.entries(a.filtres || {})) {
     if (!GEO.test(_equiv(f))) continue;
     const cle = Object.keys(m.filtres || {}).find(x => _equiv(x) === _equiv(f));
+    if (!cle) continue; // famille absente du moteur : déjà traitée (même lieu, ou exclusion)
     const texte = (m.filtres[cle] || []).flat().map(nrm).join(' | ');
     const oubli = vals.flat().map(nrm).filter(v => v && !v.split(' ').some(w => w.length >= 3 && texte.includes(w)));
     if (oubli.length) return `valeur oubliée par le moteur : ${oubli.join(', ')}`;
