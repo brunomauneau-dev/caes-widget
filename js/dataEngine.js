@@ -154,6 +154,11 @@ function isExplicitFreshDataQuestion(question) {
 }
 
 const RELANCE_LESQUELS = /^(lesquel(?:le)?s|lesquels|quel(?:le)?s sont[- ]?(?:elles|ils)|ou sont[- ]?(?:elles|ils)|ou se trouvent[- ]?(?:elles|ils)|ou ca|lesquelles sont|lesquels sont)\b/;
+// v27.5.60 — « donne-moi la liste », « la liste des établissements », « quels sont les établissements ? » après un
+// comptage : les mêmes lignes, détaillées (avant : export de tout le fichier, 14 252 lignes sans aucun filtre)
+const RELANCE_LISTE = /^(?:(?:et |alors |ok |d accord )?(?:donne|donnez|affiche|affichez|montre|montrez|fais|faites|sors|sortez|peux tu me donner|pouvez vous me donner|je veux|je voudrais|j aimerais)(?: moi| nous)? )?(?:la |une |leur )?liste(?: des| de ces)? ?(etablissements?|lycees?|formations?|ecoles?|universites?|iut|intitules?)?(?: concernee?s?| correspondante?s?| en question)?\s*\??$|^(?:quel(?:le)?s sont (?:les|ces) (etablissements|lycees|formations|ecoles|universites)|(?:et )?(?:les|ces) (etablissements|lycees|formations)\s*\?)\s*\??$/;
+// question qui demande des établissements (« quels établissements proposent… », « liste des lycées qui… »)
+const LISTE_ETAB_RE = /\b(?:quel(?:le)?s|liste(?: des)?|lister|nommer|citer)\s+(?:les |des )?(etablissements|lycees|universites|ecoles|iut)\b/;
 // v27.25 — « et l'an dernier ? », « et en 2024 ? » : la même question sur une autre session
 const RELANCE_SESSION = /^(?:et\s+)?(?:pour\s+|en\s+|a\s+|sur\s+)?(?:l an dernier|l annee derniere|l annee precedente|la session precedente|l an passe|l annee passee|20[12]\d|la session 20[12]\d)\s*\??$/;
 // v27.5.56 — « combien ont eu une proposition ? », « et parmi eux combien de boursiers ? », « dont combien de filles ? » :
@@ -161,6 +166,7 @@ const RELANCE_SESSION = /^(?:et\s+)?(?:pour\s+|en\s+|a\s+|sur\s+)?(?:l an dernie
 const RELANCE_SOUS_ENSEMBLE = /^(?:et\s+)?(?:parmi\s+(?:eux|elles|ceux ci|celles ci|ces \w+)|dont|combien\s+(?:d\s+entre\s+(?:eux|elles)|parmi\s+(?:eux|elles)|ont|sont|avaient|etaient|n\s+ont)|ceux qui|celles qui|et combien)\b/;
 function isFilterOnlyFollowUp(question) {
   const q = normalizeText(question || '').trim();
+  if (RELANCE_LISTE.test(q)) return true;
   if (RELANCE_SOUS_ENSEMBLE.test(q) && !/^combien\s+sont[- ]?(ils|elles)\s*\??$/.test(q)) return true;
   if (/^combien\s+(sont[- ]ils|y\s*(?:en\s+)?a[- ]?t[- ]?il|en tout|au total|maintenant|cela|ca|[cç]a)\s*\??$/.test(q)) return true;
   // v27.25 — « lesquelles sont à Bordeaux ? », « quels sont-ils ? », « où sont-elles ? » : les mêmes, détaillés
@@ -671,6 +677,16 @@ function inheritConversationContext(plan, question) {
       const _prevGardes = prevKept.filter(f => !(f && f.op !== 'contains_all' && _colsNouvelles.has(f.col)));
       plan.filters = mergeFiltersUnique(mergeFiltersUnique(_prevGardes, _strict), _filtresPlanner);
       plan.sousEnsemble = true;
+    } else if (filterFollowUp && RELANCE_LISTE.test(q)) {
+      // v27.5.60 — « donne-moi la liste » : les lignes de la question précédente, par établissement (ou par intitulé
+      // si « la liste des formations ») ; aucun filtre perdu
+      const t = plan.table || prev.table;
+      const veutFormations = /\b(formations?|intitules?)\b/.test(q);
+      const etab = _colEtablissement(t) || _colEtablissementQuestion(t, q, q.length);
+      plan.filters = mergeFiltersUnique(prevKept, strictFiltersFromQuestion(t, question));
+      plan.tool = 'group_by'; plan.lesquelles = true; plan.limit = 300;
+      plan.targetCol = veutFormations ? (pickListColumn(t, plan.filters) || prev.targetCol) : (etab || pickListColumn(t, plan.filters) || prev.targetCol);
+      if (veutFormations) plan.listMode = true;
     } else if (filterFollowUp && RELANCE_LESQUELS.test(q)) {
       // « lesquelles sont à Bordeaux ? » : les formations retenues, détaillées par établissement
       const etab = _colEtablissement(plan.table || prev.table);
@@ -1358,6 +1374,13 @@ function pickListColumn(table, filters) {
 function applyListMode(plan) {
   if (!plan || !plan.table || plan.tool === 'compare') return plan;
   const q = normalizeText(plan.question || '');
+  // v27.5.60 — « liste des établissements proposant un BTS MCO en Gironde », « quels établissements proposent… » :
+  // les établissements, pas les intitulés de formation (avant : « BTS - Services - Management Commercial Opérationnel : 6 »)
+  if (!hasExportWords(q) && LISTE_ETAB_RE.test(q) && !CLASSEMENT_CUE.test(q)) {
+    const i = q.search(LISTE_ETAB_RE);
+    const col = _colEtablissement(plan.table) || _colEtablissementQuestion(plan.table, q, i + q.slice(i).indexOf(q.match(LISTE_ETAB_RE)[1]));
+    if (col) { plan.tool = 'group_by'; plan.targetCol = col; plan.limit = 300; plan.lesquelles = true; return plan; }
+  }
   if (hasExportWords(q) || !hasListCue(q)) return plan;
   const hasTerms = (plan.filters || []).some(f => f.source === 'termes_formation');
   if (!hasFormationNoun(q) && !hasTerms) return plan;
@@ -2686,6 +2709,9 @@ function isDataEngineQuestion(question) {
   try { if (getDataEngineState().lastPlan && RELANCE_SESSION.test(q)) return true; } catch (e) { /* pas d'état */ }
   // Exclusion : demandes de synthèse/résumé général → répondre via Albert narratif, pas Data Engine
   if (/^(fais |donne|produis |r[eé]dige )?(une? )?(synth[eè]se|r[eé]sum[eé]|bilan|vue d'ensemble|portrait|analyse globale)/.test(q)) return false;
+  // v27.5.60 — « quels établissements proposent… », et « donne-moi la liste » après un calcul
+  if (LISTE_ETAB_RE.test(q)) return true;
+  try { if (getDataEngineState().lastPlan && RELANCE_LISTE.test(q)) return true; } catch (e) { /* pas d'état */ }
   // v27.14 — classement selon un chiffre (« les formations les plus demandées »)
   try { if (CLASSEMENT_CUE.test(q) && detecterClassement((getActiveQueryTables() || [])[0], question)) return true; } catch (e) { /* source absente */ }
   // v27.15 — taux et parts (« part des boursiers parmi les admis »)
@@ -2940,6 +2966,8 @@ function _detectDataEnginePlanBase(question, filterContextText = question) {
   if (currentPlan) return currentPlan;
 
   let tool = inferMeasureIntent(question);
+  // v27.5.60 — « quels établissements proposent le BTS MCO en Gironde ? » : une liste d'établissements calculée
+  if ((!tool || /^export/.test(tool)) && LISTE_ETAB_RE.test(normalizeText(question)) && !hasExportWords(normalizeText(question))) tool = 'group_by';
   // v27.14 — « quelle formation a le plus de candidats » : classement, même sans mot d'analyse reconnu
   if ((!tool || tool === 'stats' || tool === 'count_rows') && detecterClassement(table, question)) tool = 'top';
   if ((!tool || tool === 'group_by') && detecterPart(table, question)) tool = 'count_rows';
@@ -4313,7 +4341,7 @@ function perimetreResultat(kind, plan, result) {
     const vides = (result.total || 0) - (result.filled ?? result.total ?? 0);
     if (vides > 0) notes.push(`${_nf(vides)} ${mot(vides)} sans valeur dans « ${plan.targetCol} »`);
     const affichees = Math.min((result.rows || []).length, 20);
-    if ((result.distinct || 0) > affichees) notes.push(`seules les ${_nf(affichees)} valeurs les plus fréquentes sont affichées, sur ${_nf(result.distinct)}`);
+    if ((result.distinct || 0) > affichees && !plan.lesquelles) notes.push(`seules les ${_nf(affichees)} valeurs les plus fréquentes sont affichées, sur ${_nf(result.distinct)}`);
   }
   // v27.17 — 0 dans la commune de Bordeaux, mais des formations dans l'académie de Bordeaux (PASS à Talence) :
   // le 0 est exact, mais l'agent pensait sans doute à l'académie ou au département → on le dit
@@ -4412,6 +4440,25 @@ function deTitleHtml(title, blockId = null, originalTitle = null) {
   return `<h4 class="de-block-title" data-block-id="${safeId}" data-original-title="${safeOriginal}"><span class="de-block-title-text">${safeTitle}</span>${DE_EXACT_BADGE}<button type="button" class="de-block-title-edit-btn" onclick="_deStartRenameBlockTitle(this)" title="Renommer ce bloc">✎</button><button type="button" class="de-block-title-reset-btn" onclick="_deResetBlockTitle(this)" title="Revenir au titre original">↺</button></h4>`;
 }
 
+// v27.5.60 — chaque établissement avec sa commune et son nombre de lignes, tous affichés (pas de pourcentages, pas de
+// limite à 20) : « donne-moi la liste », « quels établissements proposent le BTS MCO en Gironde ? »
+function renderListeEtablissementsHtml(plan, result, perim, filtersHtml, debug) {
+    const lignes = applyLocalActionFilters(plan.table.objects || [], plan.filters || []);
+    const cle = _cleEtablissement(plan.table, plan.targetCol);
+    const _role = /accueil|accepte|affect|admis/.test(_hx(plan.targetCol)) ? 'accueil' : /scolarite|origine/.test(_hx(plan.targetCol)) ? 'origine' : '';
+    const communes = (plan.table.headers || []).filter(h => /^(commune|ville)/.test(_hx(h)) && !/code|insee|postal/.test(_hx(h)));
+    const comCol = (_role === 'accueil' ? communes.find(h => /accueil|accepte|affect|admis/.test(_hx(h))) : _role === 'origine' ? communes.find(h => /scolarite|origine/.test(_hx(h))) : null) || communes.find(h => !/origine/.test(_hx(h)));
+    const m = new Map();
+    lignes.forEach(r => { const k = cle(r); if (!k) return; if (!m.has(k)) m.set(k, { nom: String(r[plan.targetCol]).trim(), commune: comCol ? String(r[comCol] ?? '').trim() : '', n: 0 }); m.get(k).n++; });
+    const liste = [...m.values()].sort((a, b) => a.commune.localeCompare(b.commune, 'fr') || a.nom.localeCompare(b.nom, 'fr'));
+    const unite = plan.table.rowUnit === 'formation' ? 'formation' : 'candidat';
+    const _t0 = (typeof extractBlockTitle === 'function') ? extractBlockTitle({ plan, result }, '') : '';
+    const _suite = String(_t0).includes(' — ') ? String(_t0).slice(String(_t0).indexOf(' — ')) : '';
+    const titre = `Établissements (${liste.length})${_suite}`;
+    const items = liste.map(x => `<li>${escapeHtml(x.nom)}${x.commune ? ` <span style="color:var(--gris6,#6b7280)">(${escapeHtml(x.commune)})</span>` : ''} — ${x.n.toLocaleString('fr-FR')} ${unite}${x.n > 1 ? 's' : ''}</li>`).join('');
+    const intro = `<p><strong>${liste.length.toLocaleString('fr-FR')}</strong> établissement${liste.length > 1 ? 's' : ''} pour <strong>${lignes.length.toLocaleString('fr-FR')}</strong> ${unite}${lignes.length > 1 ? 's' : ''}${comCol ? ', classés par commune' : ''}.</p>`;
+    return `${deTitleHtml(titre, plan.blockId, plan.originalTitle || titre)}${perim}${intro}<ul>${items}</ul>${filtersHtml}${debug}`;
+}
 function renderDataEngineResultHtml(tool, plan, result) {
   // v27.10 — périmètre en clair sous le titre
   const perim = perimetreResultat(tool === 'count_rows' ? 'count' : tool, plan, result).html;
@@ -4452,6 +4499,8 @@ function renderDataEngineResultHtml(tool, plan, result) {
       + (result.sansPrecision ? `<div style="background:#fff7ed;border-left:3px solid #c2410c;border-radius:4px;padding:8px 12px;margin:10px 0"><p style="margin:0 0 6px"><strong>⚠️ Liste incomplète</strong> : seules <strong>${result.filled.toLocaleString('fr-FR')}</strong> ${unit(result.filled)} sur ${result.total.toLocaleString('fr-FR')} ont une précision dans « ${escapeHtml(plan.targetCol)} » (option, lieu d'enseignement…). Les <strong>${(result.total - result.filled).toLocaleString('fr-FR')}</strong> autres n'en ont aucune : cette liste n'est pas celle de toutes les options proposées.</p><p style="margin:0 0 6px"><strong>${unit(2).replace(/^./, c => c.toUpperCase())} sans précision, par établissement</strong> :</p>${_tableauEtablissementsHtml(result.sansPrecision)}<p style="font-size:12px;color:var(--gris3);margin:6px 0 0">Pour connaître leur option, consultez la fiche de chaque formation sur Parcoursup ; la capacité aide à repérer les formations au même intitulé (deux formations peuvent avoir la même).</p></div>` : '');
     return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}${perim}<p><strong>${(result.distinct ?? rows.length).toLocaleString('fr-FR')}</strong> intitulé${(result.distinct ?? rows.length) > 1 ? 's' : ''} différent${(result.distinct ?? rows.length) > 1 ? 's' : ''} dans <strong>${escapeHtml(plan.targetCol)}</strong>, pour <strong>${result.total.toLocaleString('fr-FR')}</strong> ${unit(result.total)}.</p><ul>${rows.map(r => `<li>${escapeHtml(r.value)} : <strong>${r.count.toLocaleString('fr-FR')}</strong></li>`).join('')}</ul>${reste}<p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
   }
+  // v27.5.60 — liste d'établissements (« donne-moi la liste », « quels établissements proposent… »)
+  if ((tool === 'group_by' || tool === 'top') && plan.lesquelles && plan.targetCol && /^(etablissement|lycee|universite)/.test(_hx(plan.targetCol))) return renderListeEtablissementsHtml(plan, result, perim, filtersHtml, debug);
   if (tool === 'group_by' || tool === 'top') {
     const rows = result.rows || [];
     const clearTitle = (typeof extractBlockTitle === 'function') ? extractBlockTitle({ plan, result }, '') : (tool === 'top' ? 'Top' : 'Répartition');

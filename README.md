@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-47 fichiers, 2 118 tests. Depuis la racine du repo :
+48 fichiers, 2 131 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -114,6 +114,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 `js/test_bilan_lycee.js` vérifie les questions d'un **bilan de lycée** sur l'export de candidats : relances sur une partie de la population (« combien ont eu une proposition ? », « et parmi eux combien de boursiers ? », « dont combien admis en CPGE ? »), taux de deux groupes (« des boursiers et des non boursiers »), « part des candidats admis en BTS » (avant : 100 %), classements d'établissements d'origine ou d'accueil (« quel lycée a le plus de candidats admis en CPGE », « les universités qui accueillent le plus »), comparaison de deux lycées, avec les taux de chaque lycée (proposition, admission, boursiers, apprentis, admis hors académie).
 
 `js/test_plusieurs_valeurs.js` vérifie les questions qui citent **plusieurs valeurs d'une même information** : « à Bordeaux ou à Pau » (avant : Bordeaux seul), « en Gironde et dans les Landes », « BTS et BUT », « admis en CPGE ou en école d'ingénieurs » (avant : 0), « hors Bordeaux et hors Toulouse » (les deux exclusions), sur l'open data et sur l'export de candidats ; « maths et physique », « boursiers et apprentis », « Droit et Économie » gardent leur sens « les deux à la fois ».
+
+`js/test_listes.js` vérifie **« donne-moi la liste »** après un comptage (avant : export de toute la table, sans filtre) et **« quels établissements proposent… »** (avant : liste des intitulés) : les établissements retenus, avec leur commune et leur nombre de formations (ou de candidats), tous affichés.
 
 `js/test_part_groupes.js` vérifie les **taux par groupe** : « pourcentage de candidats sans proposition par département », « part des boursiers par académie », « taux de remplissage des BTS par académie » donnent un taux calculé **dans** chaque groupe (avant : la répartition du total entre groupes, lue à tort comme un taux), avec la ligne « Ensemble », l'export, le graphique et les relances (« taux de proposition des boursiers » puis « et par département ? »).
 
