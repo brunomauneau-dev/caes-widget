@@ -34,8 +34,22 @@ await describe('Comparaisons', () => {
   assert(/commune/.test(ecartLecture(att, { op: 'compter', filtres: { commune: [['bordeaux']] }, exclus: {} })), 'Pau oublié : écart');
   assert(/opération/.test(ecartLecture({ op: 'liste', objet: 'etablissements' }, { op: 'export', filtres: {}, exclus: {} })), 'export au lieu de liste : écart');
   assert(ecartLecture({ op: 'compter', filtres: { formation: [['management commercial']] } }, { op: 'compter', filtres: { formation: [['management'], ['commercial']] }, exclus: {} }) === null, 'mots rangés séparément : reconnus');
-  assert(/filtres/.test(desaccord({ op: 'compter', filtres: { commune: [['pau']] }, exclus: {} }, { op: 'compter', filtres: {}, exclus: {} })), 'désaccord Albert / moteur sur les filtres');
-  assert(desaccord({ op: 'compter', filtres: { 'commune': [['x']] }, exclus: {} }, { op: 'compter', filtres: { 'commune:ori': [['x']] }, exclus: {} }) === null, 'commune / commune de scolarité : même famille');
+  // règle d'alerte (v2) : seulement les désaccords importants
+  assert(/critère oublié/.test(desaccord({ op: 'compter', filtres: { commune: [['pau']] }, exclus: {} }, { op: 'compter', filtres: {}, exclus: {} })), 'critère cité par Albert, oublié par le moteur : alerte');
+  assert(desaccord({ op: 'compter', filtres: { 'commune': [['bordeaux']] }, exclus: {} }, { op: 'compter', filtres: { 'commune:ori': [['bordeaux']] }, exclus: {} }) === null, 'commune / commune de scolarité : même famille');
+  assert(/valeur oubliée.*pau/.test(desaccord({ op: 'compter', filtres: { commune: [['bordeaux'], ['pau']] }, exclus: {} }, { op: 'compter', filtres: { commune: [['bordeaux']] }, exclus: {} })), '« Bordeaux ou Pau », moteur Bordeaux seul : alerte « Pau oublié »');
+  assert(desaccord({ op: 'compter', filtres: { formation: [['bts']] }, exclus: {} }, { op: 'compter', filtres: { formation: [['bts']], admission: [['oui']] }, exclus: {} }) === null, 'le moteur ajoute « admis » : pas d\'alerte');
+  assert(desaccord({ op: 'compter', filtres: { formation: [['bts']] }, exclus: {} }, { op: 'repartition', groupe: 'academie', filtres: { formation: [['bts']] }, exclus: {} }) === null, 'le moteur détaille par académie : pas d\'alerte');
+  assert(/opération/.test(desaccord({ op: 'compter_distinct', objet: 'academies', filtres: {}, exclus: {} }, { op: 'compter', filtres: {}, exclus: {} })), 'académies comptées comme des formations : alerte');
+  assert(/opération/.test(desaccord({ op: 'liste', objet: 'etablissements', filtres: {}, exclus: {} }, { op: 'export', filtres: {}, exclus: {} })), 'liste demandée, export fait : alerte');
+  assert(desaccord({ op: 'compter', groupe: 'academie', filtres: { formation: [['bts']] }, exclus: {} }, { op: 'repartition', groupe: 'academie', filtres: { formation: [['bts']] }, exclus: {} }) === null, '« compter regroupé par académie » = répartition par académie : pas d\'alerte');
+  assert(desaccord({ op: 'compter', filtres: { formation: [['cpge']], academie: [['bordeaux']] }, exclus: {} }, { op: 'compter', filtres: { formation: [['cpge']], commune: [['bordeaux']] }, exclus: {} }) === null, '« à Bordeaux » : commune ou académie, même lieu : pas d\'alerte');
+  assert(desaccord({ op: 'compter', filtres: { 'academie:acc': [['bordeaux']] }, exclus: {} }, { op: 'compter', filtres: {}, exclus: { 'academie:acc': [['bordeaux']] } }) === null, '« hors académie » : exclusion du moteur = critère présent');
+  assert(/critère oublié/.test(desaccord({ op: 'compter', filtres: { academie: [['toulouse']] }, exclus: {} }, { op: 'compter', filtres: { commune: [['bordeaux']] }, exclus: {} })), 'lieu différent : alerte');
+  assert(/exclusion oubliée/.test(desaccord({ op: 'compter', filtres: {}, exclus: { academie: [['bordeaux']] } }, { op: 'compter', filtres: {}, exclus: {} })), 'exclusion oubliée : alerte');
+  assert(desaccord({ op: 'compter', filtres: {}, exclus: { commune: [['bordeaux']] } }, { op: 'compter', filtres: {}, exclus: { academie: [['bordeaux']] } }) === null, 'exclusion présente des deux côtés (colonne différente) : pas d\'alerte');
+  assert(desaccord({ op: 'part', filtres: { proposition: [['non']] }, exclus: {} }, { op: 'part', groupe: 'departement', filtres: {}, exclus: {} }) === null, 'condition d\'une part rangée parmi les filtres par Albert : pas d\'alerte');
+  assert(desaccord({ op: 'compter', filtres: { formation: [['x']] }, exclus: {} }, { op: 'arret', filtres: {}, exclus: {} }) === null, 'le moteur s\'est arrêté : rien à signaler');
 });
 
 await describe('Lecture d\'Albert (simulé) : JSON lu, colonnes ramenées aux familles', async () => {

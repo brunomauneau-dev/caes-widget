@@ -13,6 +13,10 @@ on:
         description: "Version de l'ancien moteur (commit ou étiquette git)"
         required: false
         default: '224ba11'
+      modele:
+        description: 'Modèle Albert (vide = celui du widget, openweight-large)'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -33,10 +37,14 @@ jobs:
           for f in config.js knowledge.js documents.js planner.js dataEngine.js sessions.js; do
             git show "${{ inputs.ancien || '224ba11' }}:js/$f" > "ancien/$f"
           done
+      - name: Modèles Albert disponibles
+        continue-on-error: true
+        run: curl -sS --max-time 30 https://albert-proxy.bruno-mauneau.workers.dev/v1/models | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{(JSON.parse(d).data||[]).forEach(m=>console.log('MODELE',m.id,m.type||''))}catch(e){console.log(d.slice(0,500))}})"
       - name: Poser les questions (ancien moteur, moteur actuel, Albert)
         run: node scripts/essai_double_lecture.mjs
         env:
           ANCIEN_JS: ancien
+          ALBERT_MODELE: ${{ inputs.modele }}
       - name: Garder le rapport
         if: always()
         uses: actions/upload-artifact@v4
