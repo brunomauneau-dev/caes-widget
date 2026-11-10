@@ -259,7 +259,8 @@ const _MATIERES_LYCEE = [
   [/\bphysique ?chimie\b|\bphysique\b|\bpc\b/, ['physique'], 'Physique-Chimie', ['physique', 'chimie', 'pc']],
   [/\bmaths?\b|\bmathematiques?\b/, ['mathematiques'], 'Mathématiques', ['maths', 'math', 'mathematiques', 'mathematique']],
   [/\bsciences de l ingenieur\b|\bsi\b/, ['ingenieur'], "Sciences de l'ingénieur", ['si', 'ingenieur']],
-  [/\bdroit et economie\b/, ['droit', 'economie'], 'Droit et Economie', ['droit', 'economie']],
+  // « Droit et Économie » (terminale STMG) ; « spécialité droit » au lycée = cette spécialité
+  [/\b(?:specialites? (?:de |du )?)?droit et eco(?:nomie)?\b|\bdroit eco\b|\bspecialites? (?:de |du )?droit\b/, ['droit', 'economie'], 'Droit et Economie', ['droit', 'economie', 'eco']],
   [/\bmercatique\b/, ['mercatique'], 'Mercatique', ['mercatique']],
 ];
 // v27.5.53 — spécialités du lycée citées dans la question : filtres « contient » sur la colonne des enseignements
@@ -268,7 +269,8 @@ function _specialitesLycee(table, q) {
   const vide = { col: null, filtres: [], mots: new Set() };
   const ensCol = (table?.headers || []).filter(Boolean).find(h => /enseignements? .*specialite|specialites? .*suivi/.test(normalizeText(h)));
   if (!ensCol) return vide;
-  const sigle = /\b(ses|svt|hggsp|hlp|llcer|nsi|amc)\b/.test(q);
+  // nom propre à une spécialité du lycée (« droit et économie » : la formation d'accueil s'appelle « Droit »)
+  const sigle = /\b(ses|svt|hggsp|hlp|llcer|nsi|amc)\b|\bdroit et eco(nomie)?\b|\bdroit eco\b/.test(q);
   const contexteLycee = /\b(specialites?|enseignements? de specialite|doublettes?)\b/.test(q) && /\b(suivi|suivie|suivis|suivies|suivant|suivent|suit|ayant|ont pris|font|fait|lycee|terminale|doublettes?|enseignements?|avec)\b/.test(q);
   if (!sigle && !contexteLycee) return vide;
   const cache = table._motsEns || (table._motsEns = new Set(_distinctValues(table, ensCol).flatMap(v => normalizeText(v).split(' '))));
@@ -276,10 +278,19 @@ function _specialitesLycee(table, q) {
   _MATIERES_LYCEE.forEach(([re, mots, nom, alias]) => {
     if (!re.test(q) || !mots.every(w => cache.has(w))) return;
     out.filtres.push({ col: ensCol, op: 'contains_words', terms: mots.map(w => [w]), value: nom, label: nom, source: 'specialite_lycee' });
+    out.res = (out.res || []).concat([new RegExp(re.source, 'g')]);
     alias.forEach(a => out.mots.add(a));
     normalizeText(nom).split(' ').forEach(w => out.mots.add(w));
   });
   return out;
+}
+// la question sans les spécialités du lycée qu'elle cite (« spécialité droit et économie admis en droit » → « … admis en droit »)
+function _horsSpecialitesLycee(table, q) {
+  const sp = _specialitesLycee(table, q);
+  if (!sp.res) return q;
+  let r = q;
+  sp.res.forEach(re => { r = r.replace(re, ' '); });
+  return r.replace(/\b(specialites?|enseignements? de specialite|doublettes?)\b/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 function strictFiltersFromQuestion(table, question) {
@@ -461,7 +472,7 @@ function replaceConceptFiltersWithStrict(plan, question) {
   const strictCols = new Set(strict.map(f => f.col));
   // v27.5.53 — mot d'intitulé déjà traduit par un filtre exact (« agricoles » → Ministère = Agriculture) : retiré
   const _pref = w => w.slice(0, 5);
-  const _motsStrict = new Set(strict.flatMap(f => normalizeText(f.value).split(/[^a-z0-9]+/).filter(w => w.length >= 5).map(_pref)));
+  const _motsStrict = new Set(strict.filter(f => f.source !== 'specialite_lycee').flatMap(f => normalizeText(f.value).split(/[^a-z0-9]+/).filter(w => w.length >= 5).map(_pref)));
   plan.filters = (plan.filters || []).filter(f => {
     if (!(f && f.op === 'contains_all' && f.source === 'termes_formation')) return true;
     const i = (f.terms || []).map((t, k) => ({ t, l: String(f.label || '').split(' + ')[k] })).filter(x => ![].concat(x.t).some(w => w.length >= 5 && _motsStrict.has(_pref(w))));
@@ -474,8 +485,9 @@ function replaceConceptFiltersWithStrict(plan, question) {
   const _communes = new Set(strict.filter(f => f.source === 'commune_a').map(f => normalizeText(f.value)));
   const _aca = f => f && f.op === 'eq' && /acad[eé]mi/.test(_hx(f.col)) && _communes.has(normalizeText(f.value)) && !/\bacademi/.test(q);
   const _ensMots = _specialitesLycee(plan.table, q).mots;
+  const _qHors = new Set(_horsSpecialitesLycee(plan.table, q).split(' '));
   const _formCols = new Set(formationTermsInfo(plan.table).cols);
-  const _matiere = f => f && f.op === 'eq' && _ensMots.size && _formCols.has(f.col) && normalizeText(f.value).split(' ').every(w => _ensMots.has(w));
+  const _matiere = f => f && f.op === 'eq' && _ensMots.size && _formCols.has(f.col) && normalizeText(f.value).split(' ').every(w => _ensMots.has(w) && !_qHors.has(w));
   const base = (plan.filters || []).filter(f => !strictCols.has(f.col) && !_aca(f) && !_matiere(f));
   plan.filters = mergeFiltersUnique(base, strict);
   plan.mentionedCols = Array.from(new Set([...(plan.mentionedCols || []), ...strict.map(f => f.col)]));
@@ -535,6 +547,12 @@ function inheritConversationContext(plan, question) {
     const _prevStats = prev.tool === 'stats' || prev.tool === 'stats_groupes';
     if (dimensionFollowUp && _prevStats) {
       plan.tool = 'stats'; plan.statsCol = prev.statsCol || prev.targetCol; plan.statsDemandee = prev.statsDemandee;
+    } else if (dimensionFollowUp && prev.tool === 'part' && prev.part) {
+      // v27.5.54 — « taux de proposition des boursiers » puis « et par département ? » : le taux dans chaque département
+      // (avant : la répartition des boursiers entre départements)
+      const g = _dimensionPart(plan.table || prev.table, question);
+      if (g) { plan.tool = 'part'; plan.part = { ...prev.part, groupe: g }; plan.targetCol = null; }
+      else plan.tool = 'group_by';
     } else if (dimensionFollowUp && (prev.tool === 'sum' || prev.groupSumCol)) {
       // « combien de places en BTS » puis « et par académie ? » : places par académie (somme), pas des formations
       plan.tool = 'group_by'; plan.groupSumCol = prev.groupSumCol || prev.sumCol; plan.sumUnit = prev.sumUnit;
@@ -1009,14 +1027,15 @@ function formationTermsFromQuestion(table, question, otherFilters = []) {
   const info = formationTermsInfo(table);
   const out = { terms: [], labels: [], missing: [] };
   if (!info.cols.length) return out;
-  const q = normalizeText(question || '');
+  let q = normalizeText(question || '');
   const covered = new Set();
   (otherFilters || []).forEach(f => normalizeText(f.value).split(' ').forEach(w => covered.add(w)));
   // Mots qui suivent « option / mention / spécialité / parcours » : toujours cherchés, signalés s'ils sont introuvables
   const forced = new Set();
   const reOpt = /\b(?:option|options|mention|mentions|specialite|specialites|parcours)\s+(?:(?:de|d|en|du|des|la|le|l)\s+)?([a-z0-9]{3,})/g;
   let m;
-  const _ens = _specialitesLycee(table, q).mots;
+  const _ens = new Set(); // v27.5.54 — les mots des spécialités du lycée sont retirés de la question, pas ignorés partout
+  q = _horsSpecialitesLycee(table, q);
   while ((m = reOpt.exec(q))) if (!FORMATION_TERM_STOP.has(m[1]) && !_ens.has(m[1])) forced.add(m[1]);
   const originals = String(question || '').split(/[^A-Za-zÀ-ÿ0-9œŒæÆ]+/).filter(Boolean);
   const labelFor = tok => originals.find(w => normalizeText(w) === tok) || tok;
@@ -1451,9 +1470,18 @@ function _phrasePart(q) {
 function detecterPart(table, question) {
   if (!table || !Array.isArray(table.objects) || !table.objects.length) return null;
   const brut = String(question || '');
-  const q = normalizeText(brut.replace(/%/g, ' pourcentage '));
+  let q = normalizeText(brut.replace(/%/g, ' pourcentage '));
   if (!PART_CUE.test(q) || /\btaux d ?acces\b/.test(q)) return null;
-  if (/\b(repartition|ventilation|moyen|moyenne|median|mediane)\b|\bpar (?!rapport)\w/.test(q)) return null; // répartition en %, moyenne d'une colonne de %
+  if (/\b(repartition|ventilation|moyen|moyenne|median|mediane)\b/.test(q)) return null; // répartition en %, moyenne d'une colonne de %
+  // v27.5.54 — « pourcentage de candidats sans proposition par département » : un taux DANS chaque département
+  // (avant : la répartition des candidats sans proposition entre départements, lue « Gironde : 50 % »)
+  let groupe = null;
+  const PAR_GROUPE = /\s*\bpar (?!rapport\b)(?:type de |grande? )?[a-z0-9]+(?: (?:d|de|du|des|de la|de l) [a-z0-9]+)?/;
+  if (/\bpar (?!rapport\b)\w/.test(q)) {
+    groupe = _dimensionPart(table, brut);
+    if (!groupe) return null;
+    q = q.replace(PAR_GROUPE, ' ').replace(/\s+/g, ' ').trim();
+  }
   const headers = (table.headers || Object.keys(table.objects[0] || {})).filter(Boolean);
   const phrase = _phrasePart(q);
   if (!phrase) return null;
@@ -1469,7 +1497,7 @@ function detecterPart(table, question) {
       // nom tel quel (_hx y ajoute la forme développée, ce qui casse les ^…$)
       const num = headers.find(h => sp.num.test(normalizeText(h)) && _estNumerique(table, h));
       const den = headers.find(h => sp.den.test(normalizeText(h)) && _estNumerique(table, h));
-      if (num && den) return { mode: 'effectifs', num, den, quoi: sp.quoi, sur: sp.sur, note: sp.note || '', phrase, mot: sp.re };
+      if (num && den) return { mode: 'effectifs', num, den, quoi: sp.quoi, sur: sp.sur, note: sp.note || '', phrase, mot: sp.re, groupe };
       if (table.rowUnit === 'formation') return { mode: 'effectifs', manque: `${sp.quoi} / ${sp.sur}`, phrase, mot: sp.re };
     }
   }
@@ -1477,7 +1505,17 @@ function detecterPart(table, question) {
   const courte = phrase.split(/\s+(?:en|a|au|aux|dans|sur|chez|pour|de l academie|du departement)\s+/)[0];
   // … sauf si la phrase cite un critère connu (apprentis, boursiers, filles…) absent des données : le garde-fou arrêtera le calcul
   if (!_filtresDePhrase(table, courte).length && !_filtresDePhrase(table, phrase).length && !CONCEPTS_A_FILTRER.some(c => c.re.test(phrase))) return null;
-  return { mode: 'lignes', phrase, mot: new RegExp(`\\b(${phrase.split(' ').filter(w => w.length >= 3).map(w => w.replace(/[^a-z0-9]/g, '')).filter(Boolean).join('|') || 'zzz'})\\b`) };
+  return { mode: 'lignes', phrase, groupe, mot: new RegExp(`\\b(${phrase.split(' ').filter(w => w.length >= 3).map(w => w.replace(/[^a-z0-9]/g, '')).filter(Boolean).join('|') || 'zzz'})\\b`) };
+}
+// Colonne du « par X » d'une part : celle que le planner choisirait pour la répartition, à défaut la dimension connue
+function _dimensionPart(table, question) {
+  try {
+    if (typeof buildPlannerPlan === 'function') {
+      const pp = buildPlannerPlan(question, question, table, 'group_by');
+      if (pp && pp.targetCol) return pp.targetCol;
+    }
+  } catch (e) { /* planner absent */ }
+  return _colonneDimension(table, normalizeText(question || ''));
 }
 // Filtres que produit la seule phrase de la part (« boursiers », « filles boursières », « formations sélectives »)
 function _filtresDePhrase(table, phrase) {
@@ -1545,6 +1583,7 @@ function executerPart(plan) {
     const num = applyLocalActionFilters(base, d.condition).length;
     result = { mode: 'lignes', num, den: base.length, pct: base.length ? num / base.length * 100 : null, total: base.length, ignorees: 0 };
   }
+  if (d.groupe) return executerPartGroupes(plan, base, result);
   if (!result.den) return unresolvedConceptExecution(plan, [], 'aucune ligne (ou un total nul) dans le périmètre : la part ne peut pas être calculée');
   const exec = { kind: 'part', plan, result, text: `PART = ${result.num} / ${result.den} = ${result.pct}` };
   exec.html = renderPartHtml(plan, result);
@@ -1555,7 +1594,50 @@ function _libellePart(plan) {
   const d = plan.part;
   if (d.mode === 'effectifs') return { quoi: d.quoi, sur: d.sur };
   const unite = plan.table?.rowUnit === 'formation' ? 'formations' : 'lignes';
+  // v27.5.54 — valeur d'état seule (« oui », « non ») : on dit de quelle colonne (« A eu une proposition… = non »)
+  const etat = d.condition.some(f => /^(oui|non)$/i.test(_filtreEnClair(f).replace(/^« [^»]+» = /, '')));
+  if (etat) return { quoi: `${unite} où ${d.condition.map(_filtreEnClair).join(' et ')}`, sur: unite };
   return { quoi: `${unite} « ${d.condition.map(f => _filtreEnClair(f).replace(/^« [^»]+» = /, '')).join(' et ')} »`, sur: unite };
+}
+// v27.5.54 — taux par groupe : numérateur et dénominateur calculés DANS chaque groupe
+function executerPartGroupes(plan, base, ensemble) {
+  const d = plan.part, col = d.groupe;
+  const groupes = new Map(); let sansGroupe = 0;
+  base.forEach(r => { const v = String(r?.[col] ?? '').trim(); if (!v) { sansGroupe++; return; } if (!groupes.has(v)) groupes.set(v, []); groupes.get(v).push(r); });
+  const lignes = [...groupes.entries()].map(([valeur, rs]) => {
+    if (d.mode === 'effectifs') {
+      let num = 0, den = 0;
+      rs.forEach(r => { const a = _nombreCellule(r?.[d.num]), b = _nombreCellule(r?.[d.den]); if (a === null || b === null) return; num += a; den += b; });
+      return { valeur, num, den, pct: den ? num / den * 100 : null };
+    }
+    const num = applyLocalActionFilters(rs, d.condition).length;
+    return { valeur, num, den: rs.length, pct: rs.length ? num / rs.length * 100 : null };
+  }).filter(g => g.den > 0).sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1) || a.valeur.localeCompare(b.valeur, 'fr'));
+  if (!lignes.length) return unresolvedConceptExecution(plan, [], `aucune ligne avec une valeur dans « ${col} » : le taux par groupe ne peut pas être calculé`);
+  const result = { mode: d.mode, groupe: col, groupes: lignes, ensemble, total: base.length, sansGroupe };
+  const p2 = { ...plan, tool: 'part', targetCol: col }; // outil « part » gardé : les relances reprennent la part
+  const lp = _libellePart(plan);
+  const exec = { kind: 'part_groupes', plan: p2, result,
+    text: `PART PAR « ${col} » (${lp.quoi} / ${lp.sur}) :\n` + lignes.slice(0, 40).map(g => `${g.valeur} : ${g.num} / ${g.den} = ${g.pct}`).join('\n') + `\nEnsemble : ${ensemble.num} / ${ensemble.den} = ${ensemble.pct}` };
+  exec.html = renderPartGroupesHtml(p2, result);
+  rememberDataEngineExecution(exec);
+  return exec;
+}
+function renderPartGroupesHtml(plan, r) {
+  const { quoi, sur } = _libellePart(plan);
+  const dim = _shortColName(r.groupe) || r.groupe;
+  const titre = `Part de ${quoi} par ${dim}`;
+  const th = 'text-align:left;padding:6px 8px;background:#e8edff;color:var(--bleu,#003189);font-size:11px;white-space:nowrap';
+  const td = 'padding:5px 8px;border-bottom:1px solid var(--gris1,#f3f4f6);font-size:12px';
+  const tdr = td + ';text-align:right';
+  const corps = r.groupes.slice(0, 40).map(g => `<tr><td style="${td}">${escapeHtml(g.valeur)}</td><td style="${tdr};font-weight:800">${g.pct === null ? '—' : `${_pctFr(g.pct)} %`}</td><td style="${tdr}">${_nf(g.num)} / ${_nf(g.den)}</td></tr>`).join('');
+  const e = r.ensemble;
+  const pied = `<tr style="background:#e8edff"><td style="${td};font-weight:800">Ensemble</td><td style="${tdr};font-weight:800">${e.pct === null ? '—' : `${_pctFr(e.pct)} %`}</td><td style="${tdr};font-weight:800">${_nf(e.num)} / ${_nf(e.den)}</td></tr>`;
+  const table = `<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;margin:8px 0"><thead><tr><th style="${th}">${escapeHtml(dim)}</th><th style="${th};text-align:right">Part</th><th style="${th};text-align:right">Détail (${escapeHtml(quoi)} / ${escapeHtml(sur)})</th></tr></thead><tbody>${corps}${pied}</tbody></table></div>`;
+  const methode = `<p style="font-size:12px;color:var(--gris3)">Chaque part est calculée à l'intérieur du groupe : ${escapeHtml(quoi)} du groupe ÷ ${escapeHtml(sur)} du groupe.${r.groupes.length > 40 ? ` 40 groupes affichés sur ${r.groupes.length}.` : ''}</p>`;
+  const perim = perimetreResultat('part_groupes', plan, r).html;
+  const debug = `<details class="msg-sources"><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : part par groupe (${escapeHtml(r.mode)}) · ${escapeHtml(r.groupe)}</div></details>`;
+  return `${deTitleHtml(titre, plan.blockId, plan.originalTitle || titre)}${perim}${table}${methode}${debug}`;
 }
 function renderPartHtml(plan, result) {
   const d = plan.part;
@@ -1913,7 +1995,8 @@ const MOTS_COURTS = new Set('a y d l s n j m t c qu de la le du au un et ou en s
 function elaguerTermesCouverts(plan) {
   const tf = (plan.filters || []).find(f => f && f.op === 'contains_all');
   if (!tf || !Array.isArray(tf.terms)) return plan;
-  const autres = (plan.filters || []).filter(f => f && f !== tf && f.op !== 'contains_all' && f.op !== 'neq' && !SYMBOLES_OPS[f.op]);
+  // (une spécialité du lycée ne couvre pas un mot de formation d'accueil : « spécialité droit et économie admis en droit »)
+  const autres = (plan.filters || []).filter(f => f && f !== tf && f.op !== 'contains_all' && f.op !== 'neq' && !SYMBOLES_OPS[f.op] && f.source !== 'specialite_lycee');
   const sing = w => String(w).replace(/(s|x)$/, '');
   const mots = new Set(autres.flatMap(f => normalizeText(f.value).split(' ')).filter(w => w.length >= 3).map(sing));
   if (!mots.size) return plan;
@@ -1934,7 +2017,7 @@ const MOTS_FICHIER_CANDIDATS = new Set(`
   jeunes bacheliers bachelieres neo suivant suivent suivi suivie suivis ont confirme confirmes confirmee confirmees aucun aucune
   autre autres dehors hors leurs notre nos son sa ses lycee lycees etudiants etudiante etudiantes etudiant
   acceptee acceptees accepte acceptes acceptent accepter favorable favorables favorablement repondu reponse admise affectes affectees
-  choisi choisie choisis choisies choisissent prefere preferee preferees privilegiees
+  choisi choisie choisis choisies choisissent prefere preferee preferees privilegiees terminale terminales premiere classe classes
 `.split(/\s+/).filter(Boolean));
 // mots traduits par un filtre (« STMG » → « Sciences et Technologies du Management… », « licence » → « L1 - CUPGE… »)
 const _SIGLES_SERIES = [[/management.*gestion/, 'stmg'], [/industrie.*developpement durable/, 'sti2d'], [/design.*arts? appliqu/, 'std2a'],
@@ -1956,7 +2039,7 @@ function motsNonReconnus(plan) {
   if (plan.dimensionIntrouvable && !plan.targetCol) return []; // « par couleur » : message dédié plus loin
   const info = formationTermsInfo(plan.table);
   const filtres = [...(plan.filters || []), ...((plan.tool === 'part' && plan.part?.condition) || [])].filter(Boolean);
-  const cols = [plan.targetCol, plan.targetCol2, plan.sumCol, plan.groupSumCol, plan.classement?.col, plan.classement?.entite?.col, plan.part?.num, plan.part?.den, ...filtres.map(f => f.col)].filter(Boolean);
+  const cols = [plan.targetCol, plan.targetCol2, plan.sumCol, plan.groupSumCol, plan.classement?.col, plan.classement?.entite?.col, plan.part?.num, plan.part?.den, plan.part?.groupe, ...filtres.map(f => f.col)].filter(Boolean);
   const connus = new Set();
   const ajouter = t => normalizeText(t).split(' ').forEach(w => { if (w) connus.add(w); });
   filtres.forEach(f => { ajouter(f.value); ajouter(f.label || ''); (f.terms || []).forEach(t => (Array.isArray(t) ? t : [t]).forEach(ajouter)); (f.values || []).forEach(ajouter); (f.noms || []).forEach(ajouter); _motsTraduits(f.value).forEach(ajouter); });
@@ -2639,6 +2722,10 @@ function detectDataEnginePlan(question, filterContextText = question) {
 function currentExecutionToRows(exec) {
   if (!exec) return [];
   const p = exec.plan || {};
+  if (exec.kind === 'part_groupes') {
+    const r = exec.result; const lp = _libellePart(p);
+    return r.groupes.map(g => ({ [r.groupe]: g.valeur, 'Part (%)': g.pct === null ? '' : Math.round(g.pct * 10) / 10, [`Effectif (${lp.quoi})`]: g.num, [`Total (${lp.sur})`]: g.den }));
+  }
   if (exec.kind === 'stats_groupes') {
     const r = exec.result;
     return r.groupes.map(g => ({ [r.dim]: g.valeur, Formations: g.numericCount, Moyenne: g.avg === null ? '' : Math.round(g.avg * 100) / 100, 'Médiane': g.median ?? '', Min: g.min ?? '', Max: g.max ?? '' }));
@@ -2761,6 +2848,14 @@ function renderCurrentChartExecution(plan) {
     const titre = `Graphique — évolution ${prev.result.lignes[0].session} → ${prev.result.lignes[prev.result.lignes.length - 1].session}`;
     const html = `${deTitleHtml(titre, prev.plan?.blockId, prev.plan?.originalTitle || titre)}${renderMiniBarChart(rows, rows.reduce((t, r) => t + r.count, 0), 'evolution.png')}`;
     return { kind: 'evolution', plan: prev.plan, result: prev.result, text: prev.text, html };
+  }
+  // v27.5.54 — taux par groupe : barres des parts (en %)
+  if (prev.kind === 'part_groupes') {
+    const r = prev.result; const lp = _libellePart(prev.plan);
+    const rows = r.groupes.slice(0, 12).map(g => ({ value: g.valeur, count: Math.round((g.pct ?? 0) * 10) / 10 }));
+    const titre = `Graphique — part de ${lp.quoi} par ${_shortColName(r.groupe) || r.groupe} (%)`;
+    const html = `${deTitleHtml(titre, prev.plan?.blockId, prev.plan?.originalTitle || titre)}${renderMiniBarChart(rows, rows.reduce((t, x) => t + x.count, 0), 'parts.png')}`;
+    return { kind: 'part_groupes', plan: prev.plan, result: prev.result, text: prev.text, html };
   }
   // v27.24 — statistiques par groupe : barres de la statistique demandée
   if (prev.kind === 'stats_groupes') {
@@ -2896,7 +2991,7 @@ function _finalSanitizeAnalysisPlanBase(plan) {
     const strictCols = new Set(strict.map(f => f.col));
     // v27.5.53 — mot d'intitulé déjà traduit par un filtre exact (« agricoles » → Ministère = Agriculture) : retiré
     const _pref = w => w.slice(0, 5);
-    const _motsStrict = new Set(strict.flatMap(f => normalizeText(f.value).split(/[^a-z0-9]+/).filter(w => w.length >= 5).map(_pref)));
+    const _motsStrict = new Set(strict.filter(f => f.source !== 'specialite_lycee').flatMap(f => normalizeText(f.value).split(/[^a-z0-9]+/).filter(w => w.length >= 5).map(_pref)));
     plan.filters = (plan.filters || []).filter(f => {
       if (!(f && f.op === 'contains_all' && f.source === 'termes_formation')) return true;
       const i = (f.terms || []).map((t, k) => ({ t, l: String(f.label || '').split(' + ')[k] })).filter(x => ![].concat(x.t).some(w => w.length >= 5 && _motsStrict.has(_pref(w))));
@@ -2942,7 +3037,7 @@ function _finalSanitizeAnalysisPlanBase(plan) {
     const _prevGardes = (prev.filters || []).filter(pf => pf && _clesEntrants.has(_cleFiltre(pf)) && !(pf.op !== 'contains_all' && _colsNouv.has(pf.col)));
     plan.filters = mergeFiltersUnique(mergeFiltersUnique(_prevGardes, strict), _nouveaux);
     // v27.25 — relance déjà résolue (mesure d'une moyenne gardée, somme par groupe, « lesquelles … ») : outil conservé
-    const _resolue = plan.statsCol || plan.lesquelles || (dimensionFollowUp && plan.groupSumCol);
+    const _resolue = plan.statsCol || plan.lesquelles || (dimensionFollowUp && plan.groupSumCol) || (plan.tool === 'part' && plan.part && plan.part.groupe);
     if (dimensionFollowUp && !_resolue) {
       plan.tool = 'group_by';
     }
@@ -3726,6 +3821,12 @@ function dataEngineResultToContext(exec) {
     if (exec.result.demandee && exec.result.demandee !== 'avg') out += `Statistique demandée : ${_NOMS_STAT[exec.result.demandee]} = ${exec.result[exec.result.demandee]}\n`;
     if (exec.result.uneFormation) out += `Une seule formation : ${exec.result.uneFormation}\n`;
   }
+  if (exec.kind === 'part_groupes') {
+    const r = exec.result; const lp = _libellePart(p);
+    out += `Part de ${lp.quoi} parmi les ${lp.sur}, calculée dans chaque groupe de « ${r.groupe} » :\n`
+      + r.groupes.slice(0, 40).map(g => `- ${g.valeur} : ${g.pct === null ? '—' : _pctFr(g.pct)} % (${g.num} / ${g.den})`).join('\n')
+      + `\nEnsemble : ${_pctFr(r.ensemble.pct)} % (${r.ensemble.num} / ${r.ensemble.den})\n`;
+  }
   if (exec.kind === 'stats_groupes') {
     const r = exec.result;
     out += `Statistiques de « ${r.col} » par « ${r.dim} » (moyenne simple des formations, non pondérée ; statistique demandée : ${_NOMS_STAT[r.demandee]}) :\n`
@@ -3795,6 +3896,27 @@ function _sourceEnClair(table) {
   return `${table.source || 'données'}${table.name ? ` · ${table.name}` : ''}`;
 }
 // Retourne { texte, html } ; texte sert aussi au contexte transmis à Albert
+function _noteSpecialiteLycee(plan, filtres) {
+  const table = plan.table;
+  const ensCol = (table?.headers || []).filter(Boolean).find(h => /enseignements? .*specialite|specialites? .*suivi/.test(normalizeText(h)));
+  if (!ensCol || filtres.some(f => f.col === ensCol)) return '';
+  const formCols = new Set(formationTermsInfo(table).cols);
+  const mots = new Set();
+  filtres.forEach(f => {
+    if (f.op === 'contains_all' && f.source === 'termes_formation') (f.terms || []).forEach(t => [].concat(t).forEach(w => mots.add(w)));
+    else if (f.op === 'eq' && formCols.has(f.col) && f.source !== 'categorie_formation') normalizeText(f.value).split(' ').forEach(w => w.length >= 4 && mots.add(w));
+  });
+  if (!mots.size) return '';
+  const cache = table._ensSujets || (table._ensSujets = (() => {
+    const m = new Map();
+    (table.objects || []).forEach(r => String(r?.[ensCol] ?? '').split('|').map(x => x.trim()).filter(Boolean).forEach(x => m.set(x, (m.get(x) || 0) + 1)));
+    return m;
+  })());
+  const sujets = [...cache.keys()].filter(x => normalizeText(x).split(' ').some(w => mots.has(w)));
+  if (!sujets.length) return '';
+  const n = (table.objects || []).filter(r => { const v = String(r?.[ensCol] ?? ''); return sujets.some(x => v.includes(x)); }).length;
+  return `le chiffre porte sur la formation d'accueil ; ${_nf(n)} candidat${n > 1 ? 's' : ''} du fichier ${n > 1 ? 'ont' : 'a'} suivi au lycée l'enseignement de spécialité ${sujets.map(x => `« ${x} »`).join(', ')}, ce qui est autre chose (pour eux : « candidats ayant suivi la spécialité ${sujets[0].replace(/^Msgn\/\s*/, '')} »)`;
+}
 function perimetreResultat(kind, plan, result) {
   if (!plan || !result) return { texte: '', html: '' };
   const table = plan.table || {};
@@ -3802,7 +3924,7 @@ function perimetreResultat(kind, plan, result) {
   const mot = n => `${table.rowUnit === 'formation' ? 'formation' : 'ligne'}${n > 1 ? 's' : ''}`;
   const retenues = result.etablissements === true ? result.formations
     : ['count', 'count_rows', 'sum'].includes(kind) ? result.count
-    : kind === 'classement' || kind === 'part' ? result.total
+    : kind === 'classement' || kind === 'part' || kind === 'part_groupes' ? result.total
     : kind === 'compare' ? result.baseTotal : result.total;
   const parties = [];
   parties.push(retenues !== undefined && totalTable
@@ -3861,6 +3983,11 @@ function perimetreResultat(kind, plan, result) {
   // v27.23 — établissements
   if (result.etablissements === true) notes.push(result.parCandidat ? `le chiffre compte des établissements différents (${_nf(result.count)}), pas des candidats (${_nf(result.formations)})` : `le chiffre compte des établissements différents (${_nf(result.count)}), pas des formations (${_nf(result.formations)})`);
   if (result.etablissements && result.etablissements !== true) notes.push(`chiffres = nombre d'établissements différents par groupe, pas un nombre de formations`);
+  // v27.5.54 — fichier de candidats : un mot de formation d'accueil (« droit ») qui est aussi un enseignement de spécialité
+  // du lycée (« Droit et Economie ») : on dit lequel est compté, et combien de candidats ont l'autre
+  const _noteEns = _noteSpecialiteLycee(plan, filtres);
+  if (_noteEns) notes.push(_noteEns);
+  if (kind === 'part_groupes' && result.sansGroupe > 0) notes.push(`${_nf(result.sansGroupe)} ${mot(result.sansGroupe)} sans valeur dans « ${result.groupe} », comptée${result.sansGroupe > 1 ? 's' : ''} dans l'ensemble mais dans aucun groupe`);
   if (plan.lyceesTous) notes.push(`« lycées » = tous les établissements de scolarité du fichier (colonne « ${plan.lyceesTous} » : lycées, mais aussi CFA, maisons familiales rurales…)`);
   const fe = filtres.find(f => f.op === 'in' && f.source === 'etablissement');
   if (fe && !plan.etablissement?.type) {
@@ -4017,7 +4144,7 @@ function shouldAnswerLocallyWithoutAlbert(exec) {
   // Les requêtes de comptage/répartition simples doivent être résolues par le moteur,
   // sinon Albert risque de répondre à partir d'un résumé incomplet.
   // v27.7 — « unresolved » : terme introuvable, on le dit plutôt que de laisser Albert inventer
-  return ['count','group_by','top','pivot','stats','export','compare','unresolved','sum','classement','part','evolution','evolution_groupes','stats_groupes'].includes(exec.kind);
+  return ['count','group_by','top','pivot','stats','export','compare','unresolved','sum','classement','part','evolution','evolution_groupes','stats_groupes','part_groupes'].includes(exec.kind);
 }
 /* ═══════════════ v27.9 — Chiffres écrits par Albert : vérifiés contre les données fournies ═══════════════
    Albert rédige ; il ne doit pas produire de chiffres. Chaque nombre de sa réponse est comparé aux nombres

@@ -321,6 +321,16 @@ await describe('v27.12 — Chiffres officiels : le widget retrouve à l\'unité 
   assert(evoOk[0].statut === 'ok', 'évolution par groupe identique : ok');
   const evoKo = verifierOfficiels(evoOff, [{ id: 'e', kind: 'evolution_groupes', reponse: 'x', totaux: [18, 20], lignesEvo: [{ valeur: 'Bordeaux', v1: 10, v2: 13 }, { valeur: 'Lyon', v1: 8, v2: 7 }] }], evoRef);
   assert(evoKo[0].statut === 'ecart' && /Bordeaux : officiel 10 → 12, widget 10 → 13/.test(evoKo[0].detail) && /totaux/.test(evoKo[0].detail), 'évolution par groupe différente : écart détaillé');
+  // v27.5.54 — part par groupe : numérateur et dénominateur de chaque groupe comparés au serveur
+  const pgRef = [{ id: 'p', q: 'p', type: 'part_groupe' }];
+  const pgOff = { p: { valeur: { num: { Bordeaux: 30, Lyon: 20, '(vide)': 1 }, den: { Bordeaux: 100, Lyon: 80, '(vide)': 2 } } } };
+  const pgOk = verifierOfficiels(pgOff, [{ id: 'p', kind: 'part_groupes', reponse: 'x', groupesPart: [{ valeur: 'Bordeaux', num: 30, den: 100 }, { valeur: 'Lyon', num: 20, den: 80 }] }], pgRef);
+  assert(pgOk[0].statut === 'ok' && /2 groupes/.test(pgOk[0].detail), 'part par groupe identique au serveur : ok');
+  const pgKo = verifierOfficiels(pgOff, [{ id: 'p', kind: 'part_groupes', reponse: 'x', groupesPart: [{ valeur: 'Bordeaux', num: 31, den: 100 }, { valeur: 'Lyon', num: 20, den: 80 }] }], pgRef);
+  assert(pgKo[0].statut === 'ecart' && /Bordeaux : officiel 30 \/ 100, widget 31 \/ 100/.test(pgKo[0].detail), 'part par groupe différente : écart détaillé');
+  const pgRep = verifierOfficiels(pgOff, [{ id: 'p', kind: 'group_by', reponse: 'x' }], pgRef);
+  assert(pgRep[0].statut === 'ecart' && /pas de part par groupe/.test(pgRep[0].detail), 'une répartition du total à la place d\'un taux par groupe : écart');
+  assert(REFERENCES.some(r => r.type === 'part_groupe'), 'l\'essai réel compare des parts par groupe au serveur');
   assert(V.ref_admis_bts.statut === 'indisponible' && /HTTP 400/.test(V.ref_admis_bts.detail), 'champ absent des données (admis) : non vérifié, pas un faux « identique »');
   assert(R.ref_admis_bts === undefined && res.verifs.length, 'questions de référence posées à part (pas mélangées aux questions de l\'essai)');
   // v27.14 — classements : mêmes valeurs, même ordre que le tri du serveur

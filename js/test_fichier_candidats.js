@@ -157,6 +157,20 @@ await describe('Spécialités suivies au lycée', () => {
   compte('combien de candidats avec la spécialité NSI admis en BUT', nb(r => mots(r[ENS]).has('numerique') && r[ACC] === 'Oui' && r[GRP] === 'DUT'));
 });
 
+await describe('« Droit » : formation d\'accueil ou enseignement de spécialité « Droit et Economie » du lycée', () => {
+  const DE = r => /Droit et Economie/.test(r[ENS]);
+  const d = compte('combien de candidats en droit', nb(r => mots(r[MENT]).has('droit')), 'formation d\'accueil');
+  assert(new RegExp(`${nb(DE)} candidats du fichier ont suivi au lycée l'enseignement de spécialité « Droit et Economie »`).test(perim(d)), `le périmètre dit qu'il s'agit de la formation d'accueil et combien ont la spécialité du lycée (${nb(DE)})`);
+  compte('combien de candidats ayant la spécialité droit et économie', nb(DE), 'spécialité du lycée');
+  compte('combien de candidats en droit et économie', nb(DE), '« Droit et Économie » est le nom de la spécialité du lycée');
+  compte('combien de candidats ayant suivi la spécialité droit en terminale', nb(DE));
+  compte('combien de candidats de la spécialité droit et économie admis en droit', nb(r => DE(r) && r[ACC] === 'Oui' && mots(r[MENT]).has('droit')), 'les deux à la fois');
+  const b = compte('combien de candidats en BTS', nb(r => r[GRP].startsWith('BTS')));
+  assert(!/enseignement de spécialité/.test(perim(b)), 'faux positif : pas de note quand aucun enseignement du lycée ne porte le mot');
+  const s = ask('combien de candidats suivant la spécialité SES');
+  assert(!/porte sur la formation d'accueil/.test(perim(s)), 'faux positif : pas de note quand la question vise la spécialité du lycée');
+});
+
 await describe('Cumul de critères Oui/Non : aucun n\'est perdu', () => {
   compte('combien de candidats en apprentissage admis en BTS', nb(r => r[APP] === 'Oui' && r[ACC] === 'Oui' && r[GRP].startsWith('BTS')), 'avant : apprenti retiré comme « doublon » de Oui');
   compte("combien d'apprentis boursiers", nb(r => r[APP] === 'Oui' && B(r)));
@@ -177,8 +191,11 @@ await describe('Répartitions et classements', () => {
   assert(a?.kind === 'group_by' && a.plan.targetCol === ACA && !(a.plan.filters || []).length, '« par académie d\'accueil » : aucun mot « accueil » cherché dans les intitulés');
   const c = ask('répartition par type de contrat');
   assert(c?.kind === 'group_by' && c.plan.targetCol === CONTRAT, '« par type de contrat » : la colonne Type de contrat, pas Type de la classe');
+  // règle changée (v27.5.54) : « pourcentage … par département » donne maintenant le taux DANS chaque département
+  // (avant : répartition du total, avec une note) — voir test_part_groupes.js
   const p = ask('pourcentage de candidats sans proposition par département');
-  assert(p?.kind === 'group_by' && /pas un taux calculé à l'intérieur de chaque groupe/.test(perim(p)), 'pourcentage … par département : le périmètre dit que c\'est une part du total, pas un taux par département');
+  const gi = p?.result?.groupes?.find(g => g.valeur === 'Gironde');
+  assert(p?.kind === 'part_groupes' && gi && gi.num === nb(r => r[DEP] === 'Gironde' && r[PROP] === 'Non') && gi.den === nb(r => r[DEP] === 'Gironde'), 'pourcentage … par département : le taux dans chaque département');
   const t = ask('pourcentage de candidats sans proposition en Gironde');
   assert(t?.kind === 'part' && t.result.num === nb(r => r[DEP] === 'Gironde' && r[PROP] === 'Non') && t.result.den === nb(r => r[DEP] === 'Gironde'), 'le taux pour un département se calcule');
   const s = ask('nombre moyen de vœux des boursiers');

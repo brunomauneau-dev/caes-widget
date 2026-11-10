@@ -34,6 +34,7 @@ function resumeExecution(exec) {
     : exec.kind === 'part' ? (typeof r.pct === 'number' ? Math.round(r.pct * 10) / 10 : null)
     : exec.kind === 'evolution' ? (r.lignes || []).map(l => l.valeur).join(' → ')
     : exec.kind === 'stats_groupes' ? `${(r.groupes || []).length} groupes`
+    : exec.kind === 'part_groupes' ? `${(r.groupes || []).length} groupes (ensemble ${typeof r.ensemble?.pct === 'number' ? Math.round(r.ensemble.pct * 10) / 10 : '—'} %)`
     : exec.kind === 'evolution_groupes' ? `${(r.totaux || []).join(' → ')} (total, ${(r.sessions || []).join(' → ')})`
     : exec.kind === 'classement' ? (r.lignes || []).slice(0, 3).map(l => l.valeur).join(' · ')
     : (exec.kind === 'group_by' || exec.kind === 'top') ? `${r.distinct ?? (r.rows || []).length} valeurs` : null;
