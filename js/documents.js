@@ -586,6 +586,8 @@ function rowMatchesFilter(row, filter) {
   if (filter && filter.op === 'contains_all') return rowContainsAllTerms(row, filter);
   // v27.23 — une valeur parmi une liste (établissements dont le nom correspond : « Lycée Montaigne », …)
   if (filter && filter.op === 'in') return (filter.values || []).includes(normalizeText(row[filter.col]));
+  // v27.5.59 — « à Bordeaux ou à Pau », « BTS et BUT » : la ligne remplit l'un des groupes de critères
+  if (filter && filter.op === 'or') return (filter.groupes || []).some(g => g.every(f => rowMatchesFilter(row, f)));
   // v27.5.53 — mots présents dans une seule colonne (« Enseignement(s) de spécialité suivi(s) » contient « Sciences
   // Economiques et Sociales » parmi « SES | Mathématiques ») : chaque terme, sous l'une de ses formes
   if (filter && filter.op === 'contains_words' && Array.isArray(filter.sujets) && filter.sujets.length) {
@@ -795,7 +797,7 @@ function triggerBlobDownload(blob, filename) {
 
 function formatActionFilters(filters) {
   if (!filters || !filters.length) return 'Filtres appliqués : aucun — export de toute la table active.';
-  return 'Filtres appliqués : ' + filters.map(f => f.op === 'in' ? `${f.col} : ${f.label || f.value}` : f.op === 'contains_words' ? `${f.col} contient « ${f.label || f.value} »` : `${f.col} ${({ neq: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤' })[f.op] || '='} "${f.value}"`).join(' ; ');
+  return 'Filtres appliqués : ' + filters.map(f => f.op === 'or' ? `${f.label || 'l\'un ou l\'autre'}` : f.op === 'in' ? `${f.col} : ${f.label || f.value}` : f.op === 'contains_words' ? `${f.col} contient « ${f.label || f.value} »` : `${f.col} ${({ neq: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤' })[f.op] || '='} "${f.value}"`).join(' ; ');
 }
 
 

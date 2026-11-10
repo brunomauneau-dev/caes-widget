@@ -312,7 +312,18 @@
     return 'text';
   }
 
+  // v27.5.59 — schéma gardé en mémoire par table (les valeurs de chaque colonne étaient relues à chaque question :
+  // 0,4 s par question sur un export de 35 000 candidats)
+  const _schemas = new WeakMap();
   function buildSchema(table) {
+    const cle = `${(table?.objects || []).length}|${(table?.headers || []).join('\u0001')}`;
+    const c = table && typeof table === 'object' ? _schemas.get(table) : null;
+    if (c && c.cle === cle) return c.schema;
+    const schema = _buildSchema(table);
+    if (table && typeof table === 'object') _schemas.set(table, { cle, schema });
+    return schema;
+  }
+  function _buildSchema(table) {
     const headers = (table?.headers || Object.keys(table?.objects?.[0] || {}))
       .filter(h => h && !/^(id|manualSort)$/i.test(String(h)));
 

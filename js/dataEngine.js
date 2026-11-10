@@ -189,7 +189,12 @@ function _hx(h) {
   return normalizeText(`${h} ${dev}`);
 }
 function _distinctValues(table, col) {
-  return [...new Set((table?.objects || []).map(r => String(r?.[col] ?? '').trim()).filter(Boolean))];
+  // v27.5.59 — gardé en mémoire par table et par colonne (relu à chaque question avant)
+  if (!table || typeof table !== 'object') return [];
+  const n = (table.objects || []).length;
+  if (!table._distinct || table._distinct.n !== n) table._distinct = { n, m: new Map() };
+  if (!table._distinct.m.has(col)) table._distinct.m.set(col, [...new Set((table.objects || []).map(r => String(r?.[col] ?? '').trim()).filter(Boolean))]);
+  return table._distinct.m.get(col).slice();
 }
 
 // v27.8 — colonne d'état (oui/non, VRAI/FAUX, 1/0, « Boursier des lycées / Non boursier ») et non une mesure
@@ -2187,6 +2192,7 @@ function motsNonReconnus(plan) {
   const connus = new Set();
   const ajouter = t => normalizeText(t).split(' ').forEach(w => { if (w) connus.add(w); });
   if (filtres.some(f => f.source === 'specialite_lycee')) ['ses svt hggsp hlp llcer nsi amc eppcs maths math pc eco terminale lycee specialite specialites enseignement enseignements doublette'].forEach(ajouter);
+  filtres.filter(f => f.op === 'or').forEach(f => (f.groupes || []).flat().forEach(g => { ajouter(g.value); ajouter(g.label || ''); (g.terms || []).forEach(t => [].concat(t).forEach(ajouter)); (g.values || []).forEach(ajouter); _motsTraduits(g.value).forEach(ajouter); ajouter(_hx(g.col || '')); }));
   filtres.forEach(f => { ajouter(f.value); ajouter(f.label || ''); (f.terms || []).forEach(t => (Array.isArray(t) ? t : [t]).forEach(ajouter)); (f.values || []).forEach(ajouter); (f.noms || []).forEach(ajouter); _motsTraduits(f.value).forEach(ajouter); });
   cols.forEach(c => ajouter(_hx(c)));
   (plan.table.headers || []).forEach(h => ajouter(h)); // un mot d'en-tête désigne une colonne (« taux d'accès »)
@@ -2795,7 +2801,119 @@ function buildCurrentResultPlan(question, table) {
   return null;
 }
 
+// v27.5.59 — Plusieurs valeurs d'une même information reliées par « et / ou » : « en Gironde et dans les Landes »,
+// « BTS ou BUT », « à Bordeaux ou à Pau », « hors Bordeaux et hors Toulouse ». Avant : arrêt, ou pire, seule la première
+// valeur était comptée (« à Bordeaux ou à Pau » = Bordeaux seul). Méthode : la question est rejouée avec chacune des deux
+// valeurs ; si les deux plans ne diffèrent que par des filtres sur la (les) même(s) colonne(s), on garde les filtres
+// communs et on ajoute « l'un ou l'autre » (ou les deux exclusions pour « hors X et hors Y »). On ne touche à rien quand
+// la question est déjà comprise avec ses deux critères (« maths et physique », « boursiers et apprentis » : les deux à la fois).
+let _enUnion = false;
+const _COUPE_UNION = new Set('par pour qui avec sans selon parmi combien admis admises acceptes inscrits ayant dont'.split(' '));
+const _LIENS_UNION = new Set('de du des d en a au aux dans les le la l sur chez'.split(' '));
+function _planCasse(p) {
+  if (!p || !p.table) return true;
+  if (p.unresolvedTerms && p.unresolvedTerms.length) return true;
+  if (p.etablissementIntrouvable) return true;
+  try {
+    if (conceptsNonFiltres(p).length) return true;
+    if (motsNonReconnus(p).length) return true;
+    const tf = (p.filters || []).find(f => f && f.op === 'contains_all');
+    if (tf && !applyLocalActionFilters(p.table.objects || [], [tf]).length) return true;
+  } catch (e) { return true; }
+  return false;
+}
+function _clesFiltres(p) { return new Set((p?.filters || []).map(f => f.op === 'contains_all' ? `T::${(f.terms || []).map(t => [].concat(t)[0]).join('+')}` : f.op === 'in' ? `${f.col}::in::${(f.values || []).join('|')}` : _cleFiltre(f))); }
+function _cleUnion(f) { return f.op === 'contains_all' ? `T::${(f.terms || []).map(t => [].concat(t)[0]).join('+')}` : f.op === 'in' ? `${f.col}::in::${(f.values || []).join('|')}` : _cleFiltre(f); }
+function _colUnion(f) { return f.op === 'contains_all' ? FORMATION_TERMS_COL : f.col; }
+// même famille d'information : lieux, formations (catégorie ou intitulé), établissements, ou la même colonne
+function _familleUnion(f, table) {
+  if (f.op === 'contains_all' || f.source === 'categorie_formation') return 'formation';
+  const h = _hx(f.col || '');
+  try { if (formationTermsInfo(table).cols.includes(f.col)) return 'formation'; } catch (e) { /* source sans formation */ }
+  if (/^(etablissement|lycee|universite)/.test(h)) return `etab:${/accueil|accepte|affect|admis/.test(h) ? 'acc' : 'ori'}`;
+  if (GEO_COL_RE.test(h)) return `geo:${/accueil|accepte|affect|admis/.test(h) ? 'acc' : 'ori'}`;
+  return f.col;
+}
+function _essaiUnion(question, filterContextText, plan0) {
+  const q = normalizeText(reformulerQuestion(question || ''));
+  const toks = q.split(' ');
+  const idx = toks.map((w, i) => (w === 'et' || w === 'ou') ? i : -1).filter(i => i > 0);
+  if (!idx.length || !plan0 || ['compare', 'chart_current', 'export_current_excel', 'export_current_csv'].includes(plan0.tool)) return null;
+  if (plan0.part && plan0.part.groupe) return null; // « des boursiers et des non boursiers » : déjà un taux par groupe
+  // la question est déjà comprise (aucun signe de critère perdu) : rien à faire, sauf si un plan « une seule valeur » l'égale
+  // aussi « cassé » : des filtres incompatibles (« admis en licence ou en BUT » lu licence ET BUT : 0 ligne)
+  let casse0 = _planCasse(plan0);
+  if (!casse0) { try { casse0 = !applyLocalActionFilters(plan0.table.objects || [], plan0.filters || []).length; } catch (e) { /* plan sans lignes */ } }
+  const cles0 = _clesFiltres(plan0);
+  let meilleur = null;
+  const memo = new Map();
+  const planDe = x => { if (!memo.has(x)) { let p = null; try { p = detectDataEnginePlan(x, x); } catch (e) { p = null; } memo.set(x, p && !_planCasse(p) ? p : null); } return memo.get(x); };
+  const motsPlan0 = new Set();
+  (plan0.filters || []).forEach(f => [f.value, f.label, ...(f.values || []), ...(f.terms || []).flat()].forEach(v => normalizeText(v || '').split(' ').forEach(w => motsPlan0.add(w))));
+  const oublie = x => x.filter(w => !_LIENS_UNION.has(w) && w.length >= 2).some(w => !motsPlan0.has(w));
+  // vocabulaire des valeurs du fichier (et sigles courants) : une valeur de chaque côté, sinon découpage inutile
+  const t0 = plan0.table;
+  if (!t0._vocUnion || t0._vocUnion.n !== (t0.objects || []).length) {
+    const v = new Set('bts but dut iut licence licences prepa prepas cpge pass las pro techno general generale professionnel technologique ifsi staps'.split(' '));
+    (t0.headers || []).filter(Boolean).forEach(h => { const d = _distinctValues(t0, h); if (d.length <= 3000) d.forEach(x => normalizeText(x).split(' ').forEach(w => w.length >= 2 && v.add(w))); });
+    t0._vocUnion = { n: (t0.objects || []).length, v };
+  }
+  const voc = t0._vocUnion.v;
+  const porteur = x => x.some(w => !_LIENS_UNION.has(w) && (voc.has(w) || voc.has(w.replace(/s$/, ''))));
+  // les découpages les plus courts d'abord ; le premier qui convient est retenu
+  for (let taille = 2; taille <= 9 && !meilleur; taille++) {
+    for (const k of idx) {
+      if (meilleur) break;
+      for (let l = 1; l <= 4 && !meilleur; l++) {
+        const r = taille - l;
+        if (r < 1 || r > 5 || k - l < 0 || k + r >= toks.length) continue;
+        const droite = toks.slice(k + 1, k + 1 + r), gauche = toks.slice(k - l, k);
+        if (droite.some(w => _COUPE_UNION.has(w) || w === 'et' || w === 'ou') || _LIENS_UNION.has(droite[droite.length - 1])) continue;
+        if (gauche.some(w => _COUPE_UNION.has(w) || w === 'et' || w === 'ou') || _LIENS_UNION.has(gauche[0])) continue;
+        // B : la valeur de droite à la place de celle de gauche (ses mots de liaison gardés : « à Pau », « de BUT »)
+        const liens = droite.filter((w, i) => i < droite.length - 1 && _LIENS_UNION.has(w) && droite.slice(0, i).every(x => _LIENS_UNION.has(x)));
+        const contenu = droite.slice(liens.length);
+        if (!porteur(contenu) || !porteur(gauche) || !voc.has(contenu[contenu.length - 1].replace(/s$/, '')) && !voc.has(contenu[contenu.length - 1])) continue;
+        // la question entière est comprise et ses deux valeurs y figurent (« Droit et Economie ») : rien à faire
+        if (!casse0 && !oublie(contenu) && !oublie(gauche)) continue;
+        const qa = [...toks.slice(0, k), ...toks.slice(k + 1 + r)].join(' ');
+        const qb = [...toks.slice(0, k - l), ...contenu, ...toks.slice(k + 1 + r)].join(' ');
+        const pa = planDe(qa); if (!pa) continue;
+        const pb = planDe(qb); if (!pb || pa.tool !== pb.tool) continue;
+        const ka = _clesFiltres(pa), kb = _clesFiltres(pb);
+        const dA = (pa.filters || []).filter(f => !kb.has(_cleUnion(f))), dB = (pb.filters || []).filter(f => !ka.has(_cleUnion(f)));
+        if (!dA.length || !dB.length) continue;
+        const colsA = new Set(dA.map(f => _familleUnion(f, pa.table))), colsB = new Set(dB.map(f => _familleUnion(f, pa.table)));
+        if (colsA.size !== colsB.size || [...colsA].some(c => !colsB.has(c))) continue;
+        // question comprise : seulement si elle se réduit à l'une des deux valeurs (« à Bordeaux ou à Pau » = Bordeaux)
+        if (!casse0 && ![ka, kb].some(kx => kx.size === cles0.size && [...kx].every(x => cles0.has(x)))) continue;
+        meilleur = { pa, pb, dA, dB };
+      }
+    }
+  }
+  if (!meilleur) return null;
+  const { pa, dA, dB } = meilleur;
+  const communs = (pa.filters || []).filter(f => !dA.includes(f));
+  const exclusions = [...dA, ...dB].every(f => f.op === 'neq');
+  const enClair = g => g.map(f => _filtreEnClair(f)).join(' et ');
+  const simple = dA.length === 1 && dB.length === 1 && dA[0].op === 'eq' && dB[0].op === 'eq' && dA[0].col === dB[0].col;
+  const libelle = simple ? `« ${dA[0].col} » = ${dA[0].label || dA[0].value} ou ${dB[0].label || dB[0].value}` : `${enClair(dA)}, ou ${enClair(dB)}`;
+  const filtres = exclusions ? [...communs, ...dA, ...dB]
+    : [...communs, { col: _colUnion(dA[0]), op: 'or', groupes: [dA, dB], value: libelle, label: libelle, source: 'union' }];
+  return { ...pa, question: plan0.question || question, filters: filtres, union: true, unresolvedTerms: null };
+}
 function detectDataEnginePlan(question, filterContextText = question) {
+  const plan = _detectDataEnginePlanBase(question, filterContextText);
+  if (_enUnion || !plan || !/\b(et|ou)\b/.test(normalizeText(question || ''))) return plan;
+  _enUnion = true;
+  // les questions rejouées partent de l'état de conversation actuel, qui est restauré ensuite
+  const etat = getDataEngineState();
+  const sauve = { lastPlan: etat.lastPlan, lastExecution: etat.lastExecution };
+  try { return _essaiUnion(question, filterContextText, plan) || plan; }
+  catch (e) { return plan; }
+  finally { _enUnion = false; etat.lastPlan = sauve.lastPlan; etat.lastExecution = sauve.lastExecution; }
+}
+function _detectDataEnginePlanBase(question, filterContextText = question) {
   question = reformulerQuestion(question);
   // v27.25 — « et l'an dernier ? », « et en 2024 ? » : la question précédente, sur l'autre session
   const _prevPlan = getDataEngineState().lastPlan;
@@ -3089,7 +3207,8 @@ function resolveRoleDuplicates(plan) {
   // v27.5.53 — doublon = même valeur sur deux colonnes du MÊME genre (académie d'accueil / de scolarité = Bordeaux),
   // jamais deux colonnes d'état différentes (« Apprenti = Oui » et « A répondu favorablement = Oui » : l'une était
   // retirée, « combien d'apprentis admis en BTS » perdait le filtre apprenti)
-  const genre = c => (typeof plannerColumnKind === 'function') ? String(plannerColumnKind(c)).replace(/_(accueil|origine_nom)$/, '') : '';
+  // (« A eu une proposition » et « A répondu favorablement » : deux informations, pas un doublon)
+  const genre = c => { const k = (typeof plannerColumnKind === 'function') ? String(plannerColumnKind(c)).replace(/_(accueil|origine_nom)$/, '') : ''; return k === 'admission' ? `${k}:${normalizeText(c)}` : k; };
   groupes.forEach(g0 => {
     const parGenre = new Map();
     g0.forEach(f => { const k = genre(f.col); if (!parGenre.has(k)) parGenre.set(k, []); parGenre.get(k).push(f); });
@@ -3115,7 +3234,9 @@ function _finalSanitizeAnalysisPlanBase(plan) {
   const prev = state.lastPlan;
   const table = plan.table || prev?.table;
 
-  const strict = strictFiltersFromQuestion(table, plan.question || '');
+  // v27.5.59 — « à Bordeaux ou à Pau » : le filtre « l'un ou l'autre » remplace les filtres lus séparément dans la question
+  const _colsUnion = new Set((plan.filters || []).filter(f => f && f.source === 'union').flatMap(f => (f.groupes || []).flat().map(g => g.col)));
+  const strict = strictFiltersFromQuestion(table, plan.question || '').filter(f => !_colsUnion.has(f.col));
   const explicitFresh = isExplicitFreshDataQuestion(plan.question || '') && !/^(et pour|et les|idem|m[eê]me|meme)/.test(q);
   const dimensionFollowUp = isDimensionOnlyFollowUp(plan.question || '');
   const filterFollowUp = isFilterOnlyFollowUp(plan.question || '');
@@ -3124,7 +3245,7 @@ function _finalSanitizeAnalysisPlanBase(plan) {
   const onlyBoursier = /^(combien|nombre|effectif|total)\s+(de\s+)?(candidats\s+)?(non\s+)?boursiers?\s*\??$/.test(q);
   // v27.7 — filtre « intitulé de formation contenant » : vient de la question elle-même, toujours conservé
   // v27.22 — la catégorie officielle tirée d'un mot de la question (« licences » → Licence) aussi
-  const _deQuestion = f => f && (f.source === 'termes_formation' || f.source === 'categorie_formation' || f.source === 'etablissement');
+  const _deQuestion = f => f && (f.source === 'termes_formation' || f.source === 'categorie_formation' || f.source === 'etablissement' || f.source === 'union');
   const termFilters = (plan.filters || []).filter(_deQuestion);
   const keepTermFilters = () => {
     if (!termFilters.length) return;
@@ -3159,7 +3280,7 @@ function _finalSanitizeAnalysisPlanBase(plan) {
     });
     const kept = (plan.filters || []).filter(f => {
       if (!f || !f.col) return false;
-      if (f.source === 'termes_formation') return true; // v27.7 — mots cités dans la question
+      if (f.source === 'termes_formation' || f.source === 'union') return true; // v27.7 — mots cités dans la question
       if (strictCols.has(f.col)) return false; // remplacés par strict ci-dessous
       const cn = normalizeText(f.col);
       const val = normalizeText(f.value);
@@ -4092,6 +4213,7 @@ const _VALEURS_ETAT = { oui: 'oui', vrai: 'oui', true: 'oui', '1': 'oui', non: '
 function _filtreEnClair(f) {
   if (!f) return '';
   if (f.op === 'in') return `« ${f.col} » : ${f.label || f.value}`;
+  if (f.op === 'or') return `(${f.label || f.value})`;
   if (f.op === 'contains_words') return `« ${f.col} » contient « ${f.label || f.value} »`;
   if (f.op === 'contains_all') {
     const mots = String(f.label || f.value || '').split(' + ').filter(Boolean).map(t => `« ${t} »`);

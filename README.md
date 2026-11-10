@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-46 fichiers, 2 095 tests. Depuis la racine du repo :
+47 fichiers, 2 118 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -112,6 +112,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 `js/test_specialites_lycee.js` vérifie la règle **spécialité du lycée ≠ spécialité / mention de la formation d'accueil**, sur le modèle du droit, pour toutes les spécialités : « candidats en X » vise la formation d'accueil et le périmètre signale les spécialités de terminale qui contiennent X ; « spécialité X », « X en terminale », les sigles (SES, SVT, NSI, EPPCS…) et les noms propres au lycée (« droit et économie ») visent la spécialité du lycée (enseignements de spécialité et spécialité de bac pro / STMG), et le périmètre signale les formations d'accueil du même nom ; nom exact d'abord (« mathématiques » ≠ « Physique-Chimie et Mathématiques »), « maths et physique » = deux spécialités.
 
 `js/test_bilan_lycee.js` vérifie les questions d'un **bilan de lycée** sur l'export de candidats : relances sur une partie de la population (« combien ont eu une proposition ? », « et parmi eux combien de boursiers ? », « dont combien admis en CPGE ? »), taux de deux groupes (« des boursiers et des non boursiers »), « part des candidats admis en BTS » (avant : 100 %), classements d'établissements d'origine ou d'accueil (« quel lycée a le plus de candidats admis en CPGE », « les universités qui accueillent le plus »), comparaison de deux lycées, avec les taux de chaque lycée (proposition, admission, boursiers, apprentis, admis hors académie).
+
+`js/test_plusieurs_valeurs.js` vérifie les questions qui citent **plusieurs valeurs d'une même information** : « à Bordeaux ou à Pau » (avant : Bordeaux seul), « en Gironde et dans les Landes », « BTS et BUT », « admis en CPGE ou en école d'ingénieurs » (avant : 0), « hors Bordeaux et hors Toulouse » (les deux exclusions), sur l'open data et sur l'export de candidats ; « maths et physique », « boursiers et apprentis », « Droit et Économie » gardent leur sens « les deux à la fois ».
 
 `js/test_part_groupes.js` vérifie les **taux par groupe** : « pourcentage de candidats sans proposition par département », « part des boursiers par académie », « taux de remplissage des BTS par académie » donnent un taux calculé **dans** chaque groupe (avant : la répartition du total entre groupes, lue à tort comme un taux), avec la ligne « Ensemble », l'export, le graphique et les relances (« taux de proposition des boursiers » puis « et par département ? »).
 
