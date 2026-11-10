@@ -187,6 +187,11 @@ await describe('Questions en plus (champ du formulaire GitHub)', async () => {
   assert(cv.length === 2 && cv[0].conversation?.join('|') === 'combien de BTS|et en licence ?' && cv[1].q === 'combien de PASS', '« >> » : relances dans une même conversation');
   const r = await essai({ fetchImpl: fakeFetch, questions: [...QUESTIONS, ...q] });
   assert(r.resultats.length === QUESTIONS.length + 2, 'questions en plus posées après les questions types');
+  // v27.5.61 — bug vu sur l'essai réel : « exporte » après un résultat filtré exporte ce résultat ; la bibliothèque
+  // Excel simulée par l'essai doit offrir les fonctions utilisées (avant : « sheet_to_json is not a function »)
+  const ex = await essai({ fetchImpl: fakeFetch, questions: [...QUESTIONS, ...questionsEnPlus('combien de BTS >> exporte')] });
+  const exConv = ex.resultats.find(x => x.id === 'plus1')?.conversation || [];
+  assert(exConv.length === 2 && exConv[1].kind === 'export', `« combien de BTS >> exporte » : export du résultat, sans erreur (obtenu : ${exConv[1]?.kind})`);
   // v27.18 — bug vu sur l'essai réel : une évolution par groupe n'avait pas de périmètre dans le rapport
   const evo = await essai({ fetchImpl: fakeFetch, questions: [...QUESTIONS, ...questionsEnPlus('évolution du nombre de BTS par académie depuis {N-1}')] });
   const ev = evo.resultats.find(x => x.kind === 'evolution_groupes');
