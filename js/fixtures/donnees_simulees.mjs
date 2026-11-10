@@ -290,6 +290,7 @@ const EA_ACCUEIL = [
   ['Secteur sanitaire et social', 'D.E Infirmier', 'IFSI du CHU de Bordeaux', 'Bordeaux', 'Bordeaux'],
   ['Ecoles de commerce', 'Bachelor', 'KEDGE Business School', 'Talence', 'Bordeaux'],
   ['CPGE - CPES', 'CPES', 'Université de Bordeaux - Bordeaux Métropole / Lycée Montaigne', 'Bordeaux', 'Bordeaux'],
+  ['L1 - CUPGE - DEUST - DU', 'Histoire', 'Université Bordeaux Montaigne', 'Pessac', 'Bordeaux'],
 ];
 export function exportAcademique(n = 4000, graine = 21) {
   const h = hasard(graine);
@@ -301,7 +302,7 @@ export function exportAcademique(n = 4000, graine = 21) {
     const prop = h.r() < 0.79 ? 'Oui' : 'Non';
     const acc = prop === 'Oui' && h.r() < 0.84 ? 'Oui' : 'Non';
     const pro = C[0] === 'Professionnelle';
-    const A = acc === 'Oui' ? h.choix(EA_ACCUEIL, pro ? [1, 0, 0, 0, 0, 1, 0, 9, 4, 3, 1, 0, 0, 0, 0, 2, 0, 0] : [9, 3, 6, 3, 2, 4, 2, 3, 1, 1, 4, 2, 3, 1, 4, 3, 2, 1]) : ['', '', '', '', ''];
+    const A = acc === 'Oui' ? h.choix(EA_ACCUEIL, pro ? [1, 0, 0, 0, 0, 1, 0, 9, 4, 3, 1, 0, 0, 0, 0, 2, 0, 0, 0] : [9, 3, 6, 3, 2, 4, 2, 3, 1, 1, 4, 2, 3, 1, 4, 3, 2, 1, 3]) : ['', '', '', '', ''];
     rows.push([
       L[2], L[3], L[1], L[1] === 'Bayonne' ? 'oui' : 'non', L[0], '', prop, acc,
       h.r() < 0.04 ? 'Oui' : 'Non', h.r() < 0.18 ? 'Boursier des lycées' : 'Non boursier du secondaire', L[4], L[5],
