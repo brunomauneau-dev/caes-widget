@@ -171,6 +171,10 @@ function resumer(ctx, question) {
   } else if (exec.kind === 'evolution') {
     r.valeurs = exec.result.lignes.map(l => l.valeur); r.sessions = exec.result.lignes.map(l => l.session);
     r.reponse = r.sessions.map((s, i) => `${s} : ${Number(r.valeurs[i]).toLocaleString('fr-FR', { maximumFractionDigits: 2 })}`).join(' → ');
+  } else if (exec.kind === 'part_groupes') {
+    const x = exec.result;
+    r.dimension = x.groupe; r.groupesPart = x.groupes.map(g => ({ valeur: g.valeur, num: g.num, den: g.den }));
+    r.reponse = `${x.groupes.length} groupes de « ${x.groupe} » · ${x.groupes.slice(0, 3).map(g => `${g.valeur} ${(Math.round(g.pct * 10) / 10).toLocaleString('fr-FR')} %`).join(' · ')}… · ensemble ${(Math.round(x.ensemble.pct * 10) / 10).toLocaleString('fr-FR')} %`;
   } else if (exec.kind === 'part') {
     r.num = exec.result.num; r.den = exec.result.den; r.pct = exec.result.pct;
     r.reponse = `${(Math.round(r.pct * 10) / 10).toLocaleString('fr-FR')} % (${r.num.toLocaleString('fr-FR')} sur ${r.den.toLocaleString('fr-FR')})`;
@@ -340,7 +344,7 @@ export function controler(resultats) {
     ctl(`reformulations « ${g} » : même chiffre pour les ${rs.length} tournures`, ok, rs.map(r => `« ${r.question} » → ${valeurReponse(r)}`).join(' · '));
   });
   // Chaque résultat chiffré porte son périmètre
-  const chiffres = resultats.flatMap(r => r.conversation || [r]).filter(r => ['count', 'sum', 'group_by', 'top', 'stats', 'stats_groupes', 'classement', 'part', 'evolution', 'evolution_groupes'].includes(r.kind));
+  const chiffres = resultats.flatMap(r => r.conversation || [r]).filter(r => ['count', 'sum', 'group_by', 'top', 'stats', 'stats_groupes', 'classement', 'part', 'part_groupes', 'evolution', 'evolution_groupes'].includes(r.kind));
   if (chiffres.length) ctl('chaque résultat chiffré dit sur quoi il porte (périmètre)', chiffres.every(r => r.perimetre && /retenues? sur/.test(r.perimetre)), `${chiffres.filter(r => r.perimetre).length} / ${chiffres.length}`);
 
   // Contrôle général : une question qui cite une formation ne doit jamais compter tout le fichier
@@ -364,6 +368,7 @@ function valeurReponse(r) {
   if (r.kind === 'group_by' || r.kind === 'top') return `${r.distinct ?? (r.lignes || []).length} valeurs / ${r.total}`;
   if (r.kind === 'classement') return (r.valeurs || []).join(' · ');
   if (r.kind === 'part') return `${r.num} / ${r.den}`;
+  if (r.kind === 'part_groupes') return (r.groupesPart || []).map(g => `${g.valeur} ${g.num}/${g.den}`).join(' · ');
   if (r.kind === 'evolution') return (r.valeurs || []).join(' → ');
   if (r.kind === 'unresolved') return 'non reconnu';
   return r.kind;
@@ -497,6 +502,9 @@ export const REFERENCES = [
   { id: 'ref_part_filles_admises', q: 'part des filles parmi les admis', type: 'part', num: 'acc_tot_f', den: 'acc_tot' },
   { id: 'ref_remplissage_bts', q: 'taux de remplissage des BTS', type: 'part', num: 'acc_tot', den: 'capa_fin', egal: { fili: 'BTS' } },
   { id: 'ref_part_selectives', q: 'quelle part des formations sont sélectives', type: 'part', condition: { select_form: 'formation sélective' } },
+  // v27.5.54 — parts par groupe : numérateur et dénominateur de chaque académie calculés par le serveur
+  { id: 'ref_part_boursiers_par_aca', q: 'part des boursiers parmi les admis par académie', type: 'part_groupe', champ: 'acad_mies', num: 'acc_brs', den: 'acc_neobac' },
+  { id: 'ref_remplissage_bts_par_aca', q: 'taux de remplissage des BTS par académie', type: 'part_groupe', champ: 'acad_mies', num: 'acc_tot', den: 'capa_fin', egal: { fili: 'BTS' } },
   // v27.16 — session précédente et évolution : le serveur calcule chaque session
   { id: 'ref_n1_bts', q: 'combien de BTS en {N-1}', type: 'count', egal: { fili: 'BTS' }, session: -1 },
   { id: 'ref_n1_places', q: 'combien de places au total en {N-1}', type: 'sum', champ: 'capa_fin', session: -1 },
@@ -555,6 +563,14 @@ export async function chiffresOfficiels(fetchImpl, session, refs = REFERENCES, {
       try {
         const avant = await (async () => { const x = await fetchImpl(requeteOfficielle(ref.base, session - 1, jeuDe(session - 1)), { cache: 'no-store' }); if (!x.ok) throw new Error(`HTTP ${x.status}`); return Number((await x.json()).results?.[0]?.n ?? 0); })();
         out[ref.id] = { valeur: [avant, await unChiffre(ref.base)] };
+      } catch (e) { out[ref.id] = { erreur: e.message }; }
+      continue;
+    }
+    if (ref.type === 'part_groupe') {
+      try {
+        const num = await groupes({ type: 'group', champ: ref.champ, somme: ref.num, egal: ref.egal }, session);
+        const den = await groupes({ type: 'group', champ: ref.champ, somme: ref.den, egal: ref.egal }, session);
+        out[ref.id] = { valeur: { num, den } };
       } catch (e) { out[ref.id] = { erreur: e.message }; }
       continue;
     }
@@ -619,6 +635,14 @@ export function verifierOfficiels(officiels, resultats, refs = REFERENCES) {
       const obtenu = w.kind === 'evolution' ? w.valeurs : null;
       const ok = !!obtenu && JSON.stringify(obtenu) === JSON.stringify(off.valeur);
       return { ...base, statut: ok ? 'ok' : 'ecart', officiel: off.valeur.join(' → '), widget: obtenu ? obtenu.join(' → ') : w.reponse, detail: ok ? 'les deux sessions identiques' : 'évolution différente' };
+    }
+    if (ref.type === 'part_groupe') {
+      if (w.kind !== 'part_groupes') return { ...base, statut: 'ecart', officiel: '—', widget: w.reponse, detail: 'pas de part par groupe calculée' };
+      const { num, den } = off.valeur;
+      const cles = Object.keys(den).filter(k => k !== '(vide)' && den[k] > 0);
+      const ecarts = cles.map(k => { const g = (w.groupesPart || []).find(x => x.valeur === k); return g && g.num === num[k] && g.den === den[k] ? null : `${k} : officiel ${num[k]} / ${den[k]}, widget ${g ? `${g.num} / ${g.den}` : 'absent'}`; }).filter(Boolean);
+      if ((w.groupesPart || []).length !== cles.length) ecarts.push(`nombre de groupes : officiel ${cles.length}, widget ${(w.groupesPart || []).length}`);
+      return { ...base, statut: ecarts.length ? 'ecart' : 'ok', officiel: `${cles.length} groupes`, widget: w.reponse, detail: ecarts.length ? ecarts.slice(0, 4).join(' · ') : `${cles.length} groupes : numérateurs et dénominateurs identiques` };
     }
     if (ref.type === 'part') {
       const { num, den } = off.valeur;
