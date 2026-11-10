@@ -199,6 +199,9 @@ export function desaccord(a, m) {
   if (['arret', 'albert', 'erreur'].includes(m.op)) return null; // pas de chiffre donné : rien à signaler
   // le moteur détaille davantage (répartition, taux par groupe) quand Albert ne voit qu'un total : pas d'alerte
   const moteurDetaille = m.groupe && !a.groupe && ['compter', 'somme', 'statistique', 'part'].includes(a.op);
+  // « compter, regroupé par académie » (Albert) = répartition par académie (moteur)
+  const memeRegroupement = a.groupe && m.groupe && famillesEgales(_equiv(a.groupe), _equiv(m.groupe)) && ['compter', 'somme', 'repartition', 'classement', 'liste'].includes(a.op) && ['repartition', 'somme', 'classement', 'liste'].includes(m.op);
+  if (memeRegroupement && !Object.keys(a.filtres || {}).map(_equiv).some(f => !Object.keys(m.filtres || {}).map(_equiv).includes(f) && f !== _equiv(m.groupe) && f !== 'admission')) return null;
   if (!_opsProches(a.op, m.op) && !moteurDetaille) return `opération : Albert ${a.op}, moteur ${m.op}`;
   if (a.op === 'compter_distinct' && m.op === 'compter_distinct' && a.objet && m.objet && nrm(a.objet).replace(/s$/, '') !== nrm(m.objet).replace(/s$/, '')) return `objet : Albert ${a.objet}, moteur ${m.objet}`;
   if (['comparaison', 'pdf', 'evolution', 'export'].includes(m.op)) return null;
