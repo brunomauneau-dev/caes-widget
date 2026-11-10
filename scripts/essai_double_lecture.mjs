@@ -193,7 +193,8 @@ const _equiv = f => ({ specialite_lycee: 'formation' }[f.replace(/:(ori|acc)$/, 
 const _opsProches = (a, m) => a === m
   || (a === 'liste' && m === 'repartition') || (a === 'repartition' && m === 'liste')
   || (a === 'somme' && m === 'repartition') || (a === 'repartition' && m === 'somme')
-  || (a === 'repartition' && m === 'classement') || (a === 'classement' && m === 'repartition');
+  || (a === 'repartition' && m === 'classement') || (a === 'classement' && m === 'repartition')
+  || (a === 'compter_distinct' && m === 'repartition'); // « quelles académies… » : la répartition les nomme et les compte
 export function desaccord(a, m) {
   if (!a || !m) return 'lecture manquante';
   if (['arret', 'albert', 'erreur'].includes(m.op)) return null; // pas de chiffre donné : rien à signaler
@@ -212,9 +213,12 @@ export function desaccord(a, m) {
     const manque = fa.filter(f => !fm.has(f) && f !== _equiv(m.groupe || ''));
     return manque.length ? `critère oublié par le moteur : ${manque.join(', ')}` : null;
   }
-  // critère cité par Albert, absent du moteur
-  const fm = new Set(Object.keys(m.filtres || {}).map(_equiv));
-  const manque = Object.keys(a.filtres || {}).map(_equiv).filter(f => !fm.has(f) && f !== _equiv(m.groupe || '') && f !== 'admission');
+  // critère cité par Albert, absent du moteur (une exclusion du moteur compte : « hors académie »)
+  const fm = new Set([...Object.keys(m.filtres || {}), ...Object.keys(m.exclus || {})].map(_equiv));
+  // même lieu à un autre niveau (« à Bordeaux » : commune pour le moteur, académie pour Albert) : convention, pas un oubli
+  const valeursMoteur = Object.values(m.filtres || {}).flat(2).map(nrm).join(' | ');
+  const memeLieu = f => GEO.test(f) && (a.filtres[Object.keys(a.filtres).find(x => _equiv(x) === f)] || []).flat().map(nrm).every(v => v && valeursMoteur.includes(v));
+  const manque = Object.keys(a.filtres || {}).map(_equiv).filter(f => !fm.has(f) && f !== _equiv(m.groupe || '') && f !== 'admission' && !memeLieu(f));
   if (manque.length) return `critère oublié par le moteur : ${[...new Set(manque)].join(', ')}`;
   // valeur de lieu / d'établissement oubliée (« à Bordeaux ou à Pau » : Pau)
   for (const [f, vals] of Object.entries(a.filtres || {})) {
