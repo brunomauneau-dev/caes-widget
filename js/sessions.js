@@ -509,6 +509,8 @@ function extractBlockTitle(exec, question) {
     const count = exec.result?.count ?? '';
     const n = Number(count).toLocaleString('fr-FR');
     // v27.23 — établissements différents
+    // v27.5.61 — académies, départements, communes différents
+    if (exec.result?.valeurs) { const nom = String(exec.result.valeurs); return `${n} ${count > 1 ? nom : nom.replace(/s$/, '')}${fPart}`; }
     if (exec.result?.etablissements === true) return `${n} établissement${count > 1 ? 's' : ''}${fPart}`;
     // v27.7 — open data : une ligne = une formation (pas un candidat)
     const unite = exec.plan?.table?.rowUnit === 'formation' ? 'formation' : 'candidat';

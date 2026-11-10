@@ -93,7 +93,7 @@ export function creerMoteur({ fetchImpl, table = null, autresSessions = [] } = {
     __exports: [],
   };
   // Export Excel : rien n'est écrit, on note seulement le nombre de lignes
-  ctx.XLSX = { utils: { json_to_sheet: rows => { ctx.__exports.push(rows.length); return {}; }, book_new: () => ({}), book_append_sheet() {}, sheet_to_csv: () => '' }, writeFile() {} };
+  ctx.XLSX = { utils: { json_to_sheet: rows => { ctx.__exports.push(rows.length); return {}; }, book_new: () => ({}), book_append_sheet() {}, sheet_to_csv: () => '', sheet_to_json: () => [], aoa_to_sheet: () => ({}), sheet_add_aoa() {} }, writeFile() {} };
   ctx.Blob = class {};
   ctx.window = ctx;
   ctx.globalThis = ctx;
