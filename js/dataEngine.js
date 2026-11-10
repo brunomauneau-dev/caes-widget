@@ -2736,6 +2736,8 @@ function isDataEngineQuestion(question) {
   if (/^(fais |donne|produis |r[eé]dige )?(une? )?(synth[eè]se|r[eé]sum[eé]|bilan|vue d'ensemble|portrait|analyse globale)/.test(q)) return false;
   // v27.5.60 — « quels établissements proposent… », et « donne-moi la liste » après un calcul
   if (LISTE_ETAB_RE.test(q) || LISTE_GEO_RE.test(q)) return true;
+  // v27.5.62 — « imprime ce résultat », « en PDF » : impression de la dernière réponse calculée
+  if (PDF_RE.test(q) && !/\b(excel|xlsx|csv)\b/.test(q)) return true;
   try { if (getDataEngineState().lastPlan && RELANCE_LISTE.test(q)) return true; } catch (e) { /* pas d'état */ }
   // v27.14 — classement selon un chiffre (« les formations les plus demandées »)
   try { if (CLASSEMENT_CUE.test(q) && detecterClassement((getActiveQueryTables() || [])[0], question)) return true; } catch (e) { /* source absente */ }
@@ -2968,9 +2970,18 @@ function detectDataEnginePlan(question, filterContextText = question) {
 // - un export juste après un résultat filtré (« exporte », « donne-moi le fichier ») garde ses filtres, sauf « tout »
 //   (avant : « donne moi la liste » exportait les 14 252 lignes de l'open data, sans filtre) ;
 // - « donne-moi la liste » sans question précédente : le widget demande « la liste de quoi ? » au lieu d'exporter tout
+// v27.5.62 — « exporte cette liste en PDF », « imprime ce résultat » : la dernière réponse calculée, imprimée comme avec
+// le bouton « 🖨 PDF » (avant : un fichier Excel)
+const PDF_RE = /\b(pdf|imprim\w*|impression)\b/;
 function _gardeRelances(plan, question) {
-  if (!plan || _enUnion) return plan;
+  if (_enUnion) return plan;
   const q = normalizeText(question || '');
+  if (PDF_RE.test(q) && !/\b(excel|xlsx|csv)\b/.test(q)) {
+    let prev = null; try { prev = getDataEngineState().lastPlan; } catch (e) { prev = null; }
+    const t = plan?.table || prev?.table || (getActiveQueryTables() || [])[0] || null;
+    return { tool: 'export_pdf', table: t, question, filters: [], createdAt: new Date().toISOString() };
+  }
+  if (!plan) return plan;
   let prev = null; try { prev = getDataEngineState().lastPlan; } catch (e) { prev = null; }
   if (/^export/.test(plan.tool || '')) {
     const tout = /\b(tout|toute|toutes|tous|entier|entiere|complet|complete|integral|integrale|ensemble du|la table|le fichier entier|toutes les lignes)\b/.test(q);
@@ -3842,7 +3853,21 @@ function renderCompareHtml(plan, result) {
   return `${deTitleHtml(clearTitle, plan.blockId, plan.originalTitle || clearTitle)}${perim}<p>Base comparée : <strong>${baseTotal.toLocaleString('fr-FR')}</strong> lignes.</p><section class="de-section de-population" style="margin:12px 0;padding:12px;border:1px solid var(--gris2,#e5e7eb);border-radius:10px;background:#fff"><div style="overflow:auto"><table style="border-collapse:separate;border-spacing:0;width:100%;font-size:12px;min-width:360px"><tbody><tr><th style="text-align:left;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Population</th><th style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Nombre</th><th style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris2,#e5e7eb)">Part</th></tr>${tableRows}</tbody></table></div>${missingNote}</section>${indicateursTable}${filtersHtml}${insights}${charts}${statsTable}${detailsTables}${debug}`;
 }
 
+function executerPdf(plan) {
+  let bloc = null;
+  try { bloc = (typeof blocsDeLaConversation === 'function' ? blocsDeLaConversation() : []).filter(b => b.calcule).pop() || null; } catch (e) { bloc = null; }
+  const titre = 'Impression en PDF';
+  if (!bloc) {
+    const html = `<h4>${titre}</h4><p>Il n'y a pas encore de réponse calculée à imprimer dans cette conversation. Posez d'abord la question (par exemple « liste des établissements proposant un BTS MCO en Gironde »), puis demandez le PDF, ou utilisez le bouton « 🖨 PDF » sous la réponse.</p>`;
+    return { kind: 'pdf', plan, result: { imprime: false }, text: 'PDF : aucune réponse calculée à imprimer', html };
+  }
+  let ok = false;
+  try { ok = typeof imprimerRapport === 'function' && imprimerRapport([bloc], { titre: bloc.titre }); } catch (e) { ok = false; }
+  const html = `<h4>${titre}</h4><p>${ok ? 'La fenêtre d\'impression s\'est ouverte' : 'La fenêtre d\'impression n\'a pas pu s\'ouvrir'} pour la réponse « <strong>${escapeHtml(bloc.titre || '')}</strong> ». Pour obtenir un fichier PDF, choisissez « Enregistrer au format PDF » comme imprimante.</p><p style="font-size:12px;color:var(--gris3)">Pour réunir plusieurs réponses dans un seul PDF : bouton « 📑 Rapport PDF » en haut du widget.</p>`;
+  return { kind: 'pdf', plan, result: { imprime: ok, titre: bloc.titre }, text: `PDF : ${bloc.titre}`, html };
+}
 function runDataEnginePlan(plan, persistentFiltersOverride) {
+  if (plan && plan.tool === 'export_pdf') return executerPdf(plan);
   plan = finalSanitizeAnalysisPlan(plan);
   if (!plan || !plan.table) return null;
   // v27.16 — comparaison entre sessions : le même calcul rejoué sur chaque session
@@ -4574,7 +4599,7 @@ function renderListeEtablissementsHtml(plan, result, perim, filtersHtml, debug) 
     const titre = `Établissements (${liste.length})${_suite}`;
     const items = liste.map(x => `<li>${escapeHtml(x.nom)}${x.commune ? ` <span style="color:var(--gris6,#6b7280)">(${escapeHtml(x.commune)})</span>` : ''} — ${x.n.toLocaleString('fr-FR')} ${unite}${x.n > 1 ? 's' : ''}</li>`).join('');
     const intro = `<p><strong>${liste.length.toLocaleString('fr-FR')}</strong> établissement${liste.length > 1 ? 's' : ''} pour <strong>${lignes.length.toLocaleString('fr-FR')}</strong> ${unite}${lignes.length > 1 ? 's' : ''}${comCol ? ', classés par commune' : ''}.</p>`;
-    return `${deTitleHtml(titre, plan.blockId, plan.originalTitle || titre)}${perim}${intro}<ul>${items}</ul>${filtersHtml}${debug}`;
+    return `${deTitleHtml(titre, plan.blockId, plan.originalTitle || titre)}${perim}${intro}<ul>${items}</ul><p><strong>Filtres appliqués</strong></p>${filtersHtml}${debug}`;
 }
 function renderDataEngineResultHtml(tool, plan, result) {
   // v27.10 — périmètre en clair sous le titre
@@ -4671,7 +4696,7 @@ function shouldAnswerLocallyWithoutAlbert(exec) {
   // Les requêtes de comptage/répartition simples doivent être résolues par le moteur,
   // sinon Albert risque de répondre à partir d'un résumé incomplet.
   // v27.7 — « unresolved » : terme introuvable, on le dit plutôt que de laisser Albert inventer
-  return ['count','group_by','top','pivot','stats','export','compare','unresolved','sum','classement','part','evolution','evolution_groupes','stats_groupes','part_groupes'].includes(exec.kind);
+  return ['count','group_by','top','pivot','stats','export','compare','unresolved','sum','classement','part','evolution','evolution_groupes','stats_groupes','part_groupes','pdf'].includes(exec.kind);
 }
 /* ═══════════════ v27.9 — Chiffres écrits par Albert : vérifiés contre les données fournies ═══════════════
    Albert rédige ; il ne doit pas produire de chiffres. Chaque nombre de sa réponse est comparé aux nombres
