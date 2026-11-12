@@ -69,6 +69,20 @@ function isGenericGristField(name) {
   return /^(id|manualSort|A|B|C|D|E|F|G|H|I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|AA|AB|AC|AD|AE|AF|AG|AH|AI|AJ|AK|AL|AM|AN|AO|AP|AQ|AR|AS|AT|AU|AV|AW|AX|AY|AZ)$/.test(String(name));
 }
 
+// v27.5.71 — une copie de l'open data Parcoursup (table Grist, fichier importé) : une ligne = une formation, avec ses
+// effectifs (capacité, candidats). Avant : « nombre de places en CPGE à Bordeaux » y comptait les formations (2) au lieu
+// d'additionner les places (91), car seul l'open data chargé par le widget portait cette information.
+function uniteDesLignes(headers) {
+  const h = (headers || []).map(x => normalizeText(String(x || '')));
+  const capacite = h.some(x => /capacit/.test(x));
+  const effectifs = h.some(x => /effectif total des candidats pour une formation|effectif total des candidats ayant/.test(x));
+  return capacite && effectifs ? 'formation' : undefined;
+}
+function avecUnite(t) {
+  if (t && !t.rowUnit) { const u = uniteDesLignes(t.headers); if (u) t.rowUnit = u; }
+  return t;
+}
+
 function buildGristQueryTable() {
   if (!gristRecords || !gristRecords.length) return null;
   const allFields = Object.keys(gristRecords[0]).filter(f => f !== 'id' && f !== 'manualSort');
@@ -92,11 +106,11 @@ function buildGristQueryTable() {
       });
       return obj;
     });
-    return { source: 'Grist', name: 'Table Grist connectée', headers: usable, objects };
+    return avecUnite({ source: 'Grist', name: 'Table Grist connectée', headers: usable, objects });
   }
 
   // Cas où la table Grist a déjà de vrais noms de colonnes.
-  return { source: 'Grist', name: 'Table Grist connectée', headers: allFields, objects: gristRecords };
+  return avecUnite({ source: 'Grist', name: 'Table Grist connectée', headers: allFields, objects: gristRecords });
 }
 
 /* ═══════════════════════ SOURCE ACTIVE ═══════════════════════
@@ -255,12 +269,12 @@ function parseDelimitedText(text) {
 function buildImportedTable(fileName, sheetName, rows) {
   const t = rowsToTable(rows);
   if (!t || !t.objects.length) return null;
-  return {
+  return avecUnite({
     source: 'Fichier',
     name: sheetName ? `${fileName} — ${sheetName}` : fileName,
     fileName, sheetName: sheetName || '',
     headers: t.headers, objects: t.objects
-  };
+  });
 }
 
 function sheetRows(workbook, sheetName) {
