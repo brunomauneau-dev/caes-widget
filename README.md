@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-53 fichiers, 2 259 tests. Depuis la racine du repo :
+54 fichiers, 2 327 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -126,6 +126,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 `js/test_verification_lecture.js` vérifie la **double lecture par Albert** dans le widget (`js/verification.js`, mode prudent) : le moteur répond tout de suite ; un modèle Albert rapide (Mistral Small) relit la question en arrière-plan ; en cas de désaccord important (autre chose compté, critère, lieu ou exclusion oubliés, liste au lieu d'export…), un avertissement « ⚠️ Vérification » s'ajoute sous la réponse et l'alerte est notée dans « À revoir » ; accord, Albert indisponible ou lent : rien ne s'affiche. Mesuré avant activation (`scripts/essai_double_lecture.mjs`) : 0 fausse alerte, 71 à 73 % des contresens signalés, 1,5 à 2 s.
 
 `js/test_serie3.js` vérifie les corrections de la **série 3** (35 questions nouvelles) : « sauf les BTS » / « à l'exception des BTS » (avant : les BTS seuls), taux « des boursiers ayant… » rapporté aux boursiers, relances « et de Bayonne ? » / « et à Bayonne ? » (même colonne de lieu), « admis en BTS de Pau » (Pau n'est plus perdu), énumérations de 3 valeurs (« Bordeaux, Toulouse et Poitiers »), places moyennes, « je cherche les … », comparaison de deux lieux avec le critère commun gardé.
+
+`js/test_serie4.js` vérifie les **enchaînements de relances** (2 à 4 questions à la suite, open data et fichier de candidats) : chaque relance garde ce qui ne change pas (formation, lieu, population, mesure) et remplace ce qui change ; « et à Pau ? » remplace le lieu précédent, « combien de places ? » / « combien d'admis ? » portent sur les mêmes formations, « et privées ? » est calculé.
 
 `js/test_part_groupes.js` vérifie les **taux par groupe** : « pourcentage de candidats sans proposition par département », « part des boursiers par académie », « taux de remplissage des BTS par académie » donnent un taux calculé **dans** chaque groupe (avant : la répartition du total entre groupes, lue à tort comme un taux), avec la ligne « Ensemble », l'export, le graphique et les relances (« taux de proposition des boursiers » puis « et par département ? »).
 

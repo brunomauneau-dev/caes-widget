@@ -18,7 +18,7 @@ on:
         required: false
         default: ''
       jeu:
-        description: 'Questions : reglage, validation, serie3, tout'
+        description: 'Questions : reglage, validation, serie3, serie4, tout'
         required: false
         default: 'reglage'
 

@@ -150,6 +150,7 @@ function isExplicitFreshDataQuestion(question) {
   // "combien sont-ils ?", "combien y en a-t-il ?" = bare count follow-up → hérite du contexte
   if (/^combien\s+(sont[- ]ils|y\s*(?:en\s+)?a[- ]?t[- ]?il|en tout|au total|maintenant|cela|ca|[cç]a)\s*\??$/.test(q)) return false;
   if (RELANCE_SOUS_ENSEMBLE.test(q)) return false; // « combien ont eu une proposition ? » : les mêmes candidats
+  if (RELANCE_MESURE_SEULE.test(q)) return false;
   return true;
 }
 
@@ -163,11 +164,17 @@ const LISTE_ETAB_RE = /\b(?:quel(?:le)?s|liste(?: des)?|lister|nommer|citer)\s+(
 const RELANCE_SESSION = /^(?:et\s+)?(?:pour\s+|en\s+|a\s+|sur\s+)?(?:l an dernier|l annee derniere|l annee precedente|la session precedente|l an passe|l annee passee|20[12]\d|la session 20[12]\d)\s*\??$/;
 // v27.5.56 — « combien ont eu une proposition ? », « et parmi eux combien de boursiers ? », « dont combien de filles ? » :
 // une partie de la population précédente (avant : la question repartait de tout le fichier, ou « eux » était inconnu)
+// v27.5.66 — « combien de places ? », « combien d'admis ? » juste après « combien de BTS en Gironde » : la mesure
+// sur les MÊMES formations (avant : toute la France, 259 530 places)
+const RELANCE_MESURE_SEULE = /^(?:et\s+)?(?:(?:le|la)\s+)?(?:combien|nombre|total|somme)\s+(?:de\s+|d\s+|des\s+)?(?:places?|admis|admises|candidats?|candidates|candidatures?|voeux)(?:\s+(?:au total|en tout|cela fait|ca fait))?\s*$/;
 const RELANCE_SOUS_ENSEMBLE = /^(?:et\s+)?(?:parmi\s+(?:eux|elles|ceux ci|celles ci|ces \w+)|dont|combien\s+(?:d\s+entre\s+(?:eux|elles)|parmi\s+(?:eux|elles)|ont|sont|avaient|etaient|n\s+ont)|ceux qui|celles qui|et combien)\b/;
 function isFilterOnlyFollowUp(question) {
   const q = normalizeText(question || '').trim();
   if (RELANCE_LISTE.test(q)) return true;
   if (RELANCE_SOUS_ENSEMBLE.test(q) && !/^combien\s+sont[- ]?(ils|elles)\s*\??$/.test(q)) return true;
+  if (RELANCE_MESURE_SEULE.test(q)) return true;
+  // v27.5.66 — « et privées ? », « et les sélectives ? » (avant : pas de calcul)
+  if (/^et (?:les |des |en |pour les |dans le )?(?:publi\w*|priv\w*|(?:non )?selecti\w*|(?:non )?boursier\w*|apprenti\w*|filles|garcons)\s*$/.test(q)) return true;
   if (/^combien\s+(sont[- ]ils|y\s*(?:en\s+)?a[- ]?t[- ]?il|en tout|au total|maintenant|cela|ca|[cç]a)\s*\??$/.test(q)) return true;
   // v27.25 — « lesquelles sont à Bordeaux ? », « quels sont-ils ? », « où sont-elles ? » : les mêmes, détaillés
   if (RELANCE_LESQUELS.test(q)) return true;
@@ -661,6 +668,18 @@ function replaceConceptFiltersWithStrict(plan, question) {
   return plan;
 }
 
+// v27.5.66 — relance « et à Pau ? » après « les BUT des Landes » : un nouveau lieu (même rôle : accueil, origine, ou
+// lieu de la formation) remplace le lieu précédent, quel que soit son niveau (avant : Landes ET Pau, 0 formation)
+function _roleLieu(col) {
+  const h = _hx(col || '');
+  if (!/acad[eé]mi|departement|region|commune|ville/.test(h) || /code|insee|postal/.test(h)) return null;
+  const r = (typeof plannerColumnRole === 'function') ? plannerColumnRole(col) : {};
+  return r.accueil ? 'acc' : r.origine ? 'ori' : 'lieu';
+}
+function _lieuRemplacePar(f, nouveaux) {
+  const r = f && f.op !== 'neq' && _roleLieu(f.col);
+  return !!r && (nouveaux || []).some(n => n && n.op !== 'neq' && n.col !== f.col && _roleLieu(n.col) === r);
+}
 const _cleFiltre = f => `${f && f.col}::${(f && f.op) || 'eq'}::${f && f.value}`;
 function inheritConversationContext(plan, question) {
   if (!plan) return plan;
@@ -726,11 +745,11 @@ function inheritConversationContext(plan, question) {
     } else if (dimensionFollowUp) {
       plan.tool = 'group_by';
       if (!plan.targetCol && prev.targetCol && !plan.dimensionIntrouvable) plan.targetCol = prev.targetCol;
-    } else if (filterFollowUp && RELANCE_SOUS_ENSEMBLE.test(q) && !['compare'].includes(prev.tool)) {
+    } else if (filterFollowUp && (RELANCE_SOUS_ENSEMBLE.test(q) || RELANCE_MESURE_SEULE.test(q)) && !['compare'].includes(prev.tool)) {
       // v27.5.56 — sous-population : les filtres précédents + ceux de cette question ; l'outil est celui de la question
       const _strict = strictFiltersFromQuestion(plan.table, question);
       const _colsNouvelles = new Set([..._strict, ..._filtresPlanner].filter(f => f && f.op !== 'contains_all').map(f => f.col));
-      const _prevGardes = prevKept.filter(f => !(f && f.op !== 'contains_all' && _colsNouvelles.has(f.col)));
+      const _prevGardes = prevKept.filter(f => !(f && f.op !== 'contains_all' && _colsNouvelles.has(f.col)) && !_lieuRemplacePar(f, [..._strict, ..._filtresPlanner]));
       plan.filters = mergeFiltersUnique(mergeFiltersUnique(_prevGardes, _strict), _filtresPlanner);
       plan.sousEnsemble = true;
     } else if (filterFollowUp && RELANCE_LISTE.test(q)) {
@@ -752,7 +771,7 @@ function inheritConversationContext(plan, question) {
       // filtres : comme toute relance de filtre (« et pour les CPGE ? » remplace BTS)
       const _strict = strictFiltersFromQuestion(plan.table, question);
       const _colsNouvelles = new Set([..._strict, ..._filtresPlanner].filter(f => f && f.op !== 'contains_all').map(f => f.col));
-      const _prevGardes = prevKept.filter(f => !(f && f.op !== 'contains_all' && _colsNouvelles.has(f.col)));
+      const _prevGardes = prevKept.filter(f => !(f && f.op !== 'contains_all' && _colsNouvelles.has(f.col)) && !_lieuRemplacePar(f, [..._strict, ..._filtresPlanner]));
       plan.filters = mergeFiltersUnique(mergeFiltersUnique(_prevGardes, _strict), _filtresPlanner);
     } else if (filterFollowUp) {
       plan.tool = prev.tool || plan.tool;
@@ -786,7 +805,7 @@ function inheritConversationContext(plan, question) {
         // au lieu de cumuler deux valeurs incompatibles ; une formation citée remplace la précédente (prevKept).
         const _strict = strictFiltersFromQuestion(plan.table, question);
         const _colsNouvelles = new Set([..._strict, ..._filtresPlanner].filter(f => f && f.op !== 'contains_all').map(f => f.col));
-        const _prevGardes = prevKept.filter(f => !(f && f.op !== 'contains_all' && _colsNouvelles.has(f.col)));
+        const _prevGardes = prevKept.filter(f => !(f && f.op !== 'contains_all' && _colsNouvelles.has(f.col)) && !_lieuRemplacePar(f, [..._strict, ..._filtresPlanner]));
         plan.filters = mergeFiltersUnique(mergeFiltersUnique(_prevGardes, _strict), _filtresPlanner);
       }
     }
@@ -3522,7 +3541,15 @@ function _finalSanitizeAnalysisPlanBase(plan) {
     // perdait Bordeaux, et « et pour les BTS ? » après « combien de PASS » recomptait les PASS.
     const _entrants = (plan.filters || []).slice();
     const _clesPrev = new Set((prev.filters || []).map(_cleFiltre));
-    const _nouveaux = _entrants.filter(f => !_clesPrev.has(_cleFiltre(f)));
+    // v27.5.66 — même garde-fou que pour une question nouvelle : un chiffre absent de la question (« Dont effectif des
+    // admis … = 1 », lu dans « combien d'admis ? ») n'est pas un filtre. Avant : « et combien d'admis ? » donnait 43
+    // (formations ayant 1 admis de ce type) au lieu de 1 550.
+    const _chiffreInvente = f => {
+      if (!f || f.op !== 'eq' || !/^\d+(?:[,.]\d+)?$/.test(String(f.value ?? '').trim())) return false;
+      const etat01 = table && _distinctValues(table, f.col).every(x => /^(0|1)$/.test(String(x).trim()));
+      return !etat01 && !new RegExp(`(^|\\D)${String(f.value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\D|$)`).test(plan.question || '');
+    };
+    const _nouveaux = _entrants.filter(f => !_clesPrev.has(_cleFiltre(f)) && !_chiffreInvente(f));
     const _colsNouv = new Set([...strict, ..._nouveaux].filter(f => f && f.op !== 'contains_all').map(f => f.col));
     const _clesEntrants = new Set(_entrants.map(_cleFiltre));
     const _prevGardes = (prev.filters || []).filter(pf => pf && _clesEntrants.has(_cleFiltre(pf)) && !(pf.op !== 'contains_all' && _colsNouv.has(pf.col)));
