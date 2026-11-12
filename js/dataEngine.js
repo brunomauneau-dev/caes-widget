@@ -154,6 +154,7 @@ function isExplicitFreshDataQuestion(question) {
   return true;
 }
 
+const LISTE_CONDITION_RE = /^(?:les|quels|quelles|quel|quelle|lesquels|lesquelles)\s/;
 const RELANCE_LESQUELS = /^(lesquel(?:le)?s|lesquels|quel(?:le)?s sont[- ]?(?:elles|ils)|ou sont[- ]?(?:elles|ils)|ou se trouvent[- ]?(?:elles|ils)|ou ca|lesquelles sont|lesquels sont)\b/;
 // v27.5.60 — « donne-moi la liste », « la liste des établissements », « quels sont les établissements ? » après un
 // comptage : les mêmes lignes, détaillées (avant : export de tout le fichier, 14 252 lignes sans aucun filtre)
@@ -1663,15 +1664,21 @@ const COMPARATEURS = [
 ];
 const _CMP = '(superieure? ou egale? a|inferieure? ou egale? a|au moins|au plus|plus de|moins de|superieure? a|inferieure? a|au dela de|en dessous de|depassant|egale? a|>=|<=|>|<|=|de|a)';
 const SYMBOLES_OPS = { gt: 'supérieur à', gte: 'au moins', lt: 'inférieur à', lte: 'au plus', eqn: 'égal à' };
+// v27.5.67 — « taux d'accès > 80 % », « ≤ 30 » : les symboles disparaissaient au nettoyage du texte (condition perdue,
+// tous les BTS comptés). Ils sont écrits en toutes lettres avant.
+function _symbolesEnMots(question) {
+  return String(question ?? '').replace(/>=|≥/g, ' superieur ou egal a ').replace(/<=|≤/g, ' inferieur ou egal a ')
+    .replace(/>/g, ' superieur a ').replace(/</g, ' inferieur a ');
+}
 function conditionsChiffrees(table, question) {
   if (!table || !Array.isArray(table.objects) || !table.objects.length) return [];
-  const q = normalizeText(question || '');
+  const q = normalizeText(_symbolesEnMots(question || ''));
   const headers = (table.headers || Object.keys(table.objects[0] || {})).filter(Boolean);
   const colPour = mot => { for (const m of CLASSEMENT_MESURES) { if (!m.re.test(mot)) continue; const c = headers.find(h => m.col.test(_hx(h)) && _estNumerique(table, h)); if (c) return c; } return null; };
   const opPour = txt => (COMPARATEURS.find(([re]) => re.test(txt)) || [])[1];
   const out = [];
   // 1. « plus de 100 places », « au moins 30 admis », « moins de 50 candidats »
-  for (const m of q.matchAll(new RegExp(`\\b(plus de|moins de|au moins|au plus)\\s+(\\d+(?:[.,]\\d+)?)\\s*(?:%\\s*)?(places?|candidats?|admis|voeux|boursiers?)\\b`, 'g'))) {
+  for (const m of q.matchAll(new RegExp(`\\b(plus de|moins de|au moins|au plus|superieure? ou egale? a|inferieure? ou egale? a|superieure? a|inferieure? a)\\s+(\\d+(?:[.,]\\d+)?)\\s*(?:%\\s*)?(places?|candidats?|admis|voeux|boursiers?)\\b`, 'g'))) {
     const col = colPour(m[3]); const op = opPour(m[1]);
     if (col && op) out.push({ col, op, value: Number(m[2].replace(',', '.')) });
   }
@@ -2529,6 +2536,17 @@ const REFORMULATIONS = [
   [/\b(?:nb|nbre|nbr)\.?\s+(?=de\b|d['’]|des\b|total\b)/gi, 'nombre '],
   // v27.25 — fautes de frappe courantes (« conbien de BTS » partait vers Albert)
   [/\b(?:conbien|combein|cobien|combiens|conbiens|cmbien|comben|combie)\b/gi, 'combien'],
+  // v27.5.67 — abréviations de la saisie rapide (avant : arrêt « non reconnu », ou envoyé à Albert)
+  [/\b(?:cmb|cbn|cbien|cmbn)\b/gi, 'combien'],
+  [/\btx\b(?=\s+(?:d|de)\b|\s+d['’])/gi, 'taux'],
+  [/\bds\s+(?=(?:le|la|les|l['’])\b)/gi, 'dans '],
+  [/\bbdx\b/gi, 'Bordeaux'], [/\btlse\b/gi, 'Toulouse'],
+  [/\b(en|de|la|dans la|pour la)\s+NA\b(?!\s*[:=])/g, '$1 Nouvelle-Aquitaine'],
+  [/\bIDF\b/gi, 'Île-de-France'], [/\bPACA\b/gi, "Provence-Alpes-Côte d'Azur"], [/\bA?URA\b|\bARA\b/g, 'Auvergne-Rhône-Alpes'],
+  [/\bHDF\b/g, 'Hauts-de-France'], [/\bBFC\b/g, 'Bourgogne-Franche-Comté'],
+  // STS (sections de techniciens supérieurs) = BTS ; « licence pro » = licence professionnelle (pas toutes les licences)
+  [/\bSTS\b/gi, 'BTS'],
+  [/\blicences?\s+pros?\b(?!fess)/gi, 'licence professionnelle'],
   // « y a-t-il des BTS au lycée X ? », « existe-t-il des … » : un comptage (0 = non)
   [/\b(?:est[- ]ce\s+qu['’]\s*)?(?:il\s+)?y\s+a[- ]?t[- ]?il\s+(?:des|un|une|du|de\s+la|de\s+l['’]|de)\s+/gi, 'combien de '],
   [/\bexiste[- ]?t[- ]?il\s+(?:des|un|une|du|de\s+la|de\s+l['’]|de)\s+/gi, 'combien de '],
@@ -2835,6 +2853,47 @@ function appliquerSiglesFormations(question, table) {
   return q;
 }
 
+// v27.5.67 — faute de frappe sur un lieu (« giroonde », « Bordaux ») : corrigée si UN SEUL lieu des données est à une
+// lettre près (mot de 6 lettres ou plus, absent de toutes les valeurs du fichier). Le lieu corrigé apparaît dans
+// « Sur quoi porte ce calcul ». Avant : arrêt « non reconnu ».
+function _uneLettrePres(a, b) {
+  if (a === b || Math.abs(a.length - b.length) > 1) return false;
+  let i = 0, j = 0, diff = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++diff > 1) return false;
+    if (a.length > b.length) i++; else if (b.length > a.length) j++;
+    else if (a[i + 1] === b[j] && a[i] === b[j + 1]) { i += 2; j += 2; } // deux lettres inversées
+    else { i++; j++; }
+  }
+  return diff + (a.length - i) + (b.length - j) <= 1;
+}
+function corrigerFautesLieux(question, table) {
+  if (!question || !table || !Array.isArray(table.objects) || !table.objects.length) return question;
+  if (!table._lieuxFautes || table._lieuxFautes.n !== table.objects.length) {
+    const lieux = new Map(), voc = new Set();
+    (table.headers || []).filter(Boolean).forEach(h => {
+      const d = _distinctValues(table, h);
+      if (d.length > 5000) return;
+      const estLieu = /acad[eé]mi|departement|region|commune|ville/.test(_hx(h)) && !/code|insee|postal/.test(_hx(h));
+      d.forEach(v => {
+        const n = normalizeText(v);
+        n.split(' ').forEach(w => voc.add(w));
+        if (estLieu && !n.includes(' ') && n.length >= 6) lieux.set(n, String(v));
+      });
+    });
+    table._lieuxFautes = { n: table.objects.length, lieux, voc };
+  }
+  const { lieux, voc } = table._lieuxFautes;
+  return String(question).replace(/[A-Za-zÀ-ÿ'’-]{6,}/g, mot => {
+    const n = normalizeText(mot);
+    if (n.includes(' ') || n.length < 6 || voc.has(n) || voc.has(n.replace(/s$/, '')) || MOTS_QUESTION_FAUTES.has(n)) return mot;
+    const proches = [...lieux.keys()].filter(l => _uneLettrePres(n, l));
+    return proches.length === 1 ? lieux.get(proches[0]) : mot;
+  });
+}
+const MOTS_QUESTION_FAUTES = new Set('combien nombre formations formation candidats candidat combiens taux acces moyenne mediane repartition admises boursiers boursier selectives selectifs publiques publics privees prives licences licence etablissements etablissement lycees academie academies departement departements region regions commune communes places proposition propositions accepte acceptes apprentis bacheliers terminale generale generaux technologique professionnelle quelles quels quelle parmi depuis entre avec selon chaque toutes souhaite voudrais aimerais pourriez merci bonjour'.split(' '));
+
 function reformulerQuestion(question) {
   let q = String(question ?? '');
   REFORMULATIONS.forEach(([re, rep]) => { q = q.replace(re, rep); });
@@ -2852,6 +2911,8 @@ function isDataEngineQuestion(question) {
   // v27.5.62 — « imprime ce résultat », « en PDF » : impression de la dernière réponse calculée
   if (PDF_RE.test(q) && !/\b(excel|xlsx|csv)\b/.test(q)) return true;
   try { if (getDataEngineState().lastPlan && RELANCE_LISTE.test(q)) return true; } catch (e) { /* pas d'état */ }
+  // v27.5.67 — « quels BTS ont un taux d'accès inférieur à 10 % ? », « les BTS dont le taux d'accès est < 30 % » : liste calculée
+  try { if (LISTE_CONDITION_RE.test(q) && conditionsChiffrees((getActiveQueryTables() || [])[0], question).length) return true; } catch (e) { /* source absente */ }
   // v27.14 — classement selon un chiffre (« les formations les plus demandées »)
   try { if (CLASSEMENT_CUE.test(q) && detecterClassement((getActiveQueryTables() || [])[0], question)) return true; } catch (e) { /* source absente */ }
   // v27.15 — taux et parts (« part des boursiers parmi les admis »)
@@ -3146,7 +3207,7 @@ function _detectDataEnginePlanBase(question, filterContextText = question) {
   if (!tables.length) return null;
   const table = tables[0]; // Grist est déjà prioritaire dans getActiveQueryTables()
   // v27.22 — sigles (« BTS MCO », « BUT GEA », « khâgne », « Sciences Po ») → mots des intitulés de la source
-  const _avecSigles = appliquerSiglesFormations(question, table);
+  const _avecSigles = appliquerSiglesFormations(corrigerFautesLieux(question, table), table);
   if (_avecSigles !== question) { if (filterContextText === question) filterContextText = _avecSigles; question = _avecSigles; }
   if (!table || !table.objects || !table.objects.length) return null;
   const headers = table.headers || Object.keys(table.objects[0] || {});
@@ -3157,12 +3218,14 @@ function _detectDataEnginePlanBase(question, filterContextText = question) {
   if (currentPlan) return currentPlan;
 
   let tool = inferMeasureIntent(question);
+  let _listeCondition = false;
   // v27.5.60 — « quels établissements proposent le BTS MCO en Gironde ? » : une liste d'établissements calculée
   if ((!tool || /^export/.test(tool)) && (LISTE_ETAB_RE.test(normalizeText(question)) || LISTE_GEO_RE.test(normalizeText(question))) && !hasExportWords(normalizeText(question))) tool = 'group_by';
   // v27.14 — « quelle formation a le plus de candidats » : classement, même sans mot d'analyse reconnu
   if ((!tool || tool === 'stats' || tool === 'count_rows') && detecterClassement(table, question)) tool = 'top';
   if ((!tool || tool === 'group_by') && detecterPart(table, question)) tool = 'count_rows';
   if (!tool && sessionsDeLaQuestion(table, question)) tool = 'count_rows';
+  if (!tool && LISTE_CONDITION_RE.test(normalizeText(question)) && conditionsChiffrees(table, question).length) { tool = 'group_by'; _listeCondition = true; }
   if (!tool) return null;
 
   if (tool === 'compare') {
@@ -3202,6 +3265,13 @@ function _detectDataEnginePlanBase(question, filterContextText = question) {
     // à partir de filtres structurés validés, jamais depuis les résultats calculés
     // (moyenne, médiane, valeur de tableau, etc.).
     const plannerPlan = buildPlannerPlan(question, question, table, tool);
+    if (plannerPlan && _listeCondition) {
+      // v27.5.67 — liste des formations qui remplissent la condition (intitulés), pas une répartition d'une colonne chiffrée
+      const p = applyConditionsChiffrees(applyEtablissements(applyFormationTerms(plannerPlan)));
+      p.tool = 'group_by'; p.listMode = true; p.limit = 300;
+      p.targetCol = pickListColumn(table, p.filters) || p.targetCol;
+      return inheritConversationContext(p, question);
+    }
     if (plannerPlan) return inheritConversationContext(applySessions(applyPart(applyConditionsChiffrees(applyClassement(applyMeasureSum(applyListMode(applyEtablissements(applyFormationTerms(plannerPlan)))))))), question);
   }
 
@@ -3454,7 +3524,27 @@ function resolveRoleDuplicates(plan) {
 }
 
 function finalSanitizeAnalysisPlan(plan) {
-  return resolveRoleDuplicates(_finalSanitizeAnalysisPlanBase(plan));
+  return _retirerValeursEmboitees(resolveRoleDuplicates(_finalSanitizeAnalysisPlanBase(plan)));
+}
+// v27.5.67 — « BTS en Auvergne-Rhône-Alpes » : « Rhône » (département) lu DANS le nom de la région ; filtre en trop
+// retiré, sauf si le mot figure aussi ailleurs dans la question (« en Auvergne-Rhône-Alpes, dans le Rhône »)
+function _retirerValeursEmboitees(plan) {
+  if (!plan || !Array.isArray(plan.filters) || plan.filters.length < 2) return plan;
+  const q = ` ${normalizeText(_symbolesEnMots(plan.question || ''))} `;
+  const eqs = plan.filters.filter(f => f && f.op === 'eq' && typeof f.value === 'string' && f.value.length >= 3);
+  const retirer = new Set();
+  eqs.forEach(petit => {
+    const np = normalizeText(petit.value);
+    eqs.forEach(grand => {
+      if (grand === petit || grand.col === petit.col) return;
+      const ng = normalizeText(grand.value);
+      if (ng.length <= np.length || !new RegExp(`(^| )${np}( |$)`).test(ng) || !q.includes(` ${ng} `)) return;
+      const ailleurs = q.split(` ${ng} `).join(' ');
+      if (!new RegExp(`(^| )${np}( |$)`).test(ailleurs)) retirer.add(petit);
+    });
+  });
+  if (retirer.size) plan.filters = plan.filters.filter(f => !retirer.has(f));
+  return plan;
 }
 
 function _finalSanitizeAnalysisPlanBase(plan) {
