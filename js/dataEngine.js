@@ -395,13 +395,23 @@ function _specialitesLycee(table, q) {
         vus.add(cleF);
         const noms = [...new Map(fait.ok.sort((a, b) => b.n - a.n).map(x => [normalizeText(x.nom), x.nom])).values()];
         const label = noms.length <= 3 ? noms.join(' ou ') : `${noms.length} spécialités contenant « ${fait.sig.join(' ')} »`;
-        out.filtres.push({ col: L.ens, cols: L.cols, op: 'contains_words', sujets: noms.map(normalizeText), terms: fait.sig.map(w => [w, w + 's', w.replace(/s$/, '')]), value: label, label, source: 'specialite_lycee' });
+        out.filtres.push({ col: L.ens, cols: L.cols, op: 'contains_words', sujets: noms.map(normalizeText), terms: fait.sig.map(w => [w, w + 's', w.replace(/s$/, '')]), value: label, label, source: 'specialite_lycee', _de: i, _a: i + fait.k });
         fait.sig.forEach(w => out.mots.add(w));
       }
       for (let j = debut > 0 && /^(specialites?|enseignements?|doublettes?|specialite)$/.test(tokens[debut - 1]) ? debut - 1 : debut; j < i + fait.k; j++) pris.add(j);
       i += fait.k;
     }
   });
+  // v27.5.74 — « SES ou HGGSP », « maths ou physique » : l'une ou l'autre (avant : les deux exigées, 2 223 au lieu de 8 390)
+  if (out.filtres.length >= 2) {
+    const tri = out.filtres.slice().sort((a, b) => a._de - b._de);
+    const ouEntre = tri.slice(1).every((f, k) => { const entre = tokens.slice(tri[k]._a, f._de); return entre.includes('ou') && !entre.includes('et'); });
+    if (ouEntre) {
+      const label = tri.map(f => f.label).join(' ou ');
+      out.filtres = [{ col: L.ens, op: 'or', groupes: tri.map(f => [f]), value: label, label: `« ${L.ens} » contient ${tri.map(f => `« ${f.label} »`).join(' ou ')}`, source: 'specialite_lycee' }];
+    }
+  }
+  out.filtres.forEach(f => { delete f._de; delete f._a; });
   if (out.filtres.length) {
     // reste de la question (pour les formations d'accueil) : sans les spécialités du lycée ni « en terminale / au lycée »
     out.reste = tokens.filter((w, j) => !pris.has(j)).join(' ').replace(/\b(?:en|de) (?:classe de )?terminale\b|\bau lycee\b|\b(enseignements? de )?specialites?\b/g, ' ').replace(/\s+/g, ' ').trim();
@@ -3377,7 +3387,10 @@ function _detectDataEnginePlanBase(question, filterContextText = question) {
     if (groups.length >= 2) {
       const _colsG = new Set(groups.flatMap(g => (g.filters || []).map(gf => gf.col)));
       const _valsG = new Set(groups.flatMap(g => (g.filters || []).map(gf => normalizeText(gf.value))));
-      const _horsGroupes = f => f && !_colsG.has(f.col) && !_valsG.has(normalizeText(f.value)) && !(f.op === 'contains_all' && (f.terms || []).every(t => [].concat(t).some(w => _valsG.has(normalizeText(w)))));
+      // mots des valeurs des groupes (« cpge », « bts » de « CPGE - CPES », « BTS - BTSA… ») : un intitulé « contenant CPGE
+      // et BTS » n'est pas un critère commun (avant : 0 ligne de chaque côté)
+      const _motsG = new Set([..._valsG].flatMap(v => v.split(/[^a-z0-9]+/)).filter(w => w.length >= 2));
+      const _horsGroupes = f => f && !_colsG.has(f.col) && !_valsG.has(normalizeText(f.value)) && !(f.op === 'contains_all' && (f.terms || []).every(t => [].concat(t).some(w => _valsG.has(normalizeText(w)) || _motsG.has(normalizeText(w)))));
       let baseFilters = strictFiltersFromQuestion(table, question).filter(_horsGroupes);
       // v27.5.64 — critères communs aux deux groupes (« le nombre de BTS en Gironde et dans les Landes » : BTS),
       // lus par le planner ; avant : perdus, la comparaison portait sur toutes les formations
@@ -3938,42 +3951,17 @@ function detectCompareGroups(table, question) {
     }
   }
 
-  // ── 1. Paires sémantiques hardcodées ──────────────────────────────────────
-  if (/basque/.test(q) && /(non[- ]?basque|autres?|reste|hors|compare|versus)/.test(q)) {
-    const col = findColumnByConceptStrict(table, 'basque');
-    if (col) {
-      addGroup('Pays Basque',      [{ col, op: 'eq',  value: yesNoValue(col, true) }]);
-      addGroup('Hors Pays Basque', [{ col, op: 'neq', value: yesNoValue(col, true) }]);
-      return groups;
+  // ── 0c. Formations nommées (CPGE, L1, BTS, BUT, etc.) — v27.5.74 : AVANT les paires boursiers / admis
+  // (« comparer les boursiers admis en CPGE et en BTS » : CPGE contre BTS parmi les boursiers admis ; avant : 0 / 0)
+  // v27.5.74 — open data : la filière très agrégée (« comparer les BTS et les BUT en Gironde » ; avant : Albert, sans calcul)
+  {
+    const fcol = (table.headers || []).find(h => /^filiere de formation tres agregee$/.test(normalizeText(h)));
+    if (fcol) {
+      const cites = _distinctValues(table, fcol).map(v => ({ v, n: normalizeText(v) })).filter(o => o.n.length >= 2)
+        .map(o => { const m = new RegExp(`(^| )(${o.n}|${o.n}s)( |$)`).exec(q); return m ? { ...o, i: m.index } : null; }).filter(Boolean).sort((a, b) => a.i - b.i);
+      if (cites.length >= 2) { cites.slice(0, 2).forEach(o => addGroup(o.v, [{ col: fcol, op: 'eq', value: o.v }])); return groups; }
     }
   }
-  if (/boursier/.test(q) && /(non[- ]?boursier|compare|comparaison|versus| vs )/.test(q)) {
-    const col = findColumnByConceptStrict(table, 'boursier');
-    if (col) {
-      addGroup('Boursiers',    [{ col, op: 'eq', value: pickColumnValue(table, col, 'boursier_oui') }]);
-      addGroup('Non-boursiers',[{ col, op: 'eq', value: pickColumnValue(table, col, 'boursier_non') }]);
-      return groups;
-    }
-  }
-  if (/admis|r[eé]pondu favorablement|avec proposition/.test(q) &&
-      /(non[- ]?admis|sans proposition|refus[eé]|compare|versus)/.test(q)) {
-    const col = (table.headers || []).find(h => /r[eé]pondu favorablement|actuellement r[eé]pondu/i.test(h));
-    if (col) {
-      addGroup('Admis',     [{ col, op: 'eq', value: pickColumnValue(table, col, 'oui') }]);
-      addGroup('Non admis', [{ col, op: 'eq', value: pickColumnValue(table, col, 'non') }]);
-      return groups;
-    }
-  }
-  if (/apprenti/.test(q) && /(non[- ]?apprenti|compare|versus)/.test(q)) {
-    const col = findColumnByConceptStrict(table, 'apprenti');
-    if (col) {
-      addGroup('Apprentis',    [{ col, op: 'eq', value: yesNoValue(col, true) }]);
-      addGroup('Non-apprentis',[{ col, op: 'eq', value: yesNoValue(col, false) }]);
-      return groups;
-    }
-  }
-
-  // ── 2. Formations nommées (CPGE, L1, BTS, BUT, etc.) ─────────────────────
   const formationCol = findColumnByConceptStrict(table, 'formation_groupe');
   if (formationCol) {
     const formVals = [...new Set((table.objects || []).map(r => String(r[formationCol] ?? '')).filter(Boolean))];
@@ -3993,6 +3981,42 @@ function detectCompareGroups(table, question) {
     }
     if (found.length >= 2) {
       found.slice(0, 2).forEach(f => addGroup(f.raw, [{ col: formationCol, op: 'eq', value: f.raw }]));
+      return groups;
+    }
+  }
+
+  // ── 1. Paires sémantiques hardcodées ──────────────────────────────────────
+  if (/basque/.test(q) && /(non[- ]?basque|autres?|reste|hors|compare|versus)/.test(q)) {
+    const col = findColumnByConceptStrict(table, 'basque');
+    if (col) {
+      addGroup('Pays Basque',      [{ col, op: 'eq',  value: yesNoValue(col, true) }]);
+      addGroup('Hors Pays Basque', [{ col, op: 'neq', value: yesNoValue(col, true) }]);
+      return groups;
+    }
+  }
+  if (/boursier/.test(q) && /(non[- ]?boursier|compare|comparaison|versus| vs )/.test(q)) {
+    const col = findColumnByConceptStrict(table, 'boursier');
+    if (col) {
+      addGroup('Boursiers',    [{ col, op: 'eq', value: pickColumnValue(table, col, 'boursier_oui') }]);
+      addGroup('Non-boursiers',[{ col, op: 'eq', value: pickColumnValue(table, col, 'boursier_non') }]);
+      return groups;
+    }
+  }
+  // v27.5.74 — « comparer les admis en CPGE et en BTS » : deux formations, pas admis / non admis (avant : 0 / 0)
+  if (/admis|r[eé]pondu favorablement|avec proposition/.test(q) &&
+      /(non[- ]?admis|sans proposition|refus[eé]|\badmis\s+(?:et|ou|vs|versus|contre)\s+(?:les\s+)?non\b|^compar\w*\s+(?:les\s+)?admis\s*\??$)/.test(q)) {
+    const col = (table.headers || []).find(h => /r[eé]pondu favorablement|actuellement r[eé]pondu/i.test(h));
+    if (col) {
+      addGroup('Admis',     [{ col, op: 'eq', value: pickColumnValue(table, col, 'oui') }]);
+      addGroup('Non admis', [{ col, op: 'eq', value: pickColumnValue(table, col, 'non') }]);
+      return groups;
+    }
+  }
+  if (/apprenti/.test(q) && /(non[- ]?apprenti|compare|versus)/.test(q)) {
+    const col = findColumnByConceptStrict(table, 'apprenti');
+    if (col) {
+      addGroup('Apprentis',    [{ col, op: 'eq', value: yesNoValue(col, true) }]);
+      addGroup('Non-apprentis',[{ col, op: 'eq', value: yesNoValue(col, false) }]);
       return groups;
     }
   }
@@ -4366,6 +4390,16 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
   if (plan.tool === 'compare') {
     const groups = plan.compareGroups || detectCompareGroups(plan.table, plan.question);
     if (!groups || groups.length < 2) return null;
+    // v27.5.74 — open data : « comparer le nombre de PLACES en BTS et en BUT » : une comparaison compte des formations ;
+    // on s'arrête plutôt que d'afficher des formations sous le nom de places
+    if (plan.table.rowUnit === 'formation') {
+      const qc = normalizeText(plan.question || '').replace(/\b(plus de|moins de|au moins|au plus)\s+\d+\S*\s*\w+/g, ' ');
+      const mes = MESURES_SOMME.find(m => m.re.test(qc));
+      if (mes && !/\b(nombre|combien) d(e|es)? ?(formations?|filieres?)\b/.test(qc)) {
+        const g = groups.map(x => x.label).join(' » et « ');
+        return unresolvedConceptExecution(plan, [], `une comparaison compte des formations, pas des ${mes.unite} : demandez « nombre de ${mes.unite} en ${groups[0].label} » puis « et en ${groups[1].label} ? » (comparaison de « ${g} »)`);
+      }
+    }
     const commonFilters = sanitizeCompareCommonFilters(plan, groups);
     const comparePlan = { ...plan, filters: commonFilters, compareGroups: groups };
     const rows = compareGroupSummary(plan.table, groups, commonFilters);
