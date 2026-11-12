@@ -17,6 +17,10 @@ on:
         description: 'Modèle Albert (vide = celui du widget, openweight-large)'
         required: false
         default: ''
+      jeu:
+        description: 'Questions : reglage (celles du réglage), validation (nouvelles), tout'
+        required: false
+        default: 'reglage'
 
 permissions:
   contents: read
@@ -45,6 +49,7 @@ jobs:
         env:
           ANCIEN_JS: ancien
           ALBERT_MODELE: ${{ inputs.modele }}
+          JEU: ${{ inputs.jeu }}
       - name: Garder le rapport
         if: always()
         uses: actions/upload-artifact@v4
