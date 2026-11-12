@@ -464,6 +464,9 @@
     // v27.17 — mots entiers : « PASS » contient « pas » (« PASS dans l'académie de Bordeaux » devenait « ≠ Bordeaux »)
     // v27.5.64 — « sauf les BTS », « à l'exception des CPGE », « en dehors des licences » : article entre les deux
     if (/(^|\s)(hors|sauf|exclu|excluant|exclure|different|differente|diff[eé]rent|pas|non|excepte|exceptes|exception (?:de|des|du|d)|en dehors (?:de|des|du|d))(\s+(?:les|des|de|du|la|le|l|d))?\s*$/.test(windowBefore)) return 'neq';
+    // v27.5.72 — « qui ne sont pas en série générale », « n'est pas en bac pro », « ne viennent pas du lycée » : la valeur
+    // est précédée de « pas » + préposition + nom de la colonne (avant : négation perdue, « série = Générale »)
+    if (/(^|\s)pas\s+(?:en|dans|de|du|des|d|au|aux|a|la|le|les|l)(?:\s+(?:la|le|les|l))?\s+(?:serie|series|bac|baccalaureat|voie|classe|filiere|section|type)(?:\s+(?:de|du|des|d))?\s*$/.test(windowBefore)) return 'neq';
     // v27.25 — « non / pas » qui porte sur un autre mot (« formations non sélectives dans l'académie de Bordeaux »,
     // « qui ne sont pas sélectives dans l'académie ») ne nie pas l'académie : seulement « non / pas » suivi d'un mot de lieu
     const _negAcad = windowAround.match(/(?:^|\s)(hors|sauf|exclu|excluant|exclure|different|differente|pas|non)(?=\s|$)(?:\s+(\S+))?/);
@@ -620,6 +623,10 @@
     // Bac / série.
     const bacRegex = /(bac\s+general|bac\s+g[eé]n[eé]ral|voie\s+generale|voie\s+g[eé]n[eé]rale|serie\s+generale|s[eé]rie\s+g[eé]n[eé]rale|bac\s+pro|bac\s+professionnel|professionnel|technologique|bac\s+techno|stmg|sti2d|std2a|stl|st2s|stav|s2tmd|sthr)/;
     if (bacRegex.test(q)) {
+      // v27.5.72 — « qui ne sont pas en série générale », « hors bac pro », « sauf les bacs techno » : exclusion
+      // (avant : négation perdue, « Type de la classe = Générale »)
+      const _negBac = /\b(?:pas|non|hors|sauf|excepte|exceptes)\s+(?:(?:en|de|du|des|d|dans|la|le|les|l|un|une)\s+)*(?:(?:bacs?|series?|voies?|classes?)\s+)?(?:general|generale|generaux|generales|technologiques?|techno|professionnels?|professionnelles?|pro|stmg|sti2d|std2a|stl|st2s|stav|s2tmd|sthr)\b/.test(q);
+      const _opBac = _negBac ? 'neq' : 'eq';
       // v27.5.53 — deux colonnes de série (« Type de la classe » : Générale / Technologique / Professionnelle, et
       // « Série de la Classe » : STMG, STI2D…) : on prend celle qui a la valeur demandée, de préférence à l'identique
       // (avant : « bac technologique » = la seule série STMG, 3 427 au lieu de 6 388 ; « STMG » perdait son filtre)
@@ -639,7 +646,7 @@
       // (masculin / féminin confondus : la question est réécrite « bac professionnel agricole »)
       const _genre = t => t.replace(/\bbac pro\b/g, 'professionnel').replace(/professionnelle/g, 'professionnel').replace(/generale/g, 'general');
       _bacCols.forEach(x => (x.values || []).forEach(v => { const n = nrm(v.value); if (n.includes(' ') && !/^serie /.test(n) && ` ${_genre(q)} `.includes(` ${_genre(n)} `) && (!_phrase || n.length > _phrase.n.length)) _phrase = { x, v, n }; }));
-      if (_phrase) upsertCandidateFilter(filters, { entry: _phrase.x, item: _phrase.v, alias: _phrase.n, op: 'eq', score: 270 }, reasons);
+      if (_phrase) upsertCandidateFilter(filters, { entry: _phrase.x, item: _phrase.v, alias: _phrase.n, op: _opBac, score: 270 }, reasons);
       const e = _phrase ? null : (_exacte || _avec || _bacCols[0] || null);
       if (e) {
         let wanted = [];
@@ -652,7 +659,7 @@
           if (short) { wanted = [short]; label = short.toUpperCase(); }
         }
         const v = findValue(e, wanted);
-        if (v) upsertCandidateFilter(filters, { entry: e, item: v, alias: label, op: 'eq', score: 255 }, reasons);
+        if (v) upsertCandidateFilter(filters, { entry: e, item: v, alias: label, op: _opBac, score: 255 }, reasons);
       }
     }
 

@@ -1527,6 +1527,13 @@ function applyListMode(plan) {
 // pas le nombre de formations.
 const MESURES_SOMME = [
   { re: /\bplaces?\b|\bcapacites?\b/, col: /capacit/, unite: 'places' },
+  // v27.5.72 — mesures précises AVANT « admis » / « candidates » (avant : « néo-bacheliers admis en BUT », « bacheliers
+  // généraux admis en licence » additionnaient TOUS les admis ; « filles admises » s'arrêtait)
+  { re: /\b(?:filles?|candidates?|femmes?)\b.*\badmis(?:es)?\b|\badmises\b/, col: /effectif des candidates admises/, unite: 'candidates admises' },
+  { re: /\b(?:bacheliers?|bachelieres?|bac|neo ?bacheliers?)\s+(?:generaux|generales?|general)\b|\bgeneraux\b.*\badmis\b/, col: /admis neo bacheliers generaux/, unite: 'admis néo-bacheliers généraux' },
+  { re: /\b(?:bacheliers?|bachelieres?|bac|neo ?bacheliers?)\s+(?:technologiques?|techno)\b/, col: /admis neo bacheliers technologiques/, unite: 'admis néo-bacheliers technologiques' },
+  { re: /\b(?:bacheliers?|bachelieres?|bac|neo ?bacheliers?)\s+(?:professionnels?|pro)\b/, col: /admis neo bacheliers professionnels/, unite: 'admis néo-bacheliers professionnels' },
+  { re: /\bneo ?bacheliers?\b/, col: /^effectif des admis neo bacheliers$/, unite: 'admis néo-bacheliers' },
   { re: /\bcandidates\b/, col: /effectif des candidates/, unite: 'candidates' },
   { re: /\bboursiers?\b.*\badmis\b|\badmis\b.*\bboursiers?\b/, col: /admis boursiers/, unite: 'admis boursiers' },
   { re: /\badmis(es)?\b|\bont accepte\b/, col: /ayant accepte.*admis/, unite: 'admis' },
@@ -1559,7 +1566,8 @@ function applyMeasureSum(plan) {
   const groupe = ['group_by', 'top', 'pivot'].includes(plan.tool) && !plan.listMode;
   if (plan.tool !== 'count_rows' && !groupe) return plan;
   // v27.14 — le mot d'une condition chiffrée (« avec au plus 30 admis ») n'est pas la mesure demandée
-  const q = normalizeText(plan.question || '').replace(/\b(plus de|moins de|au moins|au plus)\s+\d+(?:[.,]\d+)?\s*%?\s*(places?|candidats?|admis|voeux|boursiers?)\b/g, ' ');
+  const q = normalizeText(plan.question || '').replace(/\b(plus de|moins de|au moins|au plus)\s+\d+(?:[.,]\d+)?\s*%?\s*(places?|candidats?|admis|voeux|boursiers?)\b/g, ' ')
+    .replace(/\b(?:aucun|aucune|sans|pas de|pas d|zero|0)\s+(places?|candidats?|candidatures?|admis|voeux|voeu)\b/g, ' ');
   if (/\b(combien|nombre|repartition|ventilation) d(e|es)? ?(formations?|filieres?|offres?|etablissements?)\b/.test(q)) return plan;
   const headers = plan.table.headers || [];
   for (const m of MESURES_SOMME) {
@@ -1726,6 +1734,12 @@ function conditionsChiffrees(table, question) {
     const col = colPour(/taux/.test(m[1]) ? "taux d acces" : /candidat/.test(m[1]) ? 'candidats' : /admis/.test(m[1]) ? 'admis' : 'places'); const op = opPour(m[2]);
     if (col && op && !out.some(f => f.col === col)) out.push({ col, op, value: Number(m[3].replace(',', '.')) });
   }
+  // 3. v27.5.72 — « aucun admis », « pas de places », « sans candidat », « 0 vœu » : la valeur vaut 0
+  // (avant : « combien de formations n'ont aucun admis » comptait tout ; « BTS n'ayant pas de places » additionnait les places)
+  for (const m of q.matchAll(/\b(?:aucun|aucune|sans|pas de|pas d|zero|0)\s+(places?|candidats?|candidatures?|admis|voeux|voeu)\b/g)) {
+    const col = colPour(m[1]);
+    if (col && !out.some(f => f.col === col)) out.push({ col, op: 'eqn', value: 0, zero: true });
+  }
   return out.map(f => ({ ...f, label: `${SYMBOLES_OPS[f.op]} ${String(f.value).replace('.', ',')}`, source: 'condition_chiffree' }));
 }
 function applyConditionsChiffrees(plan) {
@@ -1735,6 +1749,10 @@ function applyConditionsChiffrees(plan) {
   // le nombre cité n'est pas une valeur de colonne à égaler ailleurs (« 0 », « 100 ») : on retire les filtres = nombre
   const nombres = new Set(conds.map(c => String(c.value)));
   plan.filters = [...(plan.filters || []).filter(f => !(f && f.op !== 'contains_all' && nombres.has(String(f.value).replace(',', '.')))), ...conds];
+  // « combien de BTS n'ayant pas de places » : on compte les formations à 0, on n'additionne pas la colonne
+  const zeros = new Set(conds.filter(c => c.zero).map(c => c.col));
+  if (zeros.size && plan.tool === 'sum' && (!plan.sumCol || zeros.has(plan.sumCol) || /^(combien|nombre) (de |d )?(formations?|bts|but|licences?|cpge|pass|filieres?)\b/.test(normalizeText(plan.question || '')))) { plan.tool = 'count_rows'; plan.sumCol = null; plan.sumUnit = null; }
+  if (zeros.size && plan.groupSumCol && zeros.has(plan.groupSumCol)) { plan.groupSumCol = null; plan.sumUnit = null; }
   if (plan.tool === 'sum' && conds.some(c => c.col === plan.sumCol)) { /* « combien de places dans les formations de plus de 100 places » : somme filtrée, conservée */ }
   return plan;
 }
@@ -3630,7 +3648,49 @@ function resolveRoleDuplicates(plan) {
 }
 
 function finalSanitizeAnalysisPlan(plan) {
-  return _retirerValeursEmboitees(resolveRoleDuplicates(_finalSanitizeAnalysisPlanBase(plan)));
+  return _exclusionsMultiples(_filiereExacte(_retirerValeursEmboitees(resolveRoleDuplicates(_finalSanitizeAnalysisPlanBase(plan)))));
+}
+// v27.5.72 — « hors BTS et hors BUT », « sauf les BTS et les BUT », « sauf BTS, BUT et CPGE » : chaque valeur citée après
+// l'exclusion est exclue (avant : BTS exclu mais BUT EXIGÉ, « intitulé contenant BUT »)
+function _exclusionsMultiples(plan) {
+  if (!plan || !plan.table || !Array.isArray(plan.filters)) return plan;
+  const q = normalizeText(String(plan.question || '').replace(/\s*,\s*/g, ' et '));
+  const m = q.match(/\b(?:hors|sauf|excepte|exceptes|en dehors (?:de|des|du|d)|a l exception (?:de|des|du|d))\s+((?:(?:les|des|la|le|l|de|du|d|hors|sauf|en|dans|au|aux|a)\s+)*[a-z0-9]+(?:\s*(?:,|et|ni|ou)\s+(?:(?:les|des|la|le|l|de|du|d|hors|sauf|en|dans|au|aux|a)\s+)*[a-z0-9]+)+)/);
+  if (!m) return plan;
+  const mots = m[1].split(/\s*(?:,|\bet\b|\bni\b|\bou\b)\s*/).map(x => x.replace(/^(?:(?:les|des|la|le|l|de|du|d|hors|sauf|en|dans|au|aux|a)\s+)+/, '').trim()).filter(Boolean);
+  if (mots.length < 2) return plan;
+  let col = (plan.table.headers || []).find(h => /^filiere de formation tres agregee$/.test(normalizeText(h)));
+  let vals = col ? mots.map(w => _distinctValues(plan.table, col).find(x => normalizeText(x) === w || normalizeText(x) === w.replace(/s$/, ''))) : [];
+  if (!col || vals.some(v => !v)) {
+    // fichier de candidats (« Grands groupes de formation » : « BTS - BTSA - DTS - DMA », « L1 - CUPGE… ») : la valeur que
+    // le moteur donne à chaque mot seul (« licence » → L1…), toutes dans la même colonne
+    const lus = mots.map(w => _filtresDePhrase(plan.table, w).filter(f => f && f.op === 'eq' && f.source !== 'condition_chiffree'));
+    if (lus.some(l => l.length !== 1) || new Set(lus.map(l => l[0].col)).size !== 1) return plan; // pas une liste de formations : on ne touche à rien
+    col = lus[0][0].col; vals = lus.map(l => l[0].value);
+  }
+  const ns = new Set(vals.map(normalizeText));
+  const motsN = new Set(mots.flatMap(w => [w, w.replace(/s$/, '')]));
+  const touche = f => f && ((f.col === col && ns.has(normalizeText(f.value))) || (f.op === 'in' && f.col === col && (f.values || []).every(v => ns.has(normalizeText(v)))) ||
+    (f.op === 'or' && (f.groupes || []).flat().every(g => g.col === col && ns.has(normalizeText(g.value)))) ||
+    (f.op === 'contains_all' && (f.terms || []).every(t => [].concat(t).some(w => motsN.has(normalizeText(w))))) || (f.op === 'contains_all' && (f.terms || []).every(t => [].concat(t).some(w => ns.has(normalizeText(w)) || ns.has(normalizeText(w).replace(/s$/, ''))))));
+  plan.filters = [...plan.filters.filter(f => !touche(f)), ...vals.map(v => ({ col, op: 'neq', value: v, label: null, source: 'exclusion' }))];
+  return plan;
+}
+// v27.5.72 — un seul mot de formation qui est EXACTEMENT une filière (« licence » → Licence) : la filière, comme dans
+// « combien de licences » (avant : « bacheliers généraux admis en licence » cherchait « licence » dans les intitulés et
+// comptait aussi les LAS : 69 929 au lieu de 68 757)
+function _filiereExacte(plan) {
+  if (!plan || !plan.table || !Array.isArray(plan.filters)) return plan;
+  if ((plan.unresolvedTerms || []).length || plan.clarification || /\boptions?\b/.test(normalizeText(plan.question || ''))) return plan;
+  const termes = plan.filters.filter(f => f && f.op === 'contains_all' && f.source === 'termes_formation');
+  if (termes.length !== 1 || (termes[0].terms || []).length !== 1) return plan;
+  const mots = [].concat(termes[0].terms[0]).map(w => normalizeText(String(w)));
+  const col = (plan.table.headers || []).find(h => /^filiere de formation tres agregee$/.test(normalizeText(h)));
+  if (!col || plan.filters.some(f => f && f.col === col)) return plan;
+  const v = _distinctValues(plan.table, col).find(x => mots.some(w => normalizeText(x) === w || normalizeText(x) === w.replace(/s$/, '')));
+  if (!v) return plan;
+  plan.filters = plan.filters.map(f => f === termes[0] ? { col, op: 'eq', value: v, label: null, source: 'filiere_exacte' } : f);
+  return plan;
 }
 // v27.5.67 — « BTS en Auvergne-Rhône-Alpes » : « Rhône » (département) lu DANS le nom de la région ; filtre en trop
 // retiré, sauf si le mot figure aussi ailleurs dans la question (« en Auvergne-Rhône-Alpes, dans le Rhône »)
@@ -3707,7 +3767,7 @@ function _finalSanitizeAnalysisPlanBase(plan) {
     });
     const kept = (plan.filters || []).filter(f => {
       if (!f || !f.col) return false;
-      if (f.source === 'termes_formation' || f.source === 'union') return true; // v27.7 — mots cités dans la question
+      if (f.source === 'termes_formation' || f.source === 'union' || f.source === 'condition_chiffree') return true; // v27.7 — mots cités dans la question (v27.5.72 : « aucun admis » = 0)
       if (strictCols.has(f.col)) return false; // remplacés par strict ci-dessous
       if (f.op === 'eq' && strict.some(e => e.source === 'enumeration' && e.values.includes(normalizeText(f.value)))) return false; // v27.5.64
       const cn = normalizeText(f.col);

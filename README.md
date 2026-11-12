@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-60 fichiers, 2 666 tests. Depuis la racine du repo :
+61 fichiers, 2 689 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -140,6 +140,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 `js/test_serie9.js` vérifie la **table Grist comme source** et le **passage d'une source à l'autre** : 18 questions sur le fichier de candidats donnent les mêmes chiffres en Excel et en table Grist (identifiants de colonnes, cases à cocher, listes de choix, colonnes A, B, C…) ; une copie de l'open data (table Grist ou fichier) est reconnue comme « une ligne = une formation » (places, candidats, admis additionnés) ; un changement de source remet le contexte à zéro.
 
 `js/test_serie10.js` vérifie les **parts, établissements précis et lieux** : le numéro fait partie du nom d'établissement (« IUT Tarbes 3 », « Paris 1 » ≠ « Paris 10 »), « quelles formations propose le lycée X » (liste calculée), part d'une quantité (« part des places en BTS dans le privé » = Σ places ÷ Σ places), « formations de Lyon » = l'académie (comme « de Bordeaux »), lieux composés.
+
+`js/test_serie11.js` vérifie les **effectifs précis, valeurs à zéro, exclusions multiples et négations** : « néo-bacheliers admis », « bacheliers généraux admis », « filles admises » (la bonne colonne, ou arrêt si elle manque), « aucun admis » / « pas de places » (formations à 0), « hors BTS et hors BUT », « sauf BTS, BUT et CPGE », « sauf en CPGE et en BTS », « qui ne sont pas en série générale ».
 
 `js/test_part_groupes.js` vérifie les **taux par groupe** : « pourcentage de candidats sans proposition par département », « part des boursiers par académie », « taux de remplissage des BTS par académie » donnent un taux calculé **dans** chaque groupe (avant : la répartition du total entre groupes, lue à tort comme un taux), avec la ligne « Ensemble », l'export, le graphique et les relances (« taux de proposition des boursiers » puis « et par département ? »).
 
