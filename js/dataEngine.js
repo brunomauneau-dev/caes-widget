@@ -590,6 +590,24 @@ function strictFiltersFromQuestion(table, question) {
     }
   }
 
+  // v27.5.71 — open data : « formations de Lyon », « établissements de Lille » : « de X » = l'académie X si elle existe,
+  // sinon le département, la région, la commune (même règle que « de Bordeaux »). Avant : arrêt « aucune valeur pour lyon ».
+  {
+    const _role = c => (typeof plannerColumnRole === 'function') ? plannerColumnRole(c) : {};
+    const lieuxCols = headersS.filter(h => /acad[eé]mi|departement|region|commune|ville/.test(_hx(h)) && !/code|insee|postal/.test(_hx(h)));
+    const sansRoles = !lieuxCols.some(h => _role(h).origine || _role(h).accueil);
+    if (sansRoles && lieuxCols.length && !out.some(f => lieuxCols.includes(f.col))) {
+      const ordre = [/acad[eé]mi/, /departement/, /region/, /commune|ville/].map(re => lieuxCols.find(h => re.test(_hx(h)))).filter(Boolean);
+      const qde = ` ${q} `;
+      let trouve = null;
+      for (const col of ordre) {
+        const v = _distinctValues(table, col).filter(x => normalizeText(x).length >= 3).sort((a, b) => b.length - a.length)
+          .find(x => { const n = normalizeText(x); return new RegExp(`\\b(?:de|d|du|des) ${n} `).test(qde) && !new RegExp(`\\b(?:academie|departement|region|commune|ville|universite|iut|lycee|ecole|institut)s? (?:de|d|du|des) ${n} `).test(qde); });
+        if (v) { trouve = { col, value: v }; break; }
+      }
+      if (trouve) out.push({ col: trouve.col, value: trouve.value, op: 'eq', label: null, source: 'de_lieu' });
+    }
+  }
   // v27.5.64 — énumération de 3 valeurs ou plus d'une même colonne (« académies de Bordeaux, Toulouse et Poitiers ») :
   // une seule condition « l'une des valeurs ». Avant : Bordeaux seul lu, puis arrêt. (Deux valeurs : « X et/ou Y », union.)
   const qv = question ? normalizeText(String(question).replace(/\s*,\s*/g, ' qqvirgule ')).replace(/ ?qqvirgule ?/g, ' , ') : '';
@@ -1773,12 +1791,29 @@ function detecterPart(table, question) {
     if (col) { groupe = col; q = q.replace(_etats[0], ' ').replace(/\s+/g, ' ').trim(); }
   }
   const PAR_GROUPE = /\s*\bpar (?!rapport\b)(?:type de |grande? )?[a-z0-9]+(?: (?:d|de|du|des|de la|de l) [a-z0-9]+)?/;
-  if (!groupe && /\bpar (?!rapport\b)\w/.test(q)) {
+  if (!groupe && /\bpar (?!rapport\b|le\b|la\b|les\b|l\b|un\b|une\b|des\b)\w/.test(q)) { // v27.5.71 — « offertes par le privé » : pas un regroupement
     groupe = _dimensionPart(table, brut);
     if (!groupe) return null;
     q = q.replace(PAR_GROUPE, ' ').replace(/\s+/g, ' ').trim();
   }
   const headers = (table.headers || Object.keys(table.objects[0] || {})).filter(Boolean);
+  // v27.5.71 — « quelle part des places en BTS est dans le privé », « pourcentage des places de BTS en Gironde » :
+  // Σ places (BTS ET privé) ÷ Σ places (BTS). Avant : des formations comptées, et le critère BTS parfois perdu.
+  if (table.rowUnit === 'formation' && !groupe) {
+    const mq = q.match(/\b(?:part|pourcentage|proportion)\s+(?:des|de|du|d)\s+(places?|candidats?|candidatures?|admis|voeux)\b\s*(.*)$/);
+    if (mq) {
+      const rest = mq[2].trim();
+      const mesure = MESURES_SOMME.find(m => m.re.test(mq[1]) && !/candidates|boursiers|propositions/.test(m.unite));
+      const col = mesure && headers.find(h => mesure.col.test(normalizeText(h)) && _estNumerique(table, h));
+      let x = null, y = null;
+      const m1 = rest.match(/^(.*?)\s*\b(?:qui\s+)?(?:est|sont|se trouvent?|situees?|offertes?|proposees?|relevent)\s+(?:par|dans|en|a|au|aux|du|de|des)?\s*(.+)$/);
+      const m2 = rest.match(/^((?:en|de|des|du|d)\s+\S+(?:\s+\S+){0,3}?)\s+((?:en|dans|a|au|aux|hors|sauf)\s+.+)$/);
+      if (m1 && m1[2]) { x = m1[1]; y = m1[2]; } else if (m2) { x = m2[1]; y = m2[2]; }
+      if (col && y && _filtresDePhrase(table, y.replace(/^(?:le|la|les|l)\s+/, '')).length) {
+        return { mode: 'mesure', col, unite: mesure.unite, x: x || '', y: y.replace(/^(?:le|la|les|l)\s+/, ''), phrase: rest, mot: /zzzz/ };
+      }
+    }
+  }
   const phrase = _phrasePart(q);
   if (!phrase) return null;
   // effectifs : seulement si une ligne = une formation et que les deux colonnes existent
@@ -1829,6 +1864,17 @@ function applyPart(plan) {
   plan.tool = 'part';
   plan.part = d;
   plan.targetCol = null;
+  if (d.mode === 'mesure') {
+    // la condition = les critères de la seconde partie (« dans le privé ») ; le reste de la question = le périmètre
+    const fy = _filtresDePhrase(plan.table, d.y);
+    const cle = f => f.op === 'contains_all' ? `T::${(f.terms || []).map(t => [].concat(t)[0]).join('+')}` : `${f.col}`;
+    const clesY = new Set(fy.map(cle));
+    const fx = d.x ? _filtresDePhrase(plan.table, d.x.replace(/^(?:en|de|des|du|d)\s+/, '')) : [];
+    const tous = mergeFiltersUnique(mergeFiltersUnique(plan.filters || [], fx.filter(f => !(plan.filters || []).some(g => cle(g) === cle(f)))), fy.filter(f => !(plan.filters || []).some(g => cle(g) === cle(f))));
+    d.condition = fy.map(f => tous.find(g => cle(g) === cle(f)) || f);
+    plan.filters = tous.filter(f => !clesY.has(cle(f)) && !(f && f.op !== 'contains_all' && f.source !== 'condition_chiffree' && _estNumerique(plan.table, f.col)));
+    return plan;
+  }
   if (d.mode === 'lignes') {
     // « proportion de formations privées en Gironde » : la condition est « formations privées », « en Gironde » est le périmètre ;
     // si la partie avant « en / à / dans… » ne donne aucun critère (« part des formations en apprentissage »), on garde toute la phrase
@@ -1860,7 +1906,7 @@ function applyPart(plan) {
 function nettoyerPerimetrePart(plan) {
   const d = plan.part;
   if (!d) return plan;
-  if (d.mode === 'lignes' && d.condition) {
+  if ((d.mode === 'lignes' || d.mode === 'mesure') && d.condition) {
     const cle = f => f.op === 'contains_all' ? `T::${(f.terms || []).map(t => [].concat(t)[0]).join('+')}` : `${f.col}`;
     const cles = new Set(d.condition.map(cle));
     plan.filters = (plan.filters || []).filter(f => f && !cles.has(cle(f)));
@@ -1881,6 +1927,12 @@ function executerPart(plan) {
     let num = 0, den = 0, ignorees = 0;
     base.forEach(r => { const a = _nombreCellule(r?.[d.num]), b = _nombreCellule(r?.[d.den]); if (a === null || b === null) { ignorees++; return; } num += a; den += b; });
     result = { mode: 'effectifs', num, den, pct: den ? num / den * 100 : null, total: base.length, ignorees };
+  } else if (d.mode === 'mesure') {
+    if (!d.condition || !d.condition.length) return unresolvedConceptExecution(plan, [d.y], `je n'ai pas reconnu de quoi calculer la part (« ${d.y} »)`);
+    const somme = rs => rs.reduce((t, r) => { const a = _nombreCellule(r?.[d.col]); return a === null ? t : t + a; }, 0);
+    const ignorees = base.filter(r => _nombreCellule(r?.[d.col]) === null).length;
+    const num = somme(applyLocalActionFilters(base, d.condition)), den = somme(base);
+    result = { mode: 'mesure', num, den, pct: den ? num / den * 100 : null, total: base.length, ignorees };
   } else {
     if (!d.condition || !d.condition.length) return unresolvedConceptExecution(plan, [d.phrase], `je n'ai pas reconnu de quoi calculer la part (« ${d.phrase} »)`);
     const num = applyLocalActionFilters(base, d.condition).length;
@@ -1896,6 +1948,7 @@ const _pctFr = v => (Math.round(v * 10) / 10).toLocaleString('fr-FR', { minimumF
 function _libellePart(plan) {
   const d = plan.part;
   if (d.mode === 'effectifs') return { quoi: d.quoi, sur: d.sur };
+  if (d.mode === 'mesure') return { quoi: `${d.unite} « ${d.condition.map(f => f.op === 'neq' ? `hors ${f.value}` : f.op === 'eq' ? String(f.label || f.value) : _filtreEnClair(f).replace(/^« [^»]+» = /, '')).join(' et ')} »`, sur: `${d.unite} du périmètre` };
   const unite = plan.table?.rowUnit === 'formation' ? 'formations' : 'lignes';
   // v27.5.54 — valeur d'état seule (« oui », « non ») : on dit de quelle colonne (« A eu une proposition… = non »)
   const etat = d.condition.some(f => /^(oui|non)$/i.test(_filtreEnClair(f).replace(/^« [^»]+» = /, '')));
@@ -1948,7 +2001,9 @@ function renderPartHtml(plan, result) {
   const titre = `Part — ${_pctFr(result.pct)} % (${quoi})`;
   const methode = d.mode === 'effectifs'
     ? `<p style="font-size:12px;color:var(--gris3)">Calcul : somme de « ${escapeHtml(d.num)} » ÷ somme de « ${escapeHtml(d.den)} », sur les ${_nf(result.total - result.ignorees)} formations du périmètre — et non la moyenne des pourcentages de chaque formation${d.note ? ` ; ${escapeHtml(d.note)}` : ''}.</p>`
-    : `<p style="font-size:12px;color:var(--gris3)">Calcul : lignes qui remplissent la condition (${escapeHtml(d.condition.map(_filtreEnClair).join(' ; '))}) ÷ lignes du périmètre.</p>`;
+    : d.mode === 'mesure'
+      ? `<p style="font-size:12px;color:var(--gris3)">Calcul : somme de « ${escapeHtml(d.col)} » des formations qui remplissent la condition (${escapeHtml(d.condition.map(_filtreEnClair).join(' ; '))}) ÷ somme de « ${escapeHtml(d.col)} » de toutes les formations du périmètre${result.ignorees ? ` (${result.ignorees} formation(s) sans valeur écartée(s))` : ''}.</p>`
+      : `<p style="font-size:12px;color:var(--gris3)">Calcul : lignes qui remplissent la condition (${escapeHtml(d.condition.map(_filtreEnClair).join(' ; '))}) ÷ lignes du périmètre.</p>`;
   const de = /^[aeiouyéèêàâîôûh]/i.test(quoi) ? 'd’' : 'de ';
   const phrase = `<p>Il y a <strong>${_pctFr(result.pct)} %</strong> ${de}${escapeHtml(quoi)} : <strong>${_nf(result.num)}</strong> sur <strong>${_nf(result.den)}</strong> ${escapeHtml(sur)}.</p>`;
   const perim = perimetreResultat('part', plan, result).html;
@@ -2572,6 +2627,9 @@ const REFORMULATIONS = [
   // v27.5.70 — « classement des lycées par nombre d'admis en CPGE » = « quels lycées ont le plus d'admis en CPGE »
   // (avant : classement des spécialités de CPGE, présenté comme des lycées)
   [/\bclassement\s+des\s+([a-zà-ÿ]+)\s+(?:par|selon|en fonction du|d['’]apr[eè]s le)\s+(?:le\s+)?nombre\s+(de\s+|d['’]\s*)/gi, (m, x, de) => `quels ${x} ont le plus ${/^d['’]/.test(de) ? "d'" : 'de '}`],
+  // v27.5.71 — « quelles formations propose le lycée X ? », « que propose l'IUT X ? » = la liste des formations de X
+  // (avant : envoyé à Albert, sans calcul)
+  [/^\s*(?:quelles?\s+(?:sont\s+les\s+)?formations?\s+(?:propose|offre|proposent|offrent|dispense|sont\s+propos[ée]es\s+(?:par|à|au|a)|y\s+a[- ]t[- ]il\s+(?:à|au|a|dans))|que\s+propose|qu['’]\s*est[- ]ce\s+que\s+propose)\s+(?:le\s+|la\s+|l['’]\s*|les\s+)?(?=(?:lyc[ée]e|iut|universit[ée]|[ée]cole|[ée]tablissement|institut|campus)\b)/i, 'liste des formations du '],
   // STS (sections de techniciens supérieurs) = BTS ; « licence pro » = licence professionnelle (pas toutes les licences)
   [/\bSTS\b/gi, 'BTS'],
   [/\blicences?\s+pros?\b(?!fess)/gi, 'licence professionnelle'],
@@ -2665,9 +2723,16 @@ function etablissementDeLaQuestion(table, question) {
   const nom = m[1];
   const apres = q.slice(m.index + m[0].length).trim().split(' ').filter(Boolean);
   const suite = [];
-  for (const w of apres) { if (COUPURES_ETAB.has(w) || /^\d/.test(w) || suite.length >= 6) break; suite.push(w); }
-  while (suite.length && MOTS_LIENS_ETAB.has(suite[suite.length - 1])) suite.pop();
   const noms = _nomsEtablissements(table, col);
+  // v27.5.71 — « IUT Tarbes 3 », « Université Paris 1 » : le numéro fait partie du nom quand un établissement le porte
+  // (avant : numéro ignoré, « Paris 1 » comptait aussi Paris 8, « IUT Tarbes 3 » les 9 IUT de Tarbes)
+  const _avecNumero = mots => { const ph = ` ${[nom.replace(/s$/, ''), ...mots].join(' ')} `; return [...noms.keys()].some(k => ` ${_compacte(k)} `.includes(ph)); };
+  for (const w of apres) {
+    if (COUPURES_ETAB.has(w) || suite.length >= 6) break;
+    if (/^\d/.test(w)) { if (/^\d{1,3}$/.test(w) && suite.length && _avecNumero([...suite, w])) suite.push(w); break; }
+    suite.push(w);
+  }
+  while (suite.length && MOTS_LIENS_ETAB.has(suite[suite.length - 1])) suite.pop();
   const pluriel = /s$/.test(nom) && nom !== 'iut';
   const generique = /^etablissement/.test(nom);
   const geo = (() => { try { return formationTermsInfo(table).geo; } catch (e) { return new Set(); } })();
@@ -2774,6 +2839,8 @@ function applyEtablissements(plan) {
         return true;
       }
       if (!e.type && f.op === 'eq' && GEO_COL_RE.test(_hx(f.col))) return !normalizeText(f.value).split(' ').every(w => motsNom.has(w));
+      // v27.5.71 — le numéro du nom (« lycée Bayonne 13 ») n'est pas une valeur à égaler (« Capacité = 13 » : 0 formation)
+      if (!e.type && f.op === 'eq' && /^\d+$/.test(String(f.value ?? '').trim()) && motsNom.has(String(f.value).trim())) return false;
       return true;
     });
     plan.filters = [...filtres, filtre];
