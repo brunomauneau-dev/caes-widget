@@ -112,6 +112,19 @@ await describe('Cas sans objet, et désactivation', async () => {
   assert(appels === 0, 'désactivable (localStorage caes_verif_lecture = non)');
 });
 
+await describe('v27.5.65 — Fausses alertes de l\'essai : comptage ≈ somme d\'effectifs, liste ≈ comptage pour « je cherche »', () => {
+  const ctx = makeCtx();
+  const d = run(ctx, 'desaccordVerif'), lm = run(ctx, 'lectureMoteurVerif');
+  const A = op => ({ op, filtres: {}, exclus: {} });
+  const somme = (question, sumCol) => lm({ kind: 'sum', plan: { question, sumCol, filters: [] }, result: {} });
+  assert(d(A('compter'), somme("combien d'admis en CPGE", "Effectif total des candidats ayant accepté la proposition de l'établissement (admis)")) === null, '« combien d\'admis » : somme des admis, pas d\'alerte (avant : fausse alerte)');
+  assert(d(A('compter'), somme('et en BUT ?', "Capacité de l'établissement par formation")) === null, '« nombre de places » puis « et en BUT ? » : pas d\'alerte');
+  assert(/opération/.test(d(A('compter'), somme('combien de formations en BTS', "Capacité de l'établissement par formation"))), 'faux positif : « combien de formations » additionné en places : alerte gardée');
+  const liste = q => lm({ kind: 'group_by', plan: { question: q, lesquelles: true, targetCol: 'Établissement', filters: [] }, result: {} });
+  assert(d(A('compter'), liste('je cherche les IFSI de Nouvelle-Aquitaine')) === null, '« je cherche les IFSI » : liste, pas d\'alerte');
+  assert(/opération/.test(d(A('compter'), liste('combien d\'IFSI en Nouvelle-Aquitaine'))), 'faux positif : « combien… » répondu par une liste : alerte gardée');
+});
+
 await describe('Câblage dans le widget', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   const albert = fs.readFileSync(path.join(__dirname, 'albert.js'), 'utf8');
