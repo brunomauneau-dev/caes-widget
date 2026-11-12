@@ -2249,7 +2249,8 @@ function renderClassementHtml(plan, result) {
 // v27.8 — garde-fou : un critère cité dans la question (boursiers, filles, apprentis, Pays Basque, public/privé,
 // sélective, lycée X, Gironde…) qui n'a donné aucun filtre → on s'arrête au lieu de répondre sur tout le fichier.
 const CONCEPTS_A_FILTRER = [
-  { re: /\bboursiers?\b|\bbourse\b/, mot: 'boursiers', ok: t => /bours/.test(t) },
+  // v27.5.69 — « boursières » aussi (avant : critère au féminin ignoré sans colonne reconnue, chiffre faux affiché)
+  { re: /\bboursi(?:er|ers|ere|eres)\b|\bbourses?\b/, mot: 'boursiers', ok: t => /bours/.test(t) },
   { re: /\b(filles?|femmes?|feminins?|garcons?|hommes?|masculins?|candidates)\b/, mot: 'filles / garçons', ok: (t, f) => /sexe|genre|candidates/.test(t) || /^(f|m|h|feminin|masculin|femmes?|hommes?|filles?|garcons?)$/.test(normalizeText(f.value)) || (typeof plannerColumnKind === 'function' && plannerColumnKind(f.col) === 'sexe') },
   { re: /\bapprenti(e|s|es)?\b|\bapprentissage\b|\balternance\b/, mot: 'apprentis', ok: t => /appr|altern/.test(t) },
   // v27.14 — condition chiffrée non comprise (« dont la capacité dépasse 100 ») : arrêt, pas toutes les lignes

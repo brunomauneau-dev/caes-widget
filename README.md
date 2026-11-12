@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-56 fichiers, 2 391 tests. Depuis la racine du repo :
+57 fichiers, 2 519 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -132,6 +132,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 `js/test_serie5.js` vérifie les **tournures de la vie réelle** : symboles (« taux d'accès > 80 % », « > 100 places »), abréviations (« cmb », « tx », « ds le 33 », « bdx », « en NA », « IDF », « STS »), fautes de frappe sur un lieu (« giroonde » → Gironde si un seul lieu est à une lettre près), « Rhône » lu à tort dans « Auvergne-Rhône-Alpes », listes avec condition (« quels BTS ont un taux d'accès inférieur à 10 % »).
 
 `js/test_serie6.js` vérifie les **graphiques, exports et comparaisons entre années** : « en graphique », « en camembert », « fais un graphique par académie » reprennent le résultat affiché ; « exporte ce tableau » exporte le tableau, un export après une relance garde ses filtres ; « en 2024 et en 2025 » compare les deux sessions ; « combien de BTS en 2024 » puis « et en Gironde ? » reste en 2024.
+
+`js/test_serie7.js` vérifie **16 questions longues à plusieurs critères** (sexe, boursier, série, lycée, lieu, formation, exclusions, « ou », taux) sur **8 présentations du même fichier** : colonnes complètes, abrégées (SEXE, BOURS…), en majuscules sans accents, anonymes (« Colonne A… » : bon chiffre ou arrêt, jamais un autre chiffre), lignes de titre et ligne « Total », colonne vide, valeurs codées (1 / 0, VRAI / FAUX, F / M).
 
 `js/test_part_groupes.js` vérifie les **taux par groupe** : « pourcentage de candidats sans proposition par département », « part des boursiers par académie », « taux de remplissage des BTS par académie » donnent un taux calculé **dans** chaque groupe (avant : la répartition du total entre groupes, lue à tort comme un taux), avec la ligne « Ensemble », l'export, le graphique et les relances (« taux de proposition des boursiers » puis « et par département ? »).
 
