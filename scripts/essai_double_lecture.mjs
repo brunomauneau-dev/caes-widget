@@ -22,6 +22,24 @@ const ICI = path.dirname(fileURLToPath(import.meta.url));
 const JS_DIR = path.join(ICI, '..', 'js');
 const MODULES = ['config.js', 'knowledge.js', 'documents.js', 'planner.js', 'dataEngine.js', 'sessions.js'];
 // Série 3 : questions nouvelles, tournures variées (pour trouver des contresens du moteur actuel)
+// Série 4 : enchaînements de relances (lecture attendue de la DERNIÈRE question, avec ce qu'elle reprend)
+export const LECTURES_SERIE4 = [
+  { id: 'r1', src: 'od', q: 'combien de BTS en Gironde >> et dans les Landes ? >> et les BUT ? >> et à Pau ?', op: 'compter', filtres: { formation: [['but']], commune: [['pau']] } },
+  { id: 'r2', src: 'od', q: 'nombre de places en CPGE >> et en Gironde ? >> et pour les BTS ?', op: 'somme', filtres: { formation: [['bts']], departement: [['gironde']] } },
+  { id: 'r3', src: 'od', q: 'taux d\'accès moyen des BTS >> et en Gironde ? >> et pour les BUT ?', op: 'statistique', filtres: { formation: [['but']], departement: [['gironde']] } },
+  { id: 'r4', src: 'od', q: 'combien de formations publiques en Gironde >> et privées ?', op: 'compter', filtres: { departement: [['gironde']] }, exclus: { statut: [['public']] } },
+  { id: 'r5', src: 'od', q: 'combien de BTS en Gironde >> et hors Gironde ?', op: 'compter', filtres: { formation: [['bts']] }, exclus: { departement: [['gironde']] } },
+  { id: 'r6', src: 'od', q: 'combien de candidats pour les BTS de Gironde >> et combien d\'admis ?', op: 'somme', filtres: { formation: [['bts']], departement: [['gironde']] } },
+  { id: 'r7', src: 'od', q: 'combien de BTS en Gironde >> combien de places ?', op: 'somme', filtres: { formation: [['bts']], departement: [['gironde']] } },
+  { id: 'r8', src: 'od', q: 'nombre de places en BTS en Gironde >> et le nombre de candidats ?', op: 'somme', filtres: { formation: [['bts']], departement: [['gironde']] } },
+  { id: 'r9', src: 'od', q: 'combien de BTS en Nouvelle-Aquitaine >> et en Gironde ? >> et dans l\'académie de Toulouse ?', op: 'compter', filtres: { formation: [['bts']], academie: [['toulouse']] } },
+  { id: 'r10', src: 'fichier', q: 'combien de candidats de Pau >> combien ont eu une proposition ? >> et parmi eux combien de boursiers ?', op: 'compter', filtres: { 'commune:ori': [['pau']], proposition: [['oui']], boursier: [['boursier']] } },
+  { id: 'r11', src: 'fichier', q: 'combien de candidats admis en BTS >> et en CPGE ? >> et les boursiers ?', op: 'compter', filtres: { admission: [['oui']], formation: [['cpge']], boursier: [['boursier']] } },
+  { id: 'r12', src: 'fichier', q: 'combien de candidats de Pau >> et de Gironde ?', op: 'compter', filtres: { departement: [['gironde']] } },
+  { id: 'r13', src: 'fichier', q: 'combien de candidats admis à Bordeaux >> et à Talence ? >> et à Pessac ?', op: 'compter', filtres: { admission: [['oui']], 'commune:acc': [['pessac']] } },
+  { id: 'r14', src: 'fichier', q: 'taux de proposition des candidats de Pau >> et de Bayonne ?', op: 'part', filtres: { 'commune:ori': [['bayonne']] } },
+  { id: 'r15', src: 'fichier', q: 'combien de candidats de Gironde >> combien d\'admis ?', op: 'compter', filtres: { departement: [['gironde']], admission: [['oui']] } },
+].map(L => { const p = L.q.split(' >> '); return { ...L, conv: p.slice(0, -1), q: p[p.length - 1] }; });
 export const LECTURES_SERIE3 = [
   { id: 's1', src: 'od', q: 'Combien y a-t-il de BUT informatique en Occitanie ?', op: 'compter', filtres: { formation: [['but'], ['informatique']], region: [['occitanie']] } },
   { id: 's2', src: 'od', q: 'nombre de formations publiques non sélectives à Bordeaux', op: 'compter', filtres: { statut: [['public']], selectivite: [['non selective']], commune: [['bordeaux']] } }, // « à Bordeaux » : la commune
@@ -319,7 +337,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   const tableOD = await chargerOpenData(globalThis.fetch);
   const ancienDir = process.env.ANCIEN_JS && fs.existsSync(process.env.ANCIEN_JS) ? process.env.ANCIEN_JS : null;
   const prec = await chargerSessionPrecedente(globalThis.fetch, Number(tableOD.session) - 1);
-  const lectures = process.env.JEU === 'validation' ? LECTURES_VALIDATION : process.env.JEU === 'serie3' ? LECTURES_SERIE3 : process.env.JEU === 'tout' ? [...LECTURES, ...LECTURES_VALIDATION, ...LECTURES_SERIE3] : LECTURES;
+  const lectures = process.env.JEU === 'validation' ? LECTURES_VALIDATION : process.env.JEU === 'serie3' ? LECTURES_SERIE3 : process.env.JEU === 'serie4' ? LECTURES_SERIE4 : process.env.JEU === 'tout' ? [...LECTURES, ...LECTURES_VALIDATION, ...LECTURES_SERIE3, ...LECTURES_SERIE4] : LECTURES;
   const res = await essaiDoubleLecture({ tableOD, autresSessions: [prec], ancienDir, albert: process.env.SANS_ALBERT !== '1', lectures });
   const b = bilan(res);
   const texte = rapportDoubleLecture(res, b);
