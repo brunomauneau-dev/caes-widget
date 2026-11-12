@@ -112,19 +112,27 @@ function isExportCurrentRequest(question) {
 
 
 function isBareChartRequest(question) {
-  const q = normalizeText(question || '');
-  return /^(graphique|graphe|diagramme|histogramme|camembert|barres?|chart|fais un graphique|affiche un graphique|visualise|visualise[- ]?moi|montre[- ]?moi [çca]a|dessine|trace un graphique)$/.test(q);
+  const q = normalizeText(question || '').replace(/\s+(stp|svp|s il (te|vous) plait|merci)$/, '').trim();
+  if (/^(graphique|graphe|diagramme|histogramme|camembert|barres?|chart|fais un graphique|affiche un graphique|visualise|visualise[- ]?moi|montre[- ]?moi [çca]a|dessine|trace un graphique)$/.test(q)) return true;
+  // v27.5.68 — « en graphique », « sous forme de camembert », « montre-le en graphique », « mets ça en barres »
+  // (avant : nouvelle question SANS filtre, toutes les formations de France)
+  return /^(?:(?:et )?(?:(?:montre|affiche|mets|met|transforme|presente|fais|faites|dessine|trace)(?:[- ]?(?:le|la|les|moi|nous|ca|cela))*\s+)?(?:en |sous forme d ?(?:un |une )?|sous forme de |un |une |avec un )(?:graphique|graphe|diagramme|histogramme|camembert|barres?|diagramme en barres|courbe)(?: en barres)?|(?:fais|faites|fait)[- ]?(?:moi|nous)? (?:un |une )?(?:graphique|camembert|diagramme|histogramme)(?: de (?:ca|cela|ce tableau|ce resultat|cette repartition))?)$/.test(q);
 }
 
 function isBareExportRequest(question) {
-  const q = normalizeText(question || '');
-  return /^(export|exporte|exporte en excel|excel|xlsx|csv|exporte en csv|telecharge|télécharge|telechargement|téléchargement)$/.test(q);
+  const q = normalizeText(question || '').replace(/\s+(stp|svp|s il (te|vous) plait|merci)$/, '').trim();
+  if (/^(export|exporte|exporte en excel|excel|xlsx|csv|exporte en csv|telecharge|télécharge|telechargement|téléchargement)$/.test(q)) return true;
+  // v27.5.68 — « exporte ce tableau », « télécharge ce résultat en CSV » : le tableau affiché (avant : toutes les lignes
+  // du calcul, 1 244 formations au lieu des 15 départements du tableau)
+  return /^(?:(?:exporte|exportez|exporter|telecharge|telechargez|telecharger|enregistre|sauvegarde|mets|met)(?:[- ]?(?:le|la|les|moi|nous|ca|cela))*\s+)?(?:ce|cette|ces|le|la)\s+(?:tableau|resultat|repartition|classement|recapitulatif)(?:\s+(?:en|au format|sous)\s+(?:excel|xlsx|csv|tableur))?$/.test(q) && /exporte|telecharg|enregistre|sauvegarde|excel|xlsx|csv|tableur/.test(q);
 }
 
 function isDimensionOnlyFollowUp(question) {
   const q = normalizeText(question || '');
   // v27.10 — « et par académie ? », « puis par filière » : même relance que « par académie »
-  return /^(?:(?:et|puis|maintenant|ensuite)\s+)?(par|selon)\s+/.test(q);
+  if (/^(?:(?:et|puis|maintenant|ensuite)\s+)?(par|selon)\s+/.test(q)) return true;
+  // v27.5.68 — « fais un graphique par académie », « montre-moi la répartition par département » après un calcul
+  return /^(?:(?:et|puis|maintenant|ensuite)\s+)?(?:fais|faites|affiche|montre|donne|mets|dessine|trace)(?:[- ]?(?:moi|nous|le|la|les))*\s+(?:un |une |la |le )?(?:graphique|camembert|diagramme|histogramme|repartition|ventilation|detail|tableau)(?: en barres)?\s+(?:par|selon)\s+/.test(q);
 }
 
 function mergeFiltersUnique(base, extra) {
@@ -828,6 +836,10 @@ function inheritConversationContext(plan, question) {
           plan.lieuRemplace = cible.col; // le lieu lu dans la question n'est pas relu ailleurs (sanitize)
         }
       }
+    }
+    // v27.5.68 — « combien de BTS en 2024 » puis « et en Gironde ? » : toujours la session 2024 (avant : 2025, sans le dire)
+    if (prev.sessionUnique && !plan.sessionsDemandees && !RELANCE_SESSION.test(q) && plan.table && !sessionsDeLaQuestion(plan.table, question)) {
+      plan.sessionsDemandees = { mode: 'seule', sessions: [prev.sessionUnique], courante: Number(plan.table.session) };
     }
     const _clesPrecedentes = new Set(previousFilters.map(_cleFiltre));
     plan.filtresRepris = (plan.filters || []).map(_cleFiltre).filter(k => _clesPrecedentes.has(k) && !_clesQuestion.has(k));
@@ -1953,7 +1965,8 @@ function sessionsDeLaQuestion(table, question) {
   annees = annees.filter(y => y >= 2018);
   if (AN_DERNIER.test(q) && !annees.includes(cur - 1)) annees.push(cur - 1);
   // « l'an dernier » désigne une session ; seule une évolution / comparaison demande les deux
-  const evolution = EVOLUTION_FORTE.test(q) || (annees.length && EVOLUTION_AVEC_ANNEE.test(q));
+  // v27.5.68 — deux années citées (« en 2024 et en 2025 ») : les deux sessions (avant : 2024 seule, sans le dire)
+  const evolution = EVOLUTION_FORTE.test(q) || (annees.length && EVOLUTION_AVEC_ANNEE.test(q)) || new Set(annees).size >= 2;
   if (evolution) {
     let ss = [...new Set(annees)];
     if (ss.length === 1 && !ss.includes(cur)) ss.push(cur);
@@ -2256,6 +2269,7 @@ const LIEUX_AMBIGUS = new Set('somme manche nord lot var ain cher orne oise eure
    utilisée ou à un mot connu (outils de la question, lieux, mesures). Sinon le moteur s'arrête et le nomme. */
 const MOTS_QUESTION = new Set(`
   eux elles ceux celles entre parmi exception excepte exceptes dehors
+  fais faites fait faire mets mettre trace tracer dessine dessiner camembert diagramme histogramme barres courbe forme visualise visualiser
   combien quel quelle quels quelles nombre nombres total totale totaux somme effectif effectifs compte compter
   formation formations filiere filieres ligne lignes dont avec sans pour par dans sur des les une aux leur
   est sont ont a y il elles ils ya existe existent propose proposent proposees proposes offert offerte offertes offerts
