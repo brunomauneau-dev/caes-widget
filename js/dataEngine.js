@@ -1942,9 +1942,18 @@ function applyPart(plan) {
     // v27.5.64 — « pourcentage des candidats boursiers (qui) ont accepté une proposition », « part des boursiers ayant
     // eu une proposition » : les boursiers sont le périmètre, l'action est la condition (avant : boursiers ayant accepté
     // parmi TOUS les candidats, 11 % au lieu de 61 %)
-    const _mAct = _deQui.match(/^(?:(?:candidats?|candidates?|eleves?|lyceens?)\s+)?(.+?)\s+(?:qui\s+)?(?:ayant|ont|sont|etant|qui ont|qui sont|avaient|etaient)\s+(.+)$/);
+    // v27.5.75 — aussi « … viennent de Gironde », « … sont originaires des Landes », « … vont / partent hors académie »
+    // (avant : « quelle part des admis en CPGE viennent de Gironde » = 1 082 / 1 082 = 100 %)
+    const _mAct = _deQui.match(/^(?:(?:candidats?|candidates?|eleves?|lyceens?)\s+)?(.+?)\s+(?:qui\s+)?(?:ayant|ont|sont|etant|qui ont|qui sont|avaient|etaient|viennent|venant|proviennent|provenant|sont originaires|originaires|vont|partent|restent|etudient|habitent)\s+(.+)$/);
     let courte = _deQui.split(_coupePart(_deQui))[0];
     if (_mAct && _filtresDePhrase(plan.table, _mAct[1]).length && _filtresDePhrase(plan.table, `ont ${_mAct[2]}`).length) courte = `ont ${_mAct[2]}`;
+    else if (_mAct && _filtresDePhrase(plan.table, _mAct[1]).length && _filtresDePhrase(plan.table, `candidats ${_mAct[2]}`).length) courte = `candidats ${_mAct[2]}`;
+    else {
+      // « part des candidats de Gironde admis hors académie » : les candidats de Gironde = le périmètre ; « admis hors
+      // académie » = la condition (avant : 2 034 / 35 286, tout le fichier au dénominateur)
+      const _mAdm = _deQui.match(/^(?:(?:candidats?|candidates?|eleves?|lyceens?|bacheliers?)\s+)?(.+?)\s+((?:admis|admises|acceptes?|acceptees?)\s+.+)$/);
+      if (_mAdm && /^(?:de|des|du|d|venant|issus?|originaires?|scolarises?|provenant)\b/.test(_mAdm[1]) && _filtresDePhrase(plan.table, _mAdm[1]).length && _filtresDePhrase(plan.table, `candidats ${_mAdm[2]}`).length) courte = `candidats ${_mAdm[2]}`;
+    }
     let fx = courte !== d.phrase ? _filtresDePhrase(plan.table, courte) : [];
     if (fx.length) d.phrase = courte; else fx = _filtresDePhrase(plan.table, d.phrase);
     const cle = f => f.op === 'contains_all' ? `T::${(f.terms || []).map(t => [].concat(t)[0]).join('+')}` : `${f.col}`;
@@ -3048,6 +3057,22 @@ function corrigerFautesLieux(question, table) {
 }
 const MOTS_QUESTION_FAUTES = new Set('combien nombre formations formation candidats candidat combiens taux acces moyenne mediane repartition admises boursiers boursier selectives selectifs publiques publics privees prives licences licence etablissements etablissement lycees academie academies departement departements region regions commune communes places proposition propositions accepte acceptes apprentis bacheliers terminale generale generaux technologique professionnelle quelles quels quelle parmi depuis entre avec selon chaque toutes souhaite voudrais aimerais pourriez merci bonjour'.split(' '));
 
+// v27.5.75 — fichier de candidats (origine ET accueil) : « d'où viennent les admis en CPGE ? » = répartition par
+// département d'origine ; « où vont les boursiers ? » = répartition par académie d'accueil (avant : Albert, sans calcul)
+const MOBILITE_RE = /^\s*(?:(d['’]\s*o[uù]|de quels? (?:d[ée]partements?|lyc[ée]es?))\s+(?:viennent|proviennent|sont issus|arrivent)|(o[uù]|dans quelles? (?:acad[ée]mies?|formations?))\s+(?:vont|partent|sont admis|sont admises|s['’]inscrivent|poursuivent leurs [ée]tudes))\s+(.+?)\s*\??\s*$/i;
+function _avecRoles(table) {
+  const hs = (table?.headers || []).filter(Boolean);
+  const r = c => (typeof plannerColumnRole === 'function') ? plannerColumnRole(c) : {};
+  return hs.some(h => r(h).origine) && hs.some(h => r(h).accueil);
+}
+function reformulerMobilite(question, table) {
+  const m = String(question || '').match(MOBILITE_RE);
+  if (!m || !_avecRoles(table)) return question;
+  const qui = m[3].replace(/^(?:les|des)\s+/i, '');
+  if (m[1]) return /lyc[ée]e/i.test(m[1]) ? `répartition des ${qui} par lycée d'origine` : `répartition des ${qui} par département d'origine`;
+  return /formation/i.test(m[2]) ? `répartition des ${qui} par grand groupe de formation` : `répartition des ${qui} par académie d'accueil`;
+}
+
 function reformulerQuestion(question) {
   let q = String(question ?? '');
   REFORMULATIONS.forEach(([re, rep]) => { q = q.replace(re, rep); });
@@ -3065,6 +3090,7 @@ function isDataEngineQuestion(question) {
   // v27.5.62 — « imprime ce résultat », « en PDF » : impression de la dernière réponse calculée
   if (PDF_RE.test(q) && !/\b(excel|xlsx|csv)\b/.test(q)) return true;
   try { if (getDataEngineState().lastPlan && RELANCE_LISTE.test(q)) return true; } catch (e) { /* pas d'état */ }
+  try { if (MOBILITE_RE.test(question || '') && _avecRoles((getActiveQueryTables() || [])[0])) return true; } catch (e) { /* source absente */ }
   // v27.5.67 — « quels BTS ont un taux d'accès inférieur à 10 % ? », « les BTS dont le taux d'accès est < 30 % » : liste calculée
   try { if (LISTE_CONDITION_RE.test(q) && conditionsChiffrees((getActiveQueryTables() || [])[0], question).length) return true; } catch (e) { /* source absente */ }
   // v27.14 — classement selon un chiffre (« les formations les plus demandées »)
@@ -3361,7 +3387,7 @@ function _detectDataEnginePlanBase(question, filterContextText = question) {
   if (!tables.length) return null;
   const table = tables[0]; // Grist est déjà prioritaire dans getActiveQueryTables()
   // v27.22 — sigles (« BTS MCO », « BUT GEA », « khâgne », « Sciences Po ») → mots des intitulés de la source
-  const _avecSigles = appliquerSiglesFormations(corrigerFautesLieux(question, table), table);
+  const _avecSigles = appliquerSiglesFormations(corrigerFautesLieux(reformulerMobilite(question, table), table), table);
   if (_avecSigles !== question) { if (filterContextText === question) filterContextText = _avecSigles; question = _avecSigles; }
   if (!table || !table.objects || !table.objects.length) return null;
   const headers = table.headers || Object.keys(table.objects[0] || {});
