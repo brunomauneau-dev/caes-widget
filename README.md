@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-58 fichiers, 2 538 tests. Depuis la racine du repo :
+59 fichiers, 2 639 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -136,6 +136,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 `js/test_serie7.js` vérifie **16 questions longues à plusieurs critères** (sexe, boursier, série, lycée, lieu, formation, exclusions, « ou », taux) sur **8 présentations du même fichier** : colonnes complètes, abrégées (SEXE, BOURS…), en majuscules sans accents, anonymes (« Colonne A… » : bon chiffre ou arrêt, jamais un autre chiffre), lignes de titre et ligne « Total », colonne vide, valeurs codées (1 / 0, VRAI / FAUX, F / M).
 
 `js/test_serie8.js` vérifie les **classements, tableaux croisés, statistiques par groupe et rapports** : « moyenne des vœux par série » (une moyenne par série ; « par couleur » sans colonne : arrêt), « par série et par département » (les deux colonnes nommées), « tableau croisé boursier par série », « classement des lycées par nombre d'admis » (les lycées, pas les spécialités), « le moins de licences » (groupes à 0 compris), « candidats par place » (Σ candidats ÷ Σ places).
+
+`js/test_serie9.js` vérifie la **table Grist comme source** et le **passage d'une source à l'autre** : 18 questions sur le fichier de candidats donnent les mêmes chiffres en Excel et en table Grist (identifiants de colonnes, cases à cocher, listes de choix, colonnes A, B, C…) ; une copie de l'open data (table Grist ou fichier) est reconnue comme « une ligne = une formation » (places, candidats, admis additionnés) ; un changement de source remet le contexte à zéro.
 
 `js/test_part_groupes.js` vérifie les **taux par groupe** : « pourcentage de candidats sans proposition par département », « part des boursiers par académie », « taux de remplissage des BTS par académie » donnent un taux calculé **dans** chaque groupe (avant : la répartition du total entre groupes, lue à tort comme un taux), avec la ligne « Ensemble », l'export, le graphique et les relances (« taux de proposition des boursiers » puis « et par département ? »).
 
