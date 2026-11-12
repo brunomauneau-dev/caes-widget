@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-54 fichiers, 2 327 tests. Depuis la racine du repo :
+55 fichiers, 2 359 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -128,6 +128,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 `js/test_serie3.js` vérifie les corrections de la **série 3** (35 questions nouvelles) : « sauf les BTS » / « à l'exception des BTS » (avant : les BTS seuls), taux « des boursiers ayant… » rapporté aux boursiers, relances « et de Bayonne ? » / « et à Bayonne ? » (même colonne de lieu), « admis en BTS de Pau » (Pau n'est plus perdu), énumérations de 3 valeurs (« Bordeaux, Toulouse et Poitiers »), places moyennes, « je cherche les … », comparaison de deux lieux avec le critère commun gardé.
 
 `js/test_serie4.js` vérifie les **enchaînements de relances** (2 à 4 questions à la suite, open data et fichier de candidats) : chaque relance garde ce qui ne change pas (formation, lieu, population, mesure) et remplace ce qui change ; « et à Pau ? » remplace le lieu précédent, « combien de places ? » / « combien d'admis ? » portent sur les mêmes formations, « et privées ? » est calculé.
+
+`js/test_serie5.js` vérifie les **tournures de la vie réelle** : symboles (« taux d'accès > 80 % », « > 100 places »), abréviations (« cmb », « tx », « ds le 33 », « bdx », « en NA », « IDF », « STS »), fautes de frappe sur un lieu (« giroonde » → Gironde si un seul lieu est à une lettre près), « Rhône » lu à tort dans « Auvergne-Rhône-Alpes », listes avec condition (« quels BTS ont un taux d'accès inférieur à 10 % »).
 
 `js/test_part_groupes.js` vérifie les **taux par groupe** : « pourcentage de candidats sans proposition par département », « part des boursiers par académie », « taux de remplissage des BTS par académie » donnent un taux calculé **dans** chaque groupe (avant : la répartition du total entre groupes, lue à tort comme un taux), avec la ligne « Ensemble », l'export, le graphique et les relances (« taux de proposition des boursiers » puis « et par département ? »).
 
