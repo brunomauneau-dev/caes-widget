@@ -2684,6 +2684,14 @@ const REFORMULATIONS = [
   [/\b(?:nb|nbre|nbr)\.?\s+(?=de\b|d['’]|des\b|total\b)/gi, 'nombre '],
   // v27.25 — fautes de frappe courantes (« conbien de BTS » partait vers Albert)
   [/\b(?:conbien|combein|cobien|combiens|conbiens|cmbien|comben|combie)\b/gi, 'combien'],
+  // v27.5.76 — écarts et rangs : « combien de BTS de plus en Gironde que dans les Landes », « différence entre le nombre
+  // de BTS en Gironde et dans les Landes », « y a-t-il plus de BTS en Gironde ou dans les Landes » = une comparaison
+  // (avec l'écart) ; « quelle est la deuxième académie pour le nombre de BTS » = le classement (avant : arrêt)
+  [/^\s*combien\s+(?:de|d['’])\s*(.+?)\s+(?:de plus|en plus|de moins|en moins)\s+(.+?)\s+(?:que\s+|qu['’]\s*)(.+?)\s*\??\s*$/i, 'comparer le nombre de $1 $2 et $3'],
+  [/^\s*(?:quel(?:le)?\s+est\s+)?(?:la\s+diff[ée]rence|l['’]\s*[ée]cart)\s+entre\s+(?:le\s+nombre\s+(?:de|d['’])\s*)?(.+?)\s*\??\s*$/i, 'comparer le nombre de $1'],
+  [/^\s*(?:y\s+a[- ]?t[- ]?il|est[- ]ce\s+qu['’]\s*il\s+y\s+a|il\s+y\s+a)\s+plus\s+(?:de|d['’])\s*(.+?)\s+((?:en|à|a|dans|au|aux)\s+.+?)\s+ou\s+(.+?)\s*\??\s*$/i, 'comparer le nombre de $1 $2 et $3'],
+  [/^\s*(?:quel(?:le)?\s+est\s+)?(?:la|le|l['’])\s*(?:deuxi[eè]me|troisi[eè]me|quatri[eè]me|cinqui[eè]me|second(?:e)?|2e|3e|4e|5e|derni[eè]re?)\s+([a-zà-ÿ]+?)s?\s+(?:pour|par|en|selon)\s+(?:le\s+)?nombre\s+(?:de|d['’])\s*(.+?)\s*\??\s*$/i, 'classement des $1s par nombre de $2'],
+  [/\b(?:environ|approximativement|à peu près|a peu pres|grosso modo)\s+/gi, ''],
   // v27.5.67 — abréviations de la saisie rapide (avant : arrêt « non reconnu », ou envoyé à Albert)
   [/\b(?:cmb|cbn|cbien|cmbn)\b/gi, 'combien'],
   [/\btx\b(?=\s+(?:d|de)\b|\s+d['’])/gi, 'taux'],
@@ -4006,6 +4014,9 @@ function detectCompareGroups(table, question) {
       }
     }
     if (found.length >= 2) {
+      // v27.5.76 — dans l'ordre de la question (« de plus en BTS qu'en CPGE » : BTS d'abord, l'écart est BTS − CPGE)
+      const pos = f => { const k = FORM_KEYS.find(x => x.label === f.label); const m = k && k.re.exec(q); return m ? m.index : 999; };
+      found.sort((a, b) => pos(a) - pos(b));
       found.slice(0, 2).forEach(f => addGroup(f.raw, [{ col: formationCol, op: 'eq', value: f.raw }]));
       return groups;
     }
@@ -4110,7 +4121,10 @@ function sanitizeCompareCommonFilters(plan, groups) {
   const state = getDataEngineState();
   const prev = state.lastPlan;
   const merged = mergeFiltersUnique(prev?.filters || [], plan.filters || []);
-  return merged.filter(f => f && f.col && !axisCols.has(f.col));
+  // v27.5.76 — une valeur comparée (« Pau », « Bayonne ») relue sur une autre colonne (commune d'accueil) n'est pas un
+  // filtre commun (avant : « boursiers à Pau ou à Bayonne » = Pau 10 / Bayonne 45, au lieu de 332 / 229)
+  const valsG = new Set((groups || []).flatMap(g => (g.filters || []).map(f => normalizeText(f.value))));
+  return merged.filter(f => f && f.col && !axisCols.has(f.col) && !(f.op === 'eq' && valsG.has(normalizeText(f.value))));
 }
 
 function compareGroupSummary(table, groups, baseFilters) {
@@ -4327,7 +4341,13 @@ function renderCompareHtml(plan, result) {
   const groupedTotal = rows.reduce((s, r) => s + (r.count || 0), 0);
   const missing = Math.max(0, baseTotal - groupedTotal);
   const tableRows = rows.map(r => `<tr><td style="padding:7px 10px;border-bottom:1px solid var(--gris1,#f3f4f6)">${escapeHtml(r.label)}</td><td style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris1,#f3f4f6)"><strong>${r.count.toLocaleString('fr-FR')}</strong></td><td style="text-align:right;padding:7px 10px;border-bottom:1px solid var(--gris1,#f3f4f6)">${fmtComparePct(r.pct)}</td></tr>`).join('');
-  const missingNote = missing ? `<p style="font-size:12px;color:var(--gris6,#6b7280);margin:8px 0 0">Autres / non renseignés hors groupes comparés : <strong>${missing.toLocaleString('fr-FR')}</strong> ligne${missing>1?'s':''} (${fmtComparePct(baseTotal ? missing / baseTotal * 100 : 0)}).</p>` : '';
+  // v27.5.76 — écart entre les deux groupes, en clair (« combien de BTS de plus en Gironde que dans les Landes »)
+  const ecartHtml = rows.length === 2 ? (() => {
+    const [a, b] = rows, d = (a.count || 0) - (b.count || 0);
+    const rapport = b.count ? (a.count / b.count) : null;
+    return `<p style="margin:10px 0"><strong>Écart</strong> : ${escapeHtml(a.label)} − ${escapeHtml(b.label)} = <strong>${d > 0 ? '+' : ''}${d.toLocaleString('fr-FR')}</strong>${rapport && d !== 0 ? ` (${escapeHtml(a.label)} : ${rapport.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} fois ${escapeHtml(b.label)})` : ''}.</p>`;
+  })() : '';
+  const missingNote = ecartHtml + (missing ? `<p style="font-size:12px;color:var(--gris6,#6b7280);margin:8px 0 0">Autres / non renseignés hors groupes comparés : <strong>${missing.toLocaleString('fr-FR')}</strong> ligne${missing>1?'s':''} (${fmtComparePct(baseTotal ? missing / baseTotal * 100 : 0)}).</p>` : '');
   const cols = getCompareColumns(plan.table);
   const formationRows = compareCategoryRows(rows, cols.formation, 8);
   const academieRows = compareCategoryRows(rows, cols.academie, 8);
