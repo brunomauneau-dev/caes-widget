@@ -1560,6 +1560,16 @@ function sommesParGroupe(rows, col, sumCol) {
   return { filled, distinct: m.size, top, somme: Math.round(somme * 100) / 100, sansValeur };
 }
 function applyMeasureSum(plan) {
+  // v27.5.73 — fichier de candidats : « nombre total de vœux confirmés », « combien de vœux au total » = la somme de la
+  // colonne des vœux (avant : le nombre de candidats, 35 286, affiché comme un nombre de vœux)
+  if (plan && plan.table && plan.table.rowUnit !== 'formation' && plan.tool === 'count_rows') {
+    const qv = normalizeText(plan.question || '');
+    if (/^(?:quel est le |quel est |le |la )?(?:nombre total|total|somme|nombre)\s+(?:des |de |d )?voeux\b|^combien (?:de |d )?voeux\b(?!.*\b(?:moyenne|moyen|maximum|minimum|max|min|median|mediane)\b)/.test(qv)) {
+      const col = (plan.table.headers || []).find(h => /voeux/.test(normalizeText(h)) && _estNumerique(plan.table, h));
+      if (col) { plan.tool = 'sum'; plan.sumCol = col; plan.sumUnit = 'vœux'; return plan; }
+      plan.mesureIntrouvable = 'vœux'; return plan;
+    }
+  }
   if (!plan || !plan.table || plan.table.rowUnit !== 'formation') return plan;
   // v27.18 — répartition (« places en BTS par académie ») : somme par groupe, pas le nombre de formations
   // (avant : « Paris : 315 » = 315 formations, affiché comme des places)
@@ -1680,6 +1690,12 @@ function applyClassement(plan) {
   const c = detecterClassement(plan.table, plan.question);
   if (!c) return plan;
   if (c.frequence) { plan.tool = 'top'; plan.targetCol = c.entite.col; plan.limit = c.limit; if (c.croissant) plan.croissant = true; return plan; }
+  // v27.5.73 — « quel lycée a le plus de vœux EN MOYENNE », « quelle académie a les plus grandes formations en moyenne » :
+  // la moyenne par groupe, classée (avant : le TOTAL par groupe, présenté comme le classement demandé)
+  if (c.entite && c.col && c.additif && /\ben moyenne\b|\bmoyen(?:ne)?s?\b/.test(normalizeText(plan.question || ''))) {
+    plan.tool = 'stats'; plan.statsCol = c.col; plan.statsDim = c.entite.col; plan.statsDemandee = 'avg'; plan.targetCol = c.col;
+    return plan;
+  }
   plan.tool = 'classement';
   plan.classement = c;
   plan.targetCol = c.entite ? c.entite.col : null;
@@ -1721,7 +1737,7 @@ function conditionsChiffrees(table, question) {
   if (!table || !Array.isArray(table.objects) || !table.objects.length) return [];
   const q = normalizeText(_symbolesEnMots(question || ''));
   const headers = (table.headers || Object.keys(table.objects[0] || {})).filter(Boolean);
-  const colPour = mot => { for (const m of CLASSEMENT_MESURES) { if (!m.re.test(mot)) continue; const c = headers.find(h => m.col.test(_hx(h)) && _estNumerique(table, h)); if (c) return c; } return null; };
+  const colPour = mot0 => { const mot = mot0 === 'voeu' ? 'voeux' : mot0; for (const m of CLASSEMENT_MESURES) { if (!m.re.test(mot)) continue; const c = headers.find(h => m.col.test(_hx(h)) && _estNumerique(table, h)); if (c) return c; } return null; };
   const opPour = txt => (COMPARATEURS.find(([re]) => re.test(txt)) || [])[1];
   const out = [];
   // 1. « plus de 100 places », « au moins 30 admis », « moins de 50 candidats »
@@ -1734,10 +1750,24 @@ function conditionsChiffrees(table, question) {
     const col = colPour(/taux/.test(m[1]) ? "taux d acces" : /candidat/.test(m[1]) ? 'candidats' : /admis/.test(m[1]) ? 'admis' : 'places'); const op = opPour(m[2]);
     if (col && op && !out.some(f => f.col === col)) out.push({ col, op, value: Number(m[3].replace(',', '.')) });
   }
+  // 2b. v27.5.73 — « entre 5 et 10 vœux », « de 5 à 10 vœux » : bornes comprises (avant : condition perdue, tout le fichier)
+  for (const m of q.matchAll(/\b(?:entre|de)\s+(\d+(?:[.,]\d+)?)\s+(?:et|a)\s+(\d+(?:[.,]\d+)?)\s*(?:%\s*)?(places?|candidats?|admis|voeux|boursiers?)\b/g)) {
+    const col = colPour(m[3]);
+    if (col && !out.some(f => f.col === col)) { out.push({ col, op: 'gte', value: Number(m[1].replace(',', '.')) }); out.push({ col, op: 'lte', value: Number(m[2].replace(',', '.')) }); }
+  }
+  for (const m of q.matchAll(/\b(?:un seul|une seule|qu un|qu une)\s+(voeu|place|candidat|admis)\b/g)) {
+    const col = colPour(m[1]);
+    if (col && !out.some(f => f.col === col)) out.push({ col, op: 'eqn', value: 1 });
+  }
   // 3. v27.5.72 — « aucun admis », « pas de places », « sans candidat », « 0 vœu » : la valeur vaut 0
   // (avant : « combien de formations n'ont aucun admis » comptait tout ; « BTS n'ayant pas de places » additionnait les places)
   for (const m of q.matchAll(/\b(?:aucun|aucune|sans|pas de|pas d|zero|0)\s+(places?|candidats?|candidatures?|admis|voeux|voeu)\b/g)) {
     const col = colPour(m[1]);
+    // colonne sans aucun 0 mais avec des cases vides (« Nb de vœux » vide = aucun vœu confirmé ?) : on ne sait pas, le
+    // garde-fou s'arrête et l'explique (pas « 0 » affiché comme exact)
+    const objs = table.objects || [];
+    const zeroPresent = col && objs.some(r => _nombreCellule(r?.[col]) === 0), videPresent = col && objs.some(r => _nombreCellule(r?.[col]) === null);
+    if (col && !zeroPresent && videPresent) continue;
     if (col && !out.some(f => f.col === col)) out.push({ col, op: 'eqn', value: 0, zero: true });
   }
   return out.map(f => ({ ...f, label: `${SYMBOLES_OPS[f.op]} ${String(f.value).replace('.', ',')}`, source: 'condition_chiffree' }));
@@ -2353,6 +2383,7 @@ const LIEUX_AMBIGUS = new Set('somme manche nord lot var ain cher orne oise eure
 const MOTS_QUESTION = new Set(`
   eux elles ceux celles entre parmi exception excepte exceptes dehors
   croise croisee croises croisees croiser pivot
+  seul seule seuls seules
   fais faites fait faire mets mettre trace tracer dessine dessiner camembert diagramme histogramme barres courbe forme visualise visualiser
   combien quel quelle quels quelles nombre nombres total totale totaux somme effectif effectifs compte compter
   formation formations filiere filieres ligne lignes dont avec sans pour par dans sur des les une aux leur
@@ -4545,7 +4576,13 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     const tauxAcces = /taux d acces/.test(_hx(col));
     const tauxNuls = tauxAcces ? rows.filter(r => _nombreCellule(r?.[col]) === 0).length : 0;
     const lignes = tauxNuls ? rows.filter(r => _nombreCellule(r?.[col]) !== 0) : rows;
-    const qn = normalizeText(plan.question || '');
+    let qn = normalizeText(plan.question || '');
+    // v27.5.73 — open data : « par formation », « par BTS », « par licence » = l'unité (moyenne par formation), pas un
+    // regroupement (avant : moyenne par intitulé, ou arrêt « aucune colonne pour par bts »)
+    if (plan.table.rowUnit === 'formation') {
+      const filieres = (() => { try { const c = (plan.table.headers || []).find(h => /^filiere de formation tres agregee$/.test(normalizeText(h))); return c ? _distinctValues(plan.table, c).map(normalizeText) : []; } catch (e) { return []; } })();
+      qn = qn.replace(/\bpar\s+(?:une?\s+)?([a-z0-9]+)\b/g, (m, w) => (/^formations?$/.test(w) || filieres.includes(w) || filieres.includes(w.replace(/s$/, ''))) ? ' ' : m).replace(/\s+/g, ' ').trim();
+    }
     const demandee = plan.statsDemandee && !/\b(median|minimum|maximum|min|max|moyen|moyenne)\b/.test(qn) ? plan.statsDemandee : /\bmedian/.test(qn) ? 'median' : /\bminimum\b|\bmin\b|\ble plus bas\b|\bplus faible\b/.test(qn) ? 'min' : /\bmaximum\b|\bmax\b|\ble plus (haut|eleve)\b/.test(qn) ? 'max' : 'avg';
     // « … par académie / par filière » : une statistique par groupe
     const dim = _colonneDimension(plan.table, qn, col) || plan.statsDim || null;
@@ -4629,7 +4666,8 @@ function _colonneDimension(table, q, sauf = null) {
     if (/^regions?$/.test(mot)) return headers.find(h => /^region/.test(_hx(h)) && !/code|origine/.test(_hx(h)));
     if (/^departements?$/.test(mot)) return headers.find(h => /^departement/.test(_hx(h)) && !/code|origine/.test(_hx(h)));
     if (/^(communes?|villes?)$/.test(mot)) return headers.find(h => /^(commune|ville)/.test(_hx(h)) && !/code|insee|postal|origine/.test(_hx(h)));
-    if (/^(etablissements?|lycees?|universites?)$/.test(mot)) return _colEtablissement(table);
+    // v27.5.73 — fichier de candidats : « par lycée » = l'établissement de scolarité (« par université » : d'accueil)
+    if (/^(etablissements?|lycees?|universites?)$/.test(mot)) return _colEtablissement(table) || _colEtablissementRole(table, /^universites?$/.test(mot) ? 'accueil' : 'origine') || _colEtablissementRole(table, 'origine');
     if (/^(filieres?|formations?|diplomes?)$/.test(mot)) { try { return _colonneCategories(table, formationTermsInfo(table)); } catch (e) { return null; } }
     if (/^(statuts?|secteurs?)$/.test(mot)) return headers.find(h => /^statut/.test(_hx(h)));
     if (/^selectivite$/.test(mot)) return headers.find(h => /selectiv/.test(_hx(h)));
@@ -4692,7 +4730,7 @@ function _isIdentifiantCol(h, table) {
 }
 function inferNumericStatsColumn(table, question) {
   const q = normalizeText(question || '');
-  const motsQ = q.split(' ').filter(w => w.length >= 4 && !STATS_MOTS_VIDES.has(w));
+  const motsQ = q.split(' ').filter(w => w.length >= 4 && !STATS_MOTS_VIDES.has(w) && !/^formations?$/.test(w));
   const proche = (a, b) => a === b || a.replace(/(s|x)$/, '') === b.replace(/(s|x)$/, '');
   const headers = table.headers || Object.keys(table.objects?.[0] || {});
   const candidates = headers.filter(h => h && !/^(id|manualSort)$/i.test(String(h)) && !_isIdentifiantCol(h, table)).map(h => {
@@ -4703,6 +4741,10 @@ function inferNumericStatsColumn(table, question) {
     if (/voeu|voeux/.test(q) && /voeu|voeux/.test(hn)) score += 120;
     if (/confirm/.test(q) && /confirm/.test(hn)) score += 80;
     if (/class/.test(q) && /class/.test(hn)) score += 50;
+    // v27.5.73 — « nombre moyen d'admis / de candidats par formation » : la colonne de cet effectif (avant : la capacité,
+    // à cause du mot « formation » commun aux deux noms)
+    if (/\badmis(es)?\b/.test(q) && /ayant accepte.*admis/.test(hn) && !/boursier|candidates|neo/.test(q)) score += 100;
+    if (/\bcandidats?\b/.test(q) && !/\badmis\b/.test(q) && /effectif total des candidats pour une formation/.test(hn)) score += 100;
     // v27.5.64 — « en moyenne combien de places a un BUT » : les places = la capacité (avant : arrêt)
     if (/\bplaces?\b/.test(q) && /capacit|\bplaces?\b/.test(hn)) score += 80;
     // v27.15 — « pourcentage moyen de boursiers » : la colonne des pourcentages, pas celle des effectifs
