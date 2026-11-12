@@ -172,7 +172,7 @@ function isFilterOnlyFollowUp(question) {
   // v27.25 — « lesquelles sont à Bordeaux ? », « quels sont-ils ? », « où sont-elles ? » : les mêmes, détaillés
   if (RELANCE_LESQUELS.test(q)) return true;
   // v27.14 — « et à Bordeaux ? », « et en Gironde ? », « et dans l'académie de Toulouse ? », « et sur Pau ? »
-  return /^(seulement|uniquement|avec|sans|sauf|hors|excluant|en excluant|les boursiers|les non boursiers|non boursiers|boursiers|et pour|et les|et chez|parmi les|pour les|chez les|uniquement les|notamment les|en particulier|et parmi|et a |et au |et aux |et en |et dans |et sur |et hors |et sauf )/.test(q);
+  return /^(seulement|uniquement|avec|sans|sauf|hors|excluant|en excluant|les boursiers|les non boursiers|non boursiers|boursiers|et pour|et les|et chez|parmi les|pour les|chez les|uniquement les|notamment les|en particulier|et parmi|et a |et au |et aux |et en |et dans |et sur |et hors |et sauf |et de |et du |et des |et d )/.test(q);
 }
 
 // PR 2.1 — distingue "filtre sur population" vs "nouvelle paire à comparer".
@@ -542,6 +542,18 @@ function strictFiltersFromQuestion(table, question) {
       });
       if (v) out.push({ col: comOrig, value: v, op: 'eq', label: null, source: 'commune_a' });
     }
+    // v27.5.64 — « admis en BTS de Pau », « les BTS de Dax » : « de X » (X commune, pas académie) non lu ailleurs.
+    // Avant : Pau perdu, 4 975 admis en BTS (tout le fichier) au lieu de 257. Commune d'accueil après un verbe
+    // d'accueil (admis, acceptés…), sinon d'origine si le fichier la distingue.
+    if (!out.some(f => comCols.includes(f.col))) {
+      const acaVals = new Set(headersS.filter(h => /acad[eé]mi|departement|region/.test(_hx(h))).flatMap(h => _distinctValues(table, h).map(normalizeText)));
+      const _role = c => (typeof plannerColumnRole === 'function') ? plannerColumnRole(c) : {};
+      const comAcc = comCols.find(h => _role(h).accueil), comOri = comCols.find(h => _role(h).origine);
+      const col = comOri && comAcc ? (_VERBE_ACCUEIL_RE.test(q) ? comAcc : comOri) : comCols[0];
+      const v = _distinctValues(table, col).filter(x => normalizeText(x).length >= 3 && !acaVals.has(normalizeText(x))).sort((a, b) => b.length - a.length)
+        .find(x => new RegExp(`(^| )(de|d) ${normalizeText(x)}( |$)`).test(q) && !new RegExp(`\\b(universite|universites|iut|lycee|lycees|ecole|ecoles|institut|college|campus|academie|departement|region|commune|ville) (de |d )${normalizeText(x)}\\b`).test(q));
+      if (v) out.push({ col, value: v, op: 'eq', label: null, source: 'commune_a' });
+    }
   }
 
   // Etablissement d\'origine : "venant du/de", "issus du/de", "originaires du/de"
@@ -562,6 +574,46 @@ function strictFiltersFromQuestion(table, question) {
     }
   }
 
+  // v27.5.64 — énumération de 3 valeurs ou plus d'une même colonne (« académies de Bordeaux, Toulouse et Poitiers ») :
+  // une seule condition « l'une des valeurs ». Avant : Bordeaux seul lu, puis arrêt. (Deux valeurs : « X et/ou Y », union.)
+  const qv = question ? normalizeText(String(question).replace(/\s*,\s*/g, ' qqvirgule ')).replace(/ ?qqvirgule ?/g, ' , ') : '';
+  const enums = [];
+  if (/ , /.test(qv)) {
+    for (const col of headersS) {
+      if (_estNumerique(table, col)) continue;
+      const vals = _distinctValues(table, col);
+      if (vals.length > 5000) continue;
+      const occ = [];
+      vals.forEach(v => { const n = normalizeText(v); if (n.length < 3) return; const m = new RegExp(`(^| )${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?= |$)`).exec(qv); if (m) occ.push({ v, n, d: m.index + m[1].length, f: m.index + m[1].length + n.length }); });
+      if (occ.length < 3) continue;
+      occ.sort((x, y) => x.d - y.d || y.n.length - x.n.length);
+      const lien = /^ (?:, |, et |, ou |et |ou )(?:(?:de|d|du|des|la|le|l|en|a|au|aux) )*$/;
+      let chaine = [occ[0]], best = [];
+      for (let i = 1; i < occ.length; i++) {
+        const o = occ[i], last = chaine[chaine.length - 1];
+        if (o.d < last.f) continue; // chevauchement (« Paris » dans « Paris 11e… »)
+        if (lien.test(qv.slice(last.f, o.d) + (qv.slice(last.f, o.d).endsWith(' ') ? '' : ' '))) chaine.push(o);
+        else { if (chaine.length > best.length) best = chaine; chaine = [o]; }
+      }
+      if (chaine.length > best.length) best = chaine;
+      if (best.length >= 3 && qv.slice(best[0].d, best[best.length - 1].f).includes(' , ')) {
+        enums.push({ col, best });
+      }
+    }
+    // mêmes valeurs dans deux colonnes (académie ET commune de Bordeaux, Toulouse, Poitiers) : le mot de la question
+    // (« académies », « départements »…) tranche ; sinon académie > département > région > commune
+    const rang = c => { const h = _hx(c); const mot = [['academi', /academi/], ['departement', /departement/], ['region', /region/], ['commune', /commune|ville/]].findIndex(([m, re]) => re.test(h) && new RegExp(m === 'commune' ? '\\b(communes?|villes?)\\b' : `\\b${m}`).test(qv)); return mot >= 0 ? mot - 10 : [/academi/, /departement/, /region/, /commune|ville/].findIndex(re => re.test(h)); };
+    // fichier de candidats : commune d'accueil ou de scolarité (« admis à… » : accueil ; « de… », « lycées de… » : scolarité)
+    const _roleE = c => (typeof plannerColumnRole === 'function') ? plannerColumnRole(c) : {};
+    const rangRole = e => { const r = _roleE(e.col); if (!r.accueil && !r.origine) return 0; const avant = qv.slice(0, e.best[0].d); const acc = (_VERBE_ACCUEIL_RE.test(qv) || / a $/.test(avant)) && !/venant|issus?|originaires?|provenant|scolaris|origine|lycees?/.test(qv); return (acc ? r.accueil : r.origine) ? 0 : 0.5; };
+    const parValeurs = new Map();
+    enums.forEach(e => { const k = e.best.map(o => o.n).join('|'); if (!parValeurs.has(k) || rang(e.col) + rangRole(e) < rang(parValeurs.get(k).col) + rangRole(parValeurs.get(k))) parValeurs.set(k, e); });
+    parValeurs.forEach(({ col, best }) => {
+      const ns = new Set(best.map(o => o.n));
+      for (let i = out.length - 1; i >= 0; i--) if (out[i].col === col || ((out[i].op || 'eq') === 'eq' && ns.has(normalizeText(out[i].value)))) out.splice(i, 1);
+      out.push({ col, op: 'in', values: best.map(o => o.n), value: best.map(o => o.v).join(', '), label: best.map(o => o.v).join(', '), source: 'enumeration' });
+    });
+  }
   return out;
 }
 
@@ -583,9 +635,11 @@ function replaceConceptFiltersWithStrict(plan, question) {
   // v27.5.53 — mot d'intitulé déjà traduit par un filtre exact (« agricoles » → Ministère = Agriculture) : retiré
   const _pref = w => w.slice(0, 5);
   const _motsStrict = new Set(strict.filter(f => f.source !== 'specialite_lycee').flatMap(f => normalizeText(f.value).split(/[^a-z0-9]+/).filter(w => w.length >= 5).map(_pref)));
+  // v27.5.64 — « BTS, BUT et CPGE » : valeurs d'une énumération, pas des mots à réunir dans un même intitulé
+  const _motsEnum = new Set(strict.filter(f => f.source === 'enumeration').flatMap(f => f.values.flatMap(v => v.split(' '))));
   plan.filters = (plan.filters || []).filter(f => {
     if (!(f && f.op === 'contains_all' && f.source === 'termes_formation')) return true;
-    const i = (f.terms || []).map((t, k) => ({ t, l: String(f.label || '').split(' + ')[k] })).filter(x => ![].concat(x.t).some(w => w.length >= 5 && _motsStrict.has(_pref(w))));
+    const i = (f.terms || []).map((t, k) => ({ t, l: String(f.label || '').split(' + ')[k] })).filter(x => ![].concat(x.t).some(w => (w.length >= 5 && _motsStrict.has(_pref(w))) || _motsEnum.has(normalizeText(w))));
     if (i.length === (f.terms || []).length) return true;
     if (!i.length) return false;
     Object.assign(f, { terms: i.map(x => x.t), label: i.map(x => x.l).join(' + '), value: i.map(x => x.l).join(' + ') });
@@ -599,7 +653,9 @@ function replaceConceptFiltersWithStrict(plan, question) {
   const _formCols = new Set(formationTermsInfo(plan.table).cols);
   const _colsLycee = new Set(_colonnesLycee(plan.table).cols);
   const _matiere = f => f && f.op === 'eq' && _ensMots.size && ((_formCols.has(f.col) && normalizeText(f.value).split(' ').every(w => _ensMots.has(w) && !_qHors.has(w))) || _colsLycee.has(f.col));
-  const base = (plan.filters || []).filter(f => !strictCols.has(f.col) && !_aca(f) && !_matiere(f));
+  const _valsEnum = new Set(strict.filter(f => f.source === 'enumeration').flatMap(f => f.values));
+  const _dansEnum = f => f && f.op === 'eq' && _valsEnum.has(normalizeText(f.value)); // v27.5.64 — Bordeaux lu ailleurs
+  const base = (plan.filters || []).filter(f => !strictCols.has(f.col) && !_aca(f) && !_matiere(f) && !_dansEnum(f));
   plan.filters = mergeFiltersUnique(base, strict);
   plan.mentionedCols = Array.from(new Set([...(plan.mentionedCols || []), ...strict.map(f => f.col)]));
   return plan;
@@ -732,6 +788,24 @@ function inheritConversationContext(plan, question) {
       }
     }
 
+    // v27.5.64 — « et de Bayonne ? » / « et à Bayonne ? » après « candidats de Pau » : le lieu change de VALEUR dans la
+    // même colonne (commune de scolarité). Avant : « et de Bayonne » n'était pas lu (chiffre de Pau redonné) et
+    // « et à Bayonne » cumulait Pau (scolarité) et Bayonne (accueil), 55 au lieu de 1 494.
+    if (filterFollowUp && !plan.sousEnsemble && !RELANCE_LISTE.test(q)) {
+      const _m = q.match(/^et (?:pour |a |au |aux |en |dans |de |du |des |d |sur |chez )?(?:la |le |l |les )?(?:(?:commune|ville|academie|departement|region|lycee|etablissement) (?:de |d |du |des )?(?:la |le |l )?)?([a-z0-9][a-z0-9 \-']*?)\s*\??$/);
+      const _lieu = c => /commune|ville|acad[eé]mi|d[eé]partement|r[eé]gion/.test(_hx(c)) && !/code|insee|postal/.test(_hx(c));
+      if (_m) {
+        const x = _m[1].trim();
+        const tbl = plan.table || prev.table;
+        const cible = previousFilters.find(f => f && f.op === 'eq' && _lieu(f.col) && _distinctValues(tbl, f.col).some(v => normalizeText(v) === x));
+        if (cible) {
+          const v = _distinctValues(tbl, cible.col).find(v => normalizeText(v) === x);
+          const autres = (plan.filters || []).filter(f => !(f && _lieu(f.col)) && !previousFilters.some(p => _cleFiltre(p) === _cleFiltre(f)));
+          plan.filters = mergeFiltersUnique(previousFilters.map(f => f === cible ? { ...f, value: v, label: null } : f), autres);
+          plan.lieuRemplace = cible.col; // le lieu lu dans la question n'est pas relu ailleurs (sanitize)
+        }
+      }
+    }
     const _clesPrecedentes = new Set(previousFilters.map(_cleFiltre));
     plan.filtresRepris = (plan.filters || []).map(_cleFiltre).filter(k => _clesPrecedentes.has(k) && !_clesQuestion.has(k));
 
@@ -1709,7 +1783,12 @@ function applyPart(plan) {
     // v27.5.53 — « taux de proposition des boursiers » : la condition est « proposition », « des boursiers » est le périmètre
     // (avant : la part des boursiers dans tout le fichier, 18 %, au lieu de la part des boursiers ayant eu une proposition)
     const _deQui = /^taux\b/.test(normalizeText(plan.question || '').replace(/^.*?\b(?=taux\b)/, '')) ? d.phrase.split(/\s+(?:des|du|chez les|chez)\s+/)[0] : d.phrase;
-    const courte = _deQui.split(_coupePart(_deQui))[0];
+    // v27.5.64 — « pourcentage des candidats boursiers (qui) ont accepté une proposition », « part des boursiers ayant
+    // eu une proposition » : les boursiers sont le périmètre, l'action est la condition (avant : boursiers ayant accepté
+    // parmi TOUS les candidats, 11 % au lieu de 61 %)
+    const _mAct = _deQui.match(/^(?:(?:candidats?|candidates?|eleves?|lyceens?)\s+)?(.+?)\s+(?:qui\s+)?(?:ayant|ont|sont|etant|qui ont|qui sont|avaient|etaient)\s+(.+)$/);
+    let courte = _deQui.split(_coupePart(_deQui))[0];
+    if (_mAct && _filtresDePhrase(plan.table, _mAct[1]).length && _filtresDePhrase(plan.table, `ont ${_mAct[2]}`).length) courte = `ont ${_mAct[2]}`;
     let fx = courte !== d.phrase ? _filtresDePhrase(plan.table, courte) : [];
     if (fx.length) d.phrase = courte; else fx = _filtresDePhrase(plan.table, d.phrase);
     const cle = f => f.op === 'contains_all' ? `T::${(f.terms || []).map(t => [].concat(t)[0]).join('+')}` : `${f.col}`;
@@ -2145,7 +2224,7 @@ const LIEUX_AMBIGUS = new Set('somme manche nord lot var ain cher orne oise eure
    source où une ligne = une formation, chaque mot porteur de sens doit correspondre à un filtre, à une colonne
    utilisée ou à un mot connu (outils de la question, lieux, mesures). Sinon le moteur s'arrête et le nomme. */
 const MOTS_QUESTION = new Set(`
-  eux elles ceux celles entre parmi
+  eux elles ceux celles entre parmi exception excepte exceptes dehors
   combien quel quelle quels quelles nombre nombres total totale totaux somme effectif effectifs compte compter
   formation formations filiere filieres ligne lignes dont avec sans pour par dans sur des les une aux leur
   est sont ont a y il elles ils ya existe existent propose proposent proposees proposes offert offerte offertes offerts
@@ -2429,6 +2508,9 @@ const REFORMULATIONS = [
   // « y a-t-il des BTS au lycée X ? », « existe-t-il des … » : un comptage (0 = non)
   [/\b(?:est[- ]ce\s+qu['’]\s*)?(?:il\s+)?y\s+a[- ]?t[- ]?il\s+(?:des|un|une|du|de\s+la|de\s+l['’]|de)\s+/gi, 'combien de '],
   [/\bexiste[- ]?t[- ]?il\s+(?:des|un|une|du|de\s+la|de\s+l['’]|de)\s+/gi, 'combien de '],
+  // v27.5.64 — « je cherche les IFSI de Nouvelle-Aquitaine », « où trouver un BTS MCO à Pau ? » : la liste des
+  // établissements (avant : envoyé à Albert, sans calcul)
+  [/^\s*(?:je\s+(?:re)?cherche|(?:re)?cherche|trouve[sz]?[- ]moi|o[uù]\s+trouver|je\s+voudrais\s+trouver)\s+(?:les|des|un|une|tous\s+les|toutes\s+les)\s+(?!(?:infos?|informations?|renseignements?|conseils?|aides?|id[ée]es?|documents?|explications?|r[ée]ponses?|chiffres?|donn[ée]es|statistiques?|stats?|textes?|r[èe]gles?|dates?|calendriers?)\b)/i, 'quels établissements proposent des '],
   [/\b(?:dans\s+le|du|le\s+d[eé]partement(?:\s+du|\s+de\s+la|\s+des)?|d[eé]partement(?:\s+du|\s+de\s+la|\s+des)?)\s+(\d{2,3}|2[ab])\b(?!\s*(?:%|places?|formations?|candidats?|admis|premi|derni|e\b|ème))/gi,
     (m, code) => { const nom = DEPARTEMENTS_FR[String(code).toLowerCase()]; return nom ? `en ${nom}` : m; }],
   // négations : « qui ne sont pas dans l'académie de X » → « hors … » ; « qui ne sont pas boursiers » → « non boursiers »
@@ -3055,7 +3137,18 @@ function _detectDataEnginePlanBase(question, filterContextText = question) {
   if (tool === 'compare') {
     const groups = detectCompareGroups(table, question);
     if (groups.length >= 2) {
-      const baseFilters = strictFiltersFromQuestion(table, question).filter(f => !groups.some(g => (g.filters || []).some(gf => gf.col === f.col)));
+      const _colsG = new Set(groups.flatMap(g => (g.filters || []).map(gf => gf.col)));
+      const _valsG = new Set(groups.flatMap(g => (g.filters || []).map(gf => normalizeText(gf.value))));
+      const _horsGroupes = f => f && !_colsG.has(f.col) && !_valsG.has(normalizeText(f.value)) && !(f.op === 'contains_all' && (f.terms || []).every(t => [].concat(t).some(w => _valsG.has(normalizeText(w)))));
+      let baseFilters = strictFiltersFromQuestion(table, question).filter(_horsGroupes);
+      // v27.5.64 — critères communs aux deux groupes (« le nombre de BTS en Gironde et dans les Landes » : BTS),
+      // lus par le planner ; avant : perdus, la comparaison portait sur toutes les formations
+      try {
+        if (typeof buildPlannerPlan === 'function') {
+          const pp = applyFormationTerms(buildPlannerPlan(question, question, table, 'count_rows'));
+          baseFilters = mergeFiltersUnique(baseFilters, ((pp && pp.filters) || []).filter(_horsGroupes));
+        }
+      } catch (e) { /* planner indisponible : filtres stricts seuls */ }
       return inheritConversationContext({
         tool: 'compare',
         table,
@@ -3342,7 +3435,8 @@ function _finalSanitizeAnalysisPlanBase(plan) {
 
   // v27.5.59 — « à Bordeaux ou à Pau » : le filtre « l'un ou l'autre » remplace les filtres lus séparément dans la question
   const _colsUnion = new Set((plan.filters || []).filter(f => f && f.source === 'union').flatMap(f => (f.groupes || []).flat().map(g => g.col)));
-  const strict = strictFiltersFromQuestion(table, plan.question || '').filter(f => !_colsUnion.has(f.col));
+  const _lieuQ = c => /commune|ville|acad[eé]mi|d[eé]partement|r[eé]gion/.test(_hx(c)) && !/code|insee|postal/.test(_hx(c));
+  const strict = strictFiltersFromQuestion(table, plan.question || '').filter(f => !_colsUnion.has(f.col) && !(plan.lieuRemplace && _lieuQ(f.col)));
   const explicitFresh = isExplicitFreshDataQuestion(plan.question || '') && !/^(et pour|et les|idem|m[eê]me|meme)/.test(q);
   const dimensionFollowUp = isDimensionOnlyFollowUp(plan.question || '');
   const filterFollowUp = isFilterOnlyFollowUp(plan.question || '');
@@ -3388,6 +3482,7 @@ function _finalSanitizeAnalysisPlanBase(plan) {
       if (!f || !f.col) return false;
       if (f.source === 'termes_formation' || f.source === 'union') return true; // v27.7 — mots cités dans la question
       if (strictCols.has(f.col)) return false; // remplacés par strict ci-dessous
+      if (f.op === 'eq' && strict.some(e => e.source === 'enumeration' && e.values.includes(normalizeText(f.value)))) return false; // v27.5.64
       const cn = normalizeText(f.col);
       const val = normalizeText(f.value);
 
@@ -3490,6 +3585,30 @@ function detectCompareGroups(table, question) {
       addGroup(e1.noms.length <= 2 ? e1.noms.join(' / ') : e1.phrase, [g(e1)]);
       addGroup(e2.noms.length <= 2 ? e2.noms.join(' / ') : e2.phrase, [g(e2)]);
       return groups;
+    }
+  }
+
+  // ── 0b. v27.5.64 — deux lieux, AVANT les paires boursiers / admis (« comparer les boursiers de Pau et de
+  // Bayonne » : Pau contre Bayonne, parmi les boursiers) (« comparer la Gironde et les Landes », « candidats de Pau et de Bayonne ») ──
+  // avant : un seul lieu lu, pas de calcul (la question partait vers Albert)
+  {
+    const _role = c => (typeof plannerColumnRole === 'function') ? plannerColumnRole(c) : {};
+    const acc = _VERBE_ACCUEIL_RE.test(q) && !/venant|issus?|originaires?|provenant|scolaris|origine|lycees?/.test(q);
+    const lieux = (table.headers || []).filter(h => h && /acad[eé]mi|departement|region|commune|ville/.test(_hx(h)) && !/code|insee|postal/.test(_hx(h)))
+      .sort((a, b) => {
+        const k = h => { const x = _hx(h); const i = [/academi/, /departement/, /region/, /commune|ville/].findIndex(re => re.test(x)); const mot = ['academi', 'departement', 'region', 'commune'][i]; return (new RegExp(`\\b${mot}`).test(q) ? -10 : 0) + i + (((acc ? _role(h).origine : _role(h).accueil)) ? 0.5 : 0); };
+        return k(a) - k(b);
+      });
+    for (const col of lieux) {
+      const vals = _distinctValues(table, col);
+      if (vals.length > 5000) continue;
+      const cites = vals.map(v => ({ v, n: normalizeText(v), i: -1 })).filter(o => o.n.length >= 3).map(o => { const m = new RegExp(`(^| )${o.n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}( |$)`).exec(q); return m ? { ...o, i: m.index } : null; }).filter(Boolean)
+        .sort((x, y) => x.i - y.i);
+      const uniques = cites.filter((o, k) => !cites.some((p, j) => j !== k && p.n.length > o.n.length && p.n.includes(o.n)));
+      if (uniques.length >= 2) {
+        uniques.slice(0, 2).forEach(o => addGroup(o.v, [{ col, op: 'eq', value: o.v }]));
+        return groups;
+      }
     }
   }
 
@@ -4231,6 +4350,8 @@ function inferNumericStatsColumn(table, question) {
     if (/voeu|voeux/.test(q) && /voeu|voeux/.test(hn)) score += 120;
     if (/confirm/.test(q) && /confirm/.test(hn)) score += 80;
     if (/class/.test(q) && /class/.test(hn)) score += 50;
+    // v27.5.64 — « en moyenne combien de places a un BUT » : les places = la capacité (avant : arrêt)
+    if (/\bplaces?\b/.test(q) && /capacit|\bplaces?\b/.test(hn)) score += 80;
     // v27.15 — « pourcentage moyen de boursiers » : la colonne des pourcentages, pas celle des effectifs
     const veutPct = /\b(pourcentage|part|proportion|taux)\b/.test(q) || /%/.test(String(question || ''));
     const estPct = /^%|^(pourcentage|part|taux|proportion)\b/.test(normalizeText(h).trim()) || /^%/.test(String(h).trim());
