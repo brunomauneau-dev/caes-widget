@@ -1623,7 +1623,16 @@ function detecterClassement(table, question) {
   // classement par nombre de lignes = répartition triée (outil top)
   const sujet = q.match(/(?:^|\b(?:les|quel(?:le)?s?|top\s*\d*\s*(?:des)?|classement des)\s+(?:\d+\s+)?)(academies?|regions?|departements?|communes?|villes?|etablissements?|lycees?|universites?|ecoles?)\b(?!\s+(?:de|d|du|des)\s(?!accueil|scolarite|origine))/);
   // (« quels lycées proposent le plus de BTS » : le nombre de lignes retenues par le filtre BTS, par lycée)
-  if (sujet && /\b(le|les) plus de (formations?|lignes?|candidats?|eleves|dossiers?|bacheliers?|boursiers?|admis|[a-z0-9]{2,})\b|\b(le|les) plus (nombreu|represente|frequent)/.test(q)) {
+  // v27.5.70 — « quel département a le moins de licences » : classement croissant, groupes à zéro compris
+  const moins = sujet && /\b(le|les) moins (?:de|d) [a-z0-9]{2,}/.test(q) && !/\b(le|les) plus\b/.test(q);
+  if (moins) {
+    const e = CLASSEMENT_ENTITES.find(x => x.re.test(sujet[1]));
+    let ecol = e && headers.find(h => e.col(_hx(h)));
+    if (e && e.nom === 'établissements' && !_colEtablissement(table)) ecol = _colEtablissementRole(table, /\b(accueill\w*|d accueil)\b/.test(q) || /^(universites?|iut|ecoles?)$/.test(sujet[1]) ? 'accueil' : 'origine') || ecol;
+    const n = (q.match(/\b(?:top|les|des)\s+(\d{1,3})\b/) || [])[1];
+    if (ecol) return { frequence: true, croissant: true, entite: { col: ecol, nom: e.nom }, limit: n ? Math.min(Number(n), 100) : 10, mot: /\b(formations?|lignes?|candidats?|eleves|dossiers?)\b/ };
+  }
+  if (sujet && /\b(le|les) plus (?:de|d) (formations?|lignes?|candidats?|eleves|dossiers?|bacheliers?|boursiers?|admis|apprentis|[a-z0-9]{2,})\b|\b(le|les) plus (nombreu|represente|frequent)/.test(q)) { // v27.5.70 — « le plus d'admis »
     const e = CLASSEMENT_ENTITES.find(x => x.re.test(sujet[1]));
     // v27.5.56 — fichier de candidats : lycée de scolarité ou établissement d'accueil (« les universités qui accueillent… »)
     let ecol = e && headers.find(h => e.col(_hx(h)));
@@ -1644,7 +1653,7 @@ function applyClassement(plan) {
   if (!plan || !plan.table || ['compare', 'chart_current', 'export_current_excel', 'export_current_csv', 'export_excel', 'export_csv'].includes(plan.tool)) return plan;
   const c = detecterClassement(plan.table, plan.question);
   if (!c) return plan;
-  if (c.frequence) { plan.tool = 'top'; plan.targetCol = c.entite.col; plan.limit = c.limit; return plan; }
+  if (c.frequence) { plan.tool = 'top'; plan.targetCol = c.entite.col; plan.limit = c.limit; if (c.croissant) plan.croissant = true; return plan; }
   plan.tool = 'classement';
   plan.classement = c;
   plan.targetCol = c.entite ? c.entite.col : null;
@@ -2270,6 +2279,7 @@ const LIEUX_AMBIGUS = new Set('somme manche nord lot var ain cher orne oise eure
    utilisée ou à un mot connu (outils de la question, lieux, mesures). Sinon le moteur s'arrête et le nomme. */
 const MOTS_QUESTION = new Set(`
   eux elles ceux celles entre parmi exception excepte exceptes dehors
+  croise croisee croises croisees croiser pivot
   fais faites fait faire mets mettre trace tracer dessine dessiner camembert diagramme histogramme barres courbe forme visualise visualiser
   combien quel quelle quels quelles nombre nombres total totale totaux somme effectif effectifs compte compter
   formation formations filiere filieres ligne lignes dont avec sans pour par dans sur des les une aux leur
@@ -2559,6 +2569,9 @@ const REFORMULATIONS = [
   [/\b(en|de|la|dans la|pour la)\s+NA\b(?!\s*[:=])/g, '$1 Nouvelle-Aquitaine'],
   [/\bIDF\b/gi, 'Île-de-France'], [/\bPACA\b/gi, "Provence-Alpes-Côte d'Azur"], [/\bA?URA\b|\bARA\b/g, 'Auvergne-Rhône-Alpes'],
   [/\bHDF\b/g, 'Hauts-de-France'], [/\bBFC\b/g, 'Bourgogne-Franche-Comté'],
+  // v27.5.70 — « classement des lycées par nombre d'admis en CPGE » = « quels lycées ont le plus d'admis en CPGE »
+  // (avant : classement des spécialités de CPGE, présenté comme des lycées)
+  [/\bclassement\s+des\s+([a-zà-ÿ]+)\s+(?:par|selon|en fonction du|d['’]apr[eè]s le)\s+(?:le\s+)?nombre\s+(de\s+|d['’]\s*)/gi, (m, x, de) => `quels ${x} ont le plus ${/^d['’]/.test(de) ? "d'" : 'de '}`],
   // STS (sections de techniciens supérieurs) = BTS ; « licence pro » = licence professionnelle (pas toutes les licences)
   [/\bSTS\b/gi, 'BTS'],
   [/\blicences?\s+pros?\b(?!fess)/gi, 'licence professionnelle'],
@@ -3280,6 +3293,17 @@ function _detectDataEnginePlanBase(question, filterContextText = question) {
     // à partir de filtres structurés validés, jamais depuis les résultats calculés
     // (moyenne, médiane, valeur de tableau, etc.).
     const plannerPlan = buildPlannerPlan(question, question, table, tool);
+    const _mr = normalizeText(question).match(/\b(candidats?|candidatures?|voeux|demandes?|admis)\s+par\s+place\b/);
+    if (plannerPlan && _mr) {
+      const hs = (table.headers || []).filter(Boolean);
+      const den = hs.find(h => /capacit/.test(_hx(h)) && _estNumerique(table, h));
+      const num = /admis/.test(_mr[1]) ? hs.find(h => /ayant accepte.*admis|\badmis\b/.test(_hx(h)) && /effectif/.test(_hx(h)) && _estNumerique(table, h)) : hs.find(h => /effectif total des candidats pour une formation|^nb.*voeux|voeux confirmes/.test(_hx(h)) && _estNumerique(table, h));
+      const p = applyConditionsChiffrees(applyEtablissements(applyFormationTerms(plannerPlan)));
+      if (!num || !den) { p.tool = 'count_rows'; p.mesureIntrouvable = 'places ou de candidats'; return inheritConversationContext(p, question); }
+      p.tool = 'ratio'; p.targetCol = null;
+      p.ratio = { num, den, libelle: /admis/.test(_mr[1]) ? 'Admis par place' : 'Candidats par place', unNum: /admis/.test(_mr[1]) ? 'admis' : 'candidats' };
+      return inheritConversationContext(p, question);
+    }
     if (plannerPlan && _listeCondition) {
       // v27.5.67 — liste des formations qui remplissent la condition (intitulés), pas une répartition d'une colonne chiffrée
       const p = applyConditionsChiffrees(applyEtablissements(applyFormationTerms(plannerPlan)));
@@ -4224,7 +4248,7 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     const res = executeLocalAction(action);
     return { kind: 'export', plan, action, result: res, html: res?.html || '' };
   }
-  const rows = applyLocalActionFilters(plan.table.objects || [], plan.filters || []);
+  let rows = applyLocalActionFilters(plan.table.objects || [], plan.filters || []);
   // v27.23 — établissement cité mais introuvable : arrêt, avec les noms proches
   if (plan.etablissementIntrouvable) return unresolvedEtablissementExecution(plan, plan.etablissementIntrouvable);
   if (['count_rows', 'group_by', 'top', 'pivot'].includes(plan.tool) && plan.mesureIntrouvable) return unresolvedConceptExecution(plan, [], `aucune colonne de ${plan.mesureIntrouvable} dans les données`);
@@ -4265,6 +4289,23 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     rememberDataEngineExecution(exec);
     return exec;
   }
+  if (plan.tool === 'ratio') {
+    // v27.5.70 — « nombre de candidats par place en BTS » : Σ candidats / Σ places sur les mêmes formations
+    // (avant : une répartition par filière, sans rapport avec la question)
+    const num = rows.reduce((t, r) => { const x = _nombreCellule(r?.[plan.ratio.num]); return x === null ? t : t + x; }, 0);
+    const lignesDen = rows.filter(r => _nombreCellule(r?.[plan.ratio.den]) !== null);
+    const den = lignesDen.reduce((t, r) => t + _nombreCellule(r[plan.ratio.den]), 0);
+    if (!den) return unresolvedConceptExecution(plan, [], `aucune place renseignée dans « ${plan.ratio.den} » pour ces formations`);
+    const valeur = num / den;
+    const result = { num, den, valeur, count: rows.length, total: (plan.table.objects || []).length, colNum: plan.ratio.num, colDen: plan.ratio.den, libelle: plan.ratio.libelle };
+    const fmt = v => v.toLocaleString('fr-FR', { maximumFractionDigits: 1 });
+    const titre = `${plan.ratio.libelle} : ${fmt(valeur)}`;
+    const perim = perimetreResultat('ratio', plan, result).html;
+    const html = `${deTitleHtml(titre, plan.blockId, titre)}${perim}<p><strong>${fmt(valeur)}</strong> ${escapeHtml(plan.ratio.libelle.toLowerCase())} : ${num.toLocaleString('fr-FR')} ${escapeHtml(plan.ratio.unNum)} pour ${den.toLocaleString('fr-FR')} places (somme sur ${rows.length.toLocaleString('fr-FR')} formations).</p>`;
+    const exec = { kind: 'ratio', plan, result, text: `RAPPORT ${plan.ratio.libelle} = ${num} / ${den} = ${valeur}`, html };
+    rememberDataEngineExecution(exec);
+    return exec;
+  }
   if (plan.tool === 'sum') {
     if (!plan.sumCol) return unresolvedConceptExecution(plan, [], 'aucune colonne à additionner n\'a été reconnue : précisez (places, candidats, admis…)');
     const sum = rows.reduce((t, r) => { const x = _nombreCellule(r?.[plan.sumCol]); return x === null ? t : t + x; }, 0);
@@ -4290,8 +4331,15 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     const col = plan.targetCol || plan.mentionedCols?.[0];
     if (!col) return null;
     const limit = plan.listMode ? 300 : (plan.limit || detectLimit(plan.question) || (plan.tool === 'top' ? 10 : 30));
-    const counts = plan.distinctCol ? distinctParGroupe(rows, col, plan.distinctCol, plan.table)
+    let counts = plan.distinctCol ? distinctParGroupe(rows, col, plan.distinctCol, plan.table)
       : plan.groupSumCol ? sommesParGroupe(rows, col, plan.groupSumCol) : topCountsForRows(rows, col, Math.max(limit, 30));
+    if (plan.croissant && !plan.distinctCol && !plan.groupSumCol) {
+      // le moins : tous les groupes du fichier, y compris ceux à 0 (sinon un département sans licence serait oublié)
+      const tous = new Map(_distinctValues(plan.table, col).filter(v => String(v ?? '').trim() !== '').map(v => [String(v), 0]));
+      rows.forEach(r => { const v = String(r?.[col] ?? '').trim(); if (v) tous.set(v, (tous.get(v) || 0) + 1); });
+      const top = [...tous].map(([value, count]) => ({ value, count, pct: rows.length ? count / rows.length * 100 : 0 })).sort((a, b) => a.count - b.count || a.value.localeCompare(b.value, 'fr'));
+      counts = { ...counts, top, distinct: top.length };
+    }
     const topRows = counts.top.slice(0, limit);
     const _res = { total: rows.length, filled: counts.filled, distinct: counts.distinct, rows: topRows };
     if (plan.groupSumCol) _res.somme = { col: plan.groupSumCol, unite: plan.sumUnit, total: counts.somme, sansValeur: counts.sansValeur };
@@ -4320,6 +4368,27 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     return exec;
   }
   if (plan.tool === 'pivot') {
+    // v27.5.70 — « par série et par département » : les deux colonnes NOMMÉES (avant : série × type de la classe)
+    const _qp = normalizeText(plan.question || '');
+    const _mots = [...(_qp.match(/\bpar\s+(?:type\s+de\s+|grande\s+)?[a-z]+(?:\s+(?:et|puis)\s+(?:par\s+)?[a-z]+)?/g) || [])]
+      .flatMap(x => x.replace(/^par\s+/, '').split(/\s+(?:et|puis)\s+(?:par\s+)?/)).filter(w => !_PAR_UNITE.test(w));
+    // « tableau croisé boursier par série », « croiser la série et le département » : le premier mot aussi
+    const _mx = _qp.match(/\b(?:croise|croiser|pivot)\s+(?:des |du |de la |de l |de |d |entre |les |le |la )?([a-z]+)\s+(?:par|et|x|avec)\s+(?:les |le |la |l |des )?([a-z]+)/);
+    if (_mots.length < 2 && _mx && !_PAR_UNITE.test(_mx[1])) _mots.splice(0, _mots.length, _mx[1], _mx[2]);
+    // une seule dimension nommée (« tableau croisé des boursiers de Gironde par série ») : la seconde serait prise au
+    // hasard (avant : série × type de la classe) → répartition simple sur la dimension demandée
+    if (_mots.length === 1 && !plan._pivotSimple) {
+      const c1 = _colonneDimension(plan.table, `par ${_mots[0]}`);
+      if (c1) return runDataEnginePlan({ ...plan, tool: 'group_by', targetCol: c1, targetCol2: null, _pivotSimple: true }, persistentFiltersOverride);
+    }
+    if (_mots.length >= 2) {
+      const c1 = _colonneDimension(plan.table, `par ${_mots[0]}`), c2 = _colonneDimension(plan.table, `par ${_mots[1]}`, c1);
+      if (!c1 || !c2) return unresolvedConceptExecution(plan, [], `aucune colonne ne correspond à « par ${!c1 ? _mots[0] : _mots[1]} »`);
+      // une dimension du tableau n'est pas un filtre (« boursier » : les deux états, pas les boursiers seuls)
+      const filtres = (plan.filters || []).filter(f => !f || (f.col !== c1 && f.col !== c2) || new RegExp(`\\b${normalizeText(String(f.value)).split(' ')[0]}\\b`).test(_qp.replace(new RegExp(`\\b${_mots[0]}\\b|\\b${_mots[1]}\\b`, 'g'), '')));
+      plan = { ...plan, targetCol: c1, targetCol2: c2, filters: filtres };
+      rows = applyLocalActionFilters(plan.table.objects || [], plan.filters || []);
+    }
     const rowCol = plan.targetCol || plan.mentionedCols?.[0];
     const colCol = plan.targetCol2 || plan.mentionedCols?.find(c => c !== rowCol);
     if (!rowCol || !colCol) return null;
@@ -4353,6 +4422,7 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     const demandee = plan.statsDemandee && !/\b(median|minimum|maximum|min|max|moyen|moyenne)\b/.test(qn) ? plan.statsDemandee : /\bmedian/.test(qn) ? 'median' : /\bminimum\b|\bmin\b|\ble plus bas\b|\bplus faible\b/.test(qn) ? 'min' : /\bmaximum\b|\bmax\b|\ble plus (haut|eleve)\b/.test(qn) ? 'max' : 'avg';
     // « … par académie / par filière » : une statistique par groupe
     const dim = _colonneDimension(plan.table, qn, col) || plan.statsDim || null;
+    if (!dim) { const x = _dimensionIntrouvable(plan.table, qn, col); if (x) return unresolvedConceptExecution(plan, [], `aucune colonne ne correspond à « par ${x} » : la statistique serait donnée pour l'ensemble, sans le détail demandé`); }
     if (dim) {
       const groupes = new Map();
       lignes.forEach(r => { const v = String(r?.[dim] ?? '').trim(); if (!v) return; if (!groupes.has(v)) groupes.set(v, []); groupes.get(v).push(r); });
@@ -4436,10 +4506,21 @@ function _colonneDimension(table, q, sauf = null) {
     if (/^(filieres?|formations?|diplomes?)$/.test(mot)) { try { return _colonneCategories(table, formationTermsInfo(table)); } catch (e) { return null; } }
     if (/^(statuts?|secteurs?)$/.test(mot)) return headers.find(h => /^statut/.test(_hx(h)));
     if (/^selectivite$/.test(mot)) return headers.find(h => /selectiv/.test(_hx(h)));
-    return null;
+    // v27.5.70 — tout autre mot (« par série », « par sexe », « par ministère ») : la colonne qui le porte dans son nom
+    // (avant : « par série » ignoré, une seule moyenne affichée)
+    const m1 = mot.replace(/s$/, '');
+    const cands = headers.filter(h => h !== sauf && !_isIdentifiantCol(h, table) && !_estNumerique(table, h) && _hx(h).split(' ').some(w => w === mot || w === m1 || w.replace(/s$/, '') === m1));
+    return cands.find(h => new RegExp(`^${m1}`).test(_hx(h))) || cands[0] || null;
   };
   for (const x of m) { const c = trouve(x.replace(/^par\s+(?:type\s+de\s+|grande\s+)?/, '')); if (c && c !== sauf) return c; }
   return null;
+}
+// v27.5.70 — « par X » cité mais aucune colonne X : le mot (pour s'arrêter au lieu d'ignorer le regroupement)
+const _PAR_UNITE = /^(candidat|candidats|candidate|candidates|formation|formations|ligne|lignes|personne|personnes|eleve|eleves|place|places|an|annee|rapport|exemple|contre|ailleurs|consequent|hasard|defaut|voeu|voeux|dossier|dossiers|jour|mois|semaine)$/;
+function _dimensionIntrouvable(table, q, sauf = null) {
+  const m = [...String(q || '').matchAll(/\bpar\s+(?:type\s+de\s+|grande\s+)?([a-z]+)/g)].map(x => x[1]).filter(w => !_PAR_UNITE.test(w));
+  if (!m.length || _colonneDimension(table, q, sauf)) return null;
+  return m[0];
 }
 const _NOMS_STAT = { avg: 'moyenne', median: 'médiane', min: 'minimum', max: 'maximum' };
 function renderStatsGroupesHtml(plan, r) {
@@ -4525,6 +4606,7 @@ function dataEngineResultToContext(exec) {
     : exec.result.etablissements === true
     ? (exec.result.parCandidat ? `Résultat : ${exec.result.count} établissement(s) différent(s) (pour ${exec.result.formations} candidat(s)) — ce n'est pas un nombre de candidats.\n` : `Résultat : ${exec.result.count} établissement(s) différent(s) (qui proposent ${exec.result.formations} formation(s)) — ce n'est pas un nombre de formations.\n`)
     : `Résultat : ${exec.result.count} ligne(s) sur ${exec.result.total}.\n`;
+  if (exec.kind === 'ratio') out += `Résultat : ${exec.result.valeur} ${exec.result.libelle.toLowerCase()} (${exec.result.num} / ${exec.result.den} places, somme sur ${exec.result.count} formation(s)).\n`;
   if (exec.kind === 'sum') out += `Résultat : ${exec.result.sum} ${exec.result.unite} (somme de « ${exec.result.col} ») sur ${exec.result.count} formation(s).\n`;
   if (exec.kind === 'evolution_groupes') {
     const r = exec.result; const [s1, s2] = r.sessions;
@@ -4686,7 +4768,7 @@ function perimetreResultat(kind, plan, result) {
   const totalTable = (table.objects || []).length;
   const mot = n => `${table.rowUnit === 'formation' ? 'formation' : 'ligne'}${n > 1 ? 's' : ''}`;
   const retenues = result.etablissements === true ? result.formations
-    : ['count', 'count_rows', 'sum'].includes(kind) ? result.count
+    : ['count', 'count_rows', 'sum', 'ratio'].includes(kind) ? result.count
     : kind === 'classement' || kind === 'part' || kind === 'part_groupes' ? result.total
     : kind === 'compare' ? result.baseTotal : result.total;
   const parties = [];
@@ -4718,7 +4800,7 @@ function perimetreResultat(kind, plan, result) {
     const vides = (result.total || 0) - (result.filled ?? result.total ?? 0);
     if (vides > 0) notes.push(`${_nf(vides)} ${mot(vides)} sans valeur dans « ${plan.targetCol} »`);
     const affichees = Math.min((result.rows || []).length, 20);
-    if ((result.distinct || 0) > affichees && !plan.lesquelles) notes.push(`seules les ${_nf(affichees)} valeurs les plus fréquentes sont affichées, sur ${_nf(result.distinct)}`);
+    if ((result.distinct || 0) > affichees && !plan.lesquelles) notes.push(`seules les ${_nf(affichees)} valeurs les ${plan.croissant ? 'moins' : 'plus'} fréquentes sont affichées, sur ${_nf(result.distinct)}${plan.croissant ? ' (y compris celles à 0)' : ''}`);
   }
   // v27.17 — 0 dans la commune de Bordeaux, mais des formations dans l'académie de Bordeaux (PASS à Talence) :
   // le 0 est exact, mais l'agent pensait sans doute à l'académie ou au département → on le dit
@@ -4820,6 +4902,7 @@ function questionComprise(kind, plan, result) {
       if (result.etablissements === true) return `nombre d'établissements différents (colonne ${col(result.col)}), pas un nombre de ${unite}`;
       return `nombre de ${unite}`;
     }
+    if (kind === 'ratio') return `${(result.libelle || 'rapport').toLowerCase()} = somme de ${col(result.colNum)} ÷ somme de ${col(result.colDen)}`;
     if (kind === 'sum') return `somme de ${col(result.col)} (${result.unite || 'total'})`;
     if (kind === 'stats') return `${_NOMS_STAT[result.demandee || 'avg']} de ${col(plan.targetCol || plan.statsCol)}`;
     if (kind === 'stats_groupes') return `${_NOMS_STAT[result.demandee || 'avg']} de ${col(result.col)}, pour chaque valeur de ${col(result.dim)}`;
@@ -4828,7 +4911,7 @@ function questionComprise(kind, plan, result) {
       if (plan.listMode) return `liste des intitulés de formation (colonne ${col(plan.targetCol)})`;
       if (result.somme) return `somme de ${col(result.somme.col)} pour chaque valeur de ${col(plan.targetCol)}`;
       if (result.etablissements) return `nombre d'établissements différents pour chaque valeur de ${col(plan.targetCol)}`;
-      return kind === 'top' ? `valeurs les plus fréquentes de ${col(plan.targetCol)} (nombre de ${unite})` : `répartition des ${unite} par ${col(plan.targetCol)}`;
+      return kind === 'top' ? `valeurs les ${plan.croissant ? 'moins' : 'plus'} fréquentes de ${col(plan.targetCol)} (nombre de ${unite})` : `répartition des ${unite} par ${col(plan.targetCol)}`;
     }
     if (kind === 'pivot') return `tableau croisé ${col(plan.targetCol)} × ${col(plan.targetCol2)} (nombre de ${unite})`;
     if (kind === 'part') { const lp = _libellePart(plan); return `part des ${lp.quoi} parmi les ${lp.sur}`; }
