@@ -1595,7 +1595,9 @@ function detecterClassement(table, question) {
     if (e && e.nom === 'établissements' && !_colEtablissement(table)) {
       // l'établissement qui accueille (« qui accueillent », « d'accueil », universités…), pas « des candidats admis »
       // (« quel lycée a le plus de candidats admis en CPGE » = le lycée d'origine de ces candidats)
-      const versAccueil = /\b(accueill\w*|d accueil|admettent|recrut\w*|universites?|iut|ecoles?)\b/.test(q) && !/\b(scolarite|origine|lycees? d origine)\b/.test(q);
+      // v27.5.65 — le mot SUJET décide (« quels lycées envoient le plus de candidats en école de commerce » : les lycées
+      // d'origine ; avant, « école » ailleurs dans la phrase faisait classer les écoles d'accueil)
+      const versAccueil = (/\b(accueill\w*|d accueil|admettent|recrut\w*)\b/.test(q) || /^(universites?|iut|ecoles?)$/.test(sujet[1])) && !/\b(scolarite|origine|lycees? d origine|envoi\w*|envoy\w*)\b/.test(q);
       ecol = _colEtablissementRole(table, versAccueil ? 'accueil' : 'origine') || ecol;
     }
     const n = (q.match(/\b(?:top|les|des)\s+(\d{1,3})\b/) || [])[1];
@@ -2797,6 +2799,13 @@ function appliquerSiglesFormations(question, table) {
     if (!re.test(q)) return;
     re.lastIndex = 0;
     if (sigle && present(sigle)) return; // le sigle existe tel quel dans les données : on le garde
+    // v27.5.65 — l'expression elle-même est un intitulé des données (« Ecoles de commerce », grand groupe) : gardée
+    // (avant : traduite en « écoles de commerce et de management », introuvable dans certains fichiers → arrêt)
+    re.lastIndex = 0;
+    const _exp = (q.match(re) || [])[0];
+    re.lastIndex = 0;
+    const _valeurExacte = e => { const n = normalizeText(e); return info._texteIntitules.includes(`| ${n} |`) || info._texteIntitules.startsWith(` ${n} |`) || info._texteIntitules.endsWith(`| ${n} `) || info._texteIntitules === ` ${n} `; };
+    if (!sigle && _exp && normalizeText(_exp).split(' ').length >= 3 && _valeurExacte(_exp.replace(/[ée]cole\b/i, m => m + 's'))) return;
     const mots = normalizeText(trad).split(' ').filter(w => w.length >= 3 && !FORMATION_TERM_STOP.has(w));
     if (!mots.every(w => info.words.has(w) || info.words.has(w.replace(/s$/, '')) || info.words.has(w + 's'))) return; // traduction absente : on ne change rien
     q = q.replace(re, trad);

@@ -61,7 +61,14 @@ function lectureMoteurVerif(exec) {
     else if (f.op === 'contains_words') ajoute(filtres, familleVerif(f.col), [f.value, ...(f.terms || []).flat()]);
     else ajoute(filtres, familleVerif(f.col), [f.value, f.label, ...(f.values || [])].filter(Boolean));
   });
-  return { op, objet, groupe: groupeCol ? familleVerif(groupeCol) : null, filtres, exclus };
+  // v27.5.65 — somme d'une colonne d'effectifs ou de places : « combien d'admis », « nombre de places » = un comptage
+  // de personnes ou de places (Albert dit « compter », le moteur additionne) ; « je cherche les… » sans « combien » :
+  // une liste répond aussi bien qu'un nombre
+  // (seulement si la question nomme ce qui est additionné : « combien de formations » n'est pas une somme de places)
+  const _colS = _nrmVerif(p.sumCol || p.groupSumCol || ''), _qS = _nrmVerif(p.question || '');
+  const sommeEffectif = op === 'somme' && [[/\badmis/, /admis/], [/\bplaces?\b|capacit/, /capacit|places?/], [/\bcandidat/, /candidat/], [/\bboursier/, /boursier/], [/\bfilles?\b|candidates/, /candidates|filles/]].some(([rq, rc]) => (rq.test(_qS) || /^et\b/.test(_qS)) && rc.test(_colS)); // « et en BUT ? » : mesure reprise
+  const sansCombien = !/\b(combien|nombre|nb|effectifs?|total)\b/.test(_nrmVerif(p.question || ''));
+  return { op, objet, groupe: groupeCol ? familleVerif(groupeCol) : null, filtres, exclus, sommeEffectif, sansCombien };
 }
 
 // Alerte = désaccord IMPORTANT entre Albert et le moteur (ce qui serait montré à l'agent). Pas d'alerte quand le
@@ -82,7 +89,8 @@ function desaccordVerif(a, m) {
   // « compter, regroupé par académie » (Albert) = répartition par académie (moteur)
   const memeRegroupement = a.groupe && m.groupe && famillesEgalesVerif(_equivVerif(a.groupe), _equivVerif(m.groupe)) && ['compter', 'somme', 'repartition', 'classement', 'liste'].includes(a.op) && ['repartition', 'somme', 'classement', 'liste'].includes(m.op);
   if (memeRegroupement && !Object.keys(a.filtres || {}).map(_equivVerif).some(f => !Object.keys(m.filtres || {}).map(_equivVerif).includes(f) && f !== _equivVerif(m.groupe) && f !== 'admission')) return null;
-  if (!_opsProchesVerif(a.op, m.op) && !moteurDetaille) return `opération : Albert ${a.op}, moteur ${m.op}`;
+  const memeQuestion = (a.op === 'compter' && m.op === 'somme' && m.sommeEffectif) || (a.op === 'compter' && m.op === 'liste' && m.sansCombien);
+  if (!_opsProchesVerif(a.op, m.op) && !moteurDetaille && !memeQuestion) return `opération : Albert ${a.op}, moteur ${m.op}`;
   if (a.op === 'compter_distinct' && m.op === 'compter_distinct' && a.objet && m.objet && _nrmVerif(a.objet).replace(/s$/, '') !== _nrmVerif(m.objet).replace(/s$/, '')) return `objet : Albert ${a.objet}, moteur ${m.objet}`;
   if (['comparaison', 'pdf', 'evolution', 'export'].includes(m.op)) return null;
   if (m.op === 'part' || m.op === 'classement') {
