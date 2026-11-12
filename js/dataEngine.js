@@ -758,6 +758,9 @@ function inheritConversationContext(plan, question) {
       plan.tool = prev.tool || plan.tool;
       if (prev.tool === 'classement' && prev.classement && !plan.classement) plan.classement = prev.classement; // « et à Bordeaux ? »
       if (prev.tool === 'part' && prev.part && !plan.part) plan.part = prev.part;
+      // v27.5.65 — « nombre de places en BTS » puis « et en BUT ? » : la colonne additionnée est reprise
+      // (avant : somme d'aucune colonne, « 0 place » affiché comme exact)
+      if (prev.tool === 'sum' && prev.sumCol && !plan.sumCol) { plan.sumCol = prev.sumCol; plan.sumUnit = prev.sumUnit; }
       if (prev.sessionsDemandees && !plan.sessionsDemandees) plan.sessionsDemandees = prev.sessionsDemandees; // « et pour les PASS ? » après une évolution
       if (prev.targetCol)  plan.targetCol  = prev.targetCol;
       if (prev.targetCol2) plan.targetCol2 = prev.targetCol2;
@@ -4131,6 +4134,7 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     return exec;
   }
   if (plan.tool === 'sum') {
+    if (!plan.sumCol) return unresolvedConceptExecution(plan, [], 'aucune colonne à additionner n\'a été reconnue : précisez (places, candidats, admis…)');
     const sum = rows.reduce((t, r) => { const x = _nombreCellule(r?.[plan.sumCol]); return x === null ? t : t + x; }, 0);
     const renseignees = rows.filter(r => _nombreCellule(r?.[plan.sumCol]) !== null).length;
     const result = { sum, count: rows.length, total: (plan.table.objects || []).length, col: plan.sumCol, unite: plan.sumUnit, renseignees };

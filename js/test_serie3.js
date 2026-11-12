@@ -179,5 +179,15 @@ await describe('v27.5.65 — « quels lycées envoient le plus de candidats en �
   assert(u?.kind === 'top' && u.plan.targetCol === H[20], 'faux positif : « quelles écoles accueillent… » reste l\'établissement d\'accueil');
 });
 
+await describe('v27.5.65 — « nombre de places en BTS » puis « et en BUT ? » : la colonne additionnée est reprise', () => {
+  const places = f => OD.filter(f).reduce((t, o) => t + Number(o.capa), 0);
+  const [a, b, c] = conv(qo, ['nombre de places en BTS', 'et en BUT ?', 'et en Gironde ?']);
+  assert(a?.kind === 'sum' && a.result.sum === places(o => o.fili === 'BTS'), `BTS : ${places(o => o.fili === 'BTS')} places`);
+  assert(b?.kind === 'sum' && b.result.sum === places(o => o.fili === 'BUT'), `« et en BUT ? » : ${places(o => o.fili === 'BUT')} places (obtenu : ${b?.result?.sum} ; avant : 0 place, affiché comme exact)`);
+  assert(c?.kind === 'sum' && c.result.sum === places(o => o.fili === 'BUT' && o.dep === 'Gironde'), '« et en Gironde ? » : BUT de Gironde, en places');
+  const z = run(co, 'runDataEnginePlan')({ tool: 'sum', table: co.__t, filters: [], question: 'somme' }, []);
+  assert(z?.kind === 'unresolved', 'somme sans colonne : arrêt (« non reconnu »), jamais 0 affiché comme exact');
+});
+
 console.log(`\nRésultat : ${passed} ✓  ${failed} ✗  (${passed + failed} tests)`);
 if (failed) process.exit(1);
