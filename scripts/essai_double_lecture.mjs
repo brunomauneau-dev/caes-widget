@@ -21,6 +21,45 @@ import * as D from '../js/fixtures/donnees_simulees.mjs';
 const ICI = path.dirname(fileURLToPath(import.meta.url));
 const JS_DIR = path.join(ICI, '..', 'js');
 const MODULES = ['config.js', 'knowledge.js', 'documents.js', 'planner.js', 'dataEngine.js', 'sessions.js'];
+// Série 3 : questions nouvelles, tournures variées (pour trouver des contresens du moteur actuel)
+export const LECTURES_SERIE3 = [
+  { id: 's1', src: 'od', q: 'Combien y a-t-il de BUT informatique en Occitanie ?', op: 'compter', filtres: { formation: [['but'], ['informatique']], region: [['occitanie']] } },
+  { id: 's2', src: 'od', q: 'nombre de formations publiques non sélectives à Bordeaux', op: 'compter', filtres: { statut: [['public']], selectivite: [['non selective']], commune: [['bordeaux']] } }, // « à Bordeaux » : la commune
+  { id: 's3', src: 'od', q: 'je cherche les IFSI de Nouvelle-Aquitaine', op: ['liste', 'compter'], filtres: { formation: [['ifsi', 'infirmier']], region: [['nouvelle aquitaine']] } },
+  { id: 's4', src: 'od', q: 'quelle est la capacité totale des CPGE en Gironde ?', op: 'somme', filtres: { formation: [['cpge']], departement: [['gironde']] } },
+  { id: 's5', src: 'od', q: 'taux d\'accès médian des licences', op: 'statistique', filtres: { formation: [['licence']] } },
+  { id: 's6', src: 'od', q: 'quels sont les BTS les moins sélectifs en Gironde', op: 'classement', filtres: { formation: [['bts']], departement: [['gironde']] } },
+  { id: 's7', src: 'od', q: 'combien de PASS dans les académies de Bordeaux, Toulouse et Poitiers', op: 'compter', filtres: { formation: [['pass', 'acces specifique sante']], academie: [['bordeaux'], ['toulouse'], ['poitiers']] } },
+  { id: 's8', src: 'od', q: 'répartition des formations de Gironde par filière', op: 'repartition', groupe: 'formation', filtres: { departement: [['gironde']] } },
+  { id: 's9', src: 'od', q: 'combien de formations proposent plus de 200 places', op: 'compter', filtres: { capacite: [['200']] } },
+  { id: 's10', src: 'od', q: 'part des formations sélectives parmi les BTS', op: 'part', filtres: { formation: [['bts']] } },
+  { id: 's11', src: 'od', q: 'en moyenne combien de places a un BUT', op: 'statistique', filtres: { formation: [['but']] } },
+  { id: 's12', src: 'od', q: 'le BTS avec le plus de candidats', op: 'classement', filtres: { formation: [['bts']] } },
+  { id: 's13', src: 'od', conv: ['combien de BTS à Bordeaux'], q: 'et à Pau ?', op: 'compter', filtres: { formation: [['bts']], commune: [['pau']] } },
+  { id: 's14', src: 'od', conv: ['combien de CPGE en Gironde'], q: 'lesquelles sont publiques ?', op: 'liste', filtres: { formation: [['cpge']], departement: [['gironde']], statut: [['public']] } },
+  { id: 's15', src: 'od', conv: ['nombre de places en BTS'], q: 'et en BUT ?', op: 'somme', filtres: { formation: [['but']] } },
+  { id: 's16', src: 'od', q: 'combien de formations en Gironde sauf les BTS', op: 'compter', filtres: { departement: [['gironde']] }, exclus: { formation: [['bts']] } },
+  { id: 's17', src: 'od', q: 'combien de licences hors Bordeaux', op: 'compter', filtres: { formation: [['licence']] }, exclus: { academie: [['bordeaux']] } },
+  { id: 's18', src: 'od', q: 'liste des écoles de commerce en Gironde', op: 'liste', filtres: { formation: [['commerce']], departement: [['gironde']] } },
+  { id: 's19', src: 'od', q: 'quel est le nombre total de candidats en BTS ?', op: 'somme', filtres: { formation: [['bts']] } },
+  { id: 's20', src: 'od', q: "combien d'admis en CPGE dans l'académie de Bordeaux", op: 'somme', filtres: { formation: [['cpge']], academie: [['bordeaux']] } },
+  { id: 's21', src: 'fichier', q: 'combien de filles', op: 'arret' },
+  { id: 's22', src: 'fichier', q: 'quel pourcentage des candidats boursiers ont accepté une proposition', op: 'part', filtres: { boursier: [['boursier']] } },
+  { id: 's23', src: 'fichier', q: 'combien de candidats de Gironde admis hors académie', op: 'compter', filtres: { departement: [['gironde']], admission: [['oui']] }, exclus: { 'academie:acc': [['bordeaux']] } },
+  { id: 's24', src: 'fichier', q: 'répartition des candidats admis par grand groupe de formation', op: 'repartition', groupe: 'formation', filtres: { admission: [['oui']] } },
+  { id: 's25', src: 'fichier', q: 'combien de bacheliers technologiques ont eu une proposition', op: 'compter', filtres: { serie: [['technologique']], proposition: [['oui']] } },
+  { id: 's26', src: 'fichier', q: 'nombre de candidats par lycée en Dordogne', op: 'repartition', groupe: 'etablissement:ori', filtres: { departement: [['dordogne']] } },
+  { id: 's27', src: 'fichier', q: 'combien de candidats en école d\'ingénieurs venant du lycée Montaigne', op: 'compter', filtres: { formation: [['ingenieur']], 'etablissement:ori': [['montaigne']] } },
+  { id: 's28', src: 'fichier', q: 'combien de candidats ont fait plus de 15 vœux', op: 'compter', filtres: { voeux: [['15']] } },
+  { id: 's29', src: 'fichier', q: 'combien de candidats admis en PASS ayant suivi SVT', op: 'compter', filtres: { formation: [['pass', 'acces specifique sante']], specialite_lycee: [['vie', 'svt']], admission: [['oui']] } },
+  { id: 's30', src: 'fichier', conv: ['combien de candidats de Pau'], q: 'et de Bayonne ?', op: 'compter', filtres: { 'commune:ori': [['bayonne']] } },
+  { id: 's31', src: 'fichier', conv: ['combien de candidats admis en CPGE'], q: 'quels lycées ?', op: 'liste', objet: 'etablissements', filtres: { formation: [['cpge']], admission: [['oui']] } },
+  { id: 's32', src: 'fichier', q: 'taux d\'admission des boursiers et des non boursiers', op: 'part', groupe: 'boursier' },
+  { id: 's33', src: 'fichier', q: 'combien de candidats du public admis à Paris', op: 'compter', filtres: { statut: [['public']], 'commune:acc': [['paris']], admission: [['oui']] } },
+  { id: 's34', src: 'fichier', q: 'combien d\'apprentis sans proposition', op: 'compter', filtres: { apprenti: [['oui']], proposition: [['non']] } },
+  { id: 's35', src: 'fichier', q: 'comparer les candidats de Gironde et des Landes', op: 'comparaison' },
+];
+
 // Logique partagée avec le widget (js/verification.js), chargée dans un contexte isolé : ce qui est mesuré ici
 // est exactement ce qui tourne dans le widget
 const V = (() => {
@@ -280,7 +319,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   const tableOD = await chargerOpenData(globalThis.fetch);
   const ancienDir = process.env.ANCIEN_JS && fs.existsSync(process.env.ANCIEN_JS) ? process.env.ANCIEN_JS : null;
   const prec = await chargerSessionPrecedente(globalThis.fetch, Number(tableOD.session) - 1);
-  const lectures = process.env.JEU === 'validation' ? LECTURES_VALIDATION : process.env.JEU === 'tout' ? [...LECTURES, ...LECTURES_VALIDATION] : LECTURES;
+  const lectures = process.env.JEU === 'validation' ? LECTURES_VALIDATION : process.env.JEU === 'serie3' ? LECTURES_SERIE3 : process.env.JEU === 'tout' ? [...LECTURES, ...LECTURES_VALIDATION, ...LECTURES_SERIE3] : LECTURES;
   const res = await essaiDoubleLecture({ tableOD, autresSessions: [prec], ancienDir, albert: process.env.SANS_ALBERT !== '1', lectures });
   const b = bilan(res);
   const texte = rapportDoubleLecture(res, b);

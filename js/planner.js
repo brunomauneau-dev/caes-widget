@@ -462,7 +462,8 @@
     const windowBefore = idx >= 0 ? q.slice(Math.max(0, idx - 35), idx) : q;
     const windowAround = idx >= 0 ? q.slice(Math.max(0, idx - 35), Math.min(q.length, idx + a.length + 20)) : q;
     // v27.17 — mots entiers : « PASS » contient « pas » (« PASS dans l'académie de Bordeaux » devenait « ≠ Bordeaux »)
-    if (/(^|\s)(hors|sauf|exclu|excluant|exclure|different|differente|diff[eé]rent|pas|non)\s*$/.test(windowBefore)) return 'neq';
+    // v27.5.64 — « sauf les BTS », « à l'exception des CPGE », « en dehors des licences » : article entre les deux
+    if (/(^|\s)(hors|sauf|exclu|excluant|exclure|different|differente|diff[eé]rent|pas|non|excepte|exceptes|exception (?:de|des|du|d)|en dehors (?:de|des|du|d))(\s+(?:les|des|de|du|la|le|l|d))?\s*$/.test(windowBefore)) return 'neq';
     // v27.25 — « non / pas » qui porte sur un autre mot (« formations non sélectives dans l'académie de Bordeaux »,
     // « qui ne sont pas sélectives dans l'académie ») ne nie pas l'académie : seulement « non / pas » suivi d'un mot de lieu
     const _negAcad = windowAround.match(/(?:^|\s)(hors|sauf|exclu|excluant|exclure|different|differente|pas|non)(?=\s|$)(?:\s+(\S+))?/);
@@ -696,7 +697,9 @@
         else if (/licence|\bl1\b/.test(q)) { wanted = ['licence','l1']; label = 'licence/L1'; }
         else if (/cpge|prepa|pr[eé]pa/.test(q)) { wanted = ['cpge','prepa','classe preparatoire']; label = 'CPGE/prépa'; }
         const v = findValue(e, wanted);
-        if (v) upsertCandidateFilter(filters, { entry: e, item: v, alias: label, op: 'eq', score: 248 }, reasons);
+        // v27.5.64 — « sauf les BTS », « hors BTS », « à l'exception des CPGE » : exclusion (avant : « sauf les BTS » = les BTS)
+        const _neg = new RegExp(`\\b(?:hors|sauf|excepte|exceptes|exception (?:de|des|du|d)|en dehors (?:de|des|du|d)|pas de|non)\\s+(?:les |des |de |du |la |le |l |d )?(?:${wanted.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})s?\\b`).test(q);
+        if (v) upsertCandidateFilter(filters, { entry: e, item: v, alias: label, op: _neg ? 'neq' : 'eq', score: 248 }, reasons);
       }
     }
 
