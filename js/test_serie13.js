@@ -73,6 +73,11 @@ const grouper = (rows, cle, val = () => 1) => { const m = {}; rows.forEach(r => 
 
 const ROWS = D.exportAcademique(3000, 21);
 const L = ROWS.slice(1);
+// v27.5.82 — définition SAIO : un « candidat » a confirmé au moins un vœu (colonne 16 non vide et ≥ 1). Les questions qui
+// disent « candidats », et les taux de proposition / d'admission, portent sur LC ; les autres sur tout le fichier (L).
+const CAND = r => String(r[16] ?? '').trim() !== '' && Number(r[16]) >= 1;
+const LC = L.filter(CAND);
+const nfc = f => LC.filter(f).length;
 const cf = makeCtx();
 cf.XLSX.read = () => ({ SheetNames: ['BDD'], Sheets: { BDD: 'ws' } });
 cf.XLSX.utils.sheet_to_json = () => ROWS.map(r => r.slice());
@@ -88,10 +93,10 @@ const v = e => !e ? 'pas de calcul' : e.kind === 'unresolved' ? 'arrêt' : e.kin
 
 await describe('Spécialités du lycée : « ou » = l\'une ou l\'autre', () => {
   assert(nf(r => SES(r) && HG(r)) > 0 && nf(r => SES(r) || HG(r)) > nf(r => SES(r) && HG(r)), 'jeu de données : des candidats ont l\'une, l\'autre, ou les deux');
-  assert(v(qf('combien de candidats ont suivi SES ou HGGSP')) === nf(r => SES(r) || HG(r)), `SES ou HGGSP : ${nf(r => SES(r) || HG(r))} (obtenu : ${v(qf('combien de candidats ont suivi SES ou HGGSP'))} ; avant : ${nf(r => SES(r) && HG(r))}, les deux)`);
-  assert(v(qf('combien de candidats ont suivi SES et HGGSP')) === nf(r => SES(r) && HG(r)), 'faux positif : « SES et HGGSP » = les deux');
+  assert(v(qf('combien de candidats ont suivi SES ou HGGSP')) === nfc(r => SES(r) || HG(r)), `SES ou HGGSP : ${nfc(r => SES(r) || HG(r))} (obtenu : ${v(qf('combien de candidats ont suivi SES ou HGGSP'))} ; avant : ${nfc(r => SES(r) && HG(r))}, les deux)`);
+  assert(v(qf('combien de candidats ont suivi SES et HGGSP')) === nfc(r => SES(r) && HG(r)), 'faux positif : « SES et HGGSP » = les deux');
   const MP = r => spe(r).includes('Mathématiques') || spe(r).some(x => /^Physique-Chimie/.test(x));
-  assert(v(qf('combien de candidats ayant suivi maths ou physique admis en CPGE')) === nf(r => r[ADM] === 'Oui' && CPGE(r) && MP(r)), '« maths ou physique » admis en CPGE');
+  assert(v(qf('combien de candidats ayant suivi maths ou physique admis en CPGE')) === nfc(r => r[ADM] === 'Oui' && CPGE(r) && MP(r)), '« maths ou physique » admis en CPGE');
 });
 
 await describe('Comparer deux formations (fichier de candidats)', () => {

@@ -63,6 +63,11 @@ const egal = (a, b) => JSON.stringify(a) === JSON.stringify(b) || (a && b && typ
 const ROWS = D.exportAcademique(3000, 21);
 const H = D.EXPORT_ACADEMIQUE_ENTETES;
 const L = ROWS.slice(1);
+// v27.5.82 — définition SAIO : un « candidat » a confirmé au moins un vœu (colonne 16 non vide et ≥ 1). Les questions qui
+// disent « candidats », et les taux de proposition / d'admission, portent sur LC ; les autres sur tout le fichier (L).
+const CAND = r => String(r[16] ?? '').trim() !== '' && Number(r[16]) >= 1;
+const LC = L.filter(CAND);
+const nfc = f => LC.filter(f).length;
 // identifiant de colonne Grist : sans accents (« œ » → « oe »), caractères non alphanumériques → « _ »
 const colId = h => h.replace(/œ/g, 'oe').replace(/Œ/g, 'OE').replace(/æ/g, 'ae').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+/, '') || 'A';
 const IDS = H.map(colId);
@@ -124,7 +129,7 @@ const af = asker(cf);
 const reference = Object.fromEntries(QUESTIONS.map(q => [q, valeur(af(q))]));
 
 await describe('Contrôle : réponses du fichier Excel (déjà vérifiées par les séries précédentes)', () => {
-  assert(reference['combien de candidats de Pau'] === L.filter(r => r[2] === 'Pau').length, 'candidats de Pau : valeur recalculée sur les lignes');
+  assert(reference['combien de candidats de Pau'] === LC.filter(r => r[2] === 'Pau').length, 'candidats de Pau : valeur recalculée sur les lignes');
   assert(reference['combien de boursiers admis en CPGE'] === L.filter(r => r[9] === 'Boursier des lycées' && r[7] === 'Oui' && r[17] === 'CPGE - CPES').length, 'boursiers admis en CPGE : valeur recalculée sur les lignes');
   assert(Object.values(reference).every(v => v !== 'arrêt' && v !== 'pas de calcul'), 'toutes les questions sont calculées sur le fichier');
 });

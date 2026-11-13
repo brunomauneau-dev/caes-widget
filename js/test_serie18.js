@@ -71,6 +71,11 @@ const grouper = (rows, cle, val = () => 1) => { const m = {}; rows.forEach(r => 
 
 const ROWS = D.exportAcademique(3000, 21);
 const L = ROWS.slice(1);
+// v27.5.82 — définition SAIO : un « candidat » a confirmé au moins un vœu (colonne 16 non vide et ≥ 1). Les questions qui
+// disent « candidats », et les taux de proposition / d'admission, portent sur LC ; les autres sur tout le fichier (L).
+const CAND = r => String(r[16] ?? '').trim() !== '' && Number(r[16]) >= 1;
+const LC = L.filter(CAND);
+const nfc = f => LC.filter(f).length;
 const H = D.EXPORT_ACADEMIQUE_ENTETES;
 const cf = makeCtx();
 cf.XLSX.read = () => ({ SheetNames: ['BDD'], Sheets: { BDD: 'ws' } });
@@ -91,7 +96,7 @@ await describe('Enseignements de spécialité : comptés un par un', () => {
     assert(/compté dans chacune/.test(e.html), '   … et le texte dit qu\'un candidat compte dans chacune de ses spécialités');
   }
   const t = qf('combien de candidats par spécialité en terminale');
-  assert(t?.kind === 'group_by' && inclus(lignes(t), eclate(L)), '« par spécialité en terminale » : enseignements suivis (avant : arrêt)');
+  assert(t?.kind === 'group_by' && inclus(lignes(t), eclate(LC)), '« par spécialité en terminale » : enseignements suivis (avant : arrêt)');
 });
 
 await describe('Formation d\'accueil, bac pro, ou demande de précision', () => {

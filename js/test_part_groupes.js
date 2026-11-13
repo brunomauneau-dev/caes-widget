@@ -52,8 +52,12 @@ const proche = (a, b) => a !== null && b !== null && Math.abs(a - b) < 1e-9;
 const ROWS = D.exportAcademique(4000, 21);
 const H = D.EXPORT_ACADEMIQUE_ENTETES;
 const [DEP, , , , ETAB, , PROP, ACC, , BOURS, , , TYPE, SERIE] = H;
-const L = ROWS.slice(1).map(r => Object.fromEntries(H.map((h, i) => [h, r[i]])));
+// v27.5.82 — définition SAIO : un « candidat » a confirmé au moins un vœu ; les valeurs attendues portent sur ces lignes
+// (les élèves sans vœu, case vide, ne sont plus comptés comme candidats). L_TOUT = toutes les lignes du fichier.
+const L_TOUT = ROWS.slice(1).map(r => Object.fromEntries(H.map((h, i) => [h, r[i]])));
+const L = L_TOUT.filter(r => String(r['Nb total de vœux confirmés en phase principale'] ?? '').trim() !== '' && Number(r['Nb total de vœux confirmés en phase principale']) >= 1);
 const nb = pred => L.filter(pred).length;
+const nbt = pred => L_TOUT.filter(pred).length; // questions sans « candidats » : tout le fichier (élèves sans vœu compris)
 const B = r => r[BOURS] === 'Boursier des lycées';
 const ctx = makeCtx();
 ctx.XLSX.read = () => ({ SheetNames: ['BDD'], Sheets: { BDD: 'ws' } });
@@ -79,7 +83,7 @@ await describe('Taux par groupe, dans chaque groupe', () => {
   assert(t?.kind === 'part_groupes' && gi.num === nb(r => B(r) && r[DEP] === 'Gironde' && r[PROP] === 'Oui') && gi.den === nb(r => B(r) && r[DEP] === 'Gironde'), 'taux de proposition des boursiers par département : boursiers du département seulement');
   const s = ask(ctx, 'part des boursiers par série');
   const gs = groupe(s, 'Professionnelle');
-  assert(s?.kind === 'part_groupes' && s.result.groupe === SERIE && gs.num === nb(r => B(r) && r[SERIE] === 'Professionnelle') && gs.den === nb(r => r[SERIE] === 'Professionnelle'), 'part des boursiers par série');
+  assert(s?.kind === 'part_groupes' && s.result.groupe === SERIE && gs.num === nbt(r => B(r) && r[SERIE] === 'Professionnelle') && gs.den === nbt(r => r[SERIE] === 'Professionnelle'), 'part des boursiers par série');
   const l = ask(ctx, "taux d'admission par lycée");
   const gl = groupe(l, 'Lycée Montaigne');
   assert(l?.kind === 'part_groupes' && l.result.groupe === ETAB && gl.num === nb(r => r[ETAB] === 'Lycée Montaigne' && r[ACC] === 'Oui'), "taux d'admission par lycée (de scolarité)");

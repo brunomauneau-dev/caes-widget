@@ -68,13 +68,17 @@ function chaine(ask, etapes, titre) {
 const grouper = (rows, cle, val = () => 1) => { const m = {}; rows.forEach(r => { const k = cle(r); if (k === '' || k == null) return; m[k] = (m[k] || 0) + val(r); }); return m; };
 
 const ROWS = D.exportAcademique(3000, 21);
-const L = ROWS.slice(1);
+// v27.5.82 — définition SAIO : un « candidat » a confirmé au moins un vœu ; les valeurs attendues portent sur ces lignes
+// (les élèves sans vœu, case vide, ne sont plus comptés comme candidats). L_TOUT = toutes les lignes du fichier.
+const L_TOUT = ROWS.slice(1);
+const L = L_TOUT.filter(r => String(r[16] ?? '').trim() !== '' && Number(r[16]) >= 1);
 const cf = makeCtx();
 cf.XLSX.read = () => ({ SheetNames: ['BDD'], Sheets: { BDD: 'ws' } });
 cf.XLSX.utils.sheet_to_json = () => ROWS.map(r => r.slice());
 await run(cf, 'importSpreadsheetFile')({ name: 'BDD.xlsx', size: 1000, arrayBuffer: async () => new ArrayBuffer(8) });
 const qf = asker(cf);
 const nf = f => L.filter(f).length;
+const nft = f => L_TOUT.filter(f).length; // questions sans « candidats » : tout le fichier (élèves sans vœu compris)
 const DEP = 0, ORI = 2, ADM = 7, BOURS = 9, ACC = 21;
 const B = r => r[BOURS] === 'Boursier des lycées', A = r => r[ADM] === 'Oui';
 const v = e => !e ? 'pas de calcul' : e.kind === 'unresolved' ? 'arrêt' : e.kind === 'count' ? e.result.count : e.kind;
@@ -94,7 +98,7 @@ await describe('« combien de X parmi eux ? » en relance', () => {
   assert(v(e) === nf(r => r[DEP] === 'Landes' && B(r)), `boursiers parmi les candidats des Landes : ${nf(r => r[DEP] === 'Landes' && B(r))} (avant : ${nf(B)}, tous les boursiers)`);
   qf('combien de candidats de Pau');
   assert(v(qf('combien d\'admis d\'entre eux ?', true)) === nf(r => r[ORI] === 'Pau' && A(r)), '« combien d\'admis d\'entre eux ? »');
-  assert(v(qf('combien de boursiers')) === nf(B), 'faux positif : « combien de boursiers » seul (nouvelle question) = tous les boursiers');
+  assert(v(qf('combien de boursiers')) === nft(B), 'faux positif : « combien de boursiers » seul (nouvelle question) = tous les boursiers');
 });
 
 console.log(`\nRésultat : ${passed} ✓  ${failed} ✗  (${passed + failed} tests)`);
