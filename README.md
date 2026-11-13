@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-66 fichiers, 2 761 tests. Depuis la racine du repo :
+68 fichiers, 2 783 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -152,6 +152,10 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 `js/test_serie15.js` vérifie les **écarts, rangs et « environ »** : « combien de BTS de plus en Gironde que dans les Landes », « différence / écart entre… », « y a-t-il plus de … ou … » (comparaison avec l'écart affiché, groupes dans l'ordre de la question), « la deuxième académie pour le nombre de BTS » (classement), « environ combien… » ; une valeur comparée n'est jamais un filtre commun aux deux groupes.
 
 `js/test_serie16.js` vérifie les **noms de formations de la langue courante** : psycho, compta, éco, prépa éco / scientifique, ingé, école d'infirmiers (= IFSI), « la fac » (= université) ; ce qui n'existe pas dans les données (kiné, médecine, université absente) s'arrête, jamais 0.
+
+`js/test_serie17.js` vérifie les **classements selon un taux** : « quels lycées ont le plus fort taux de boursiers », « quel département… », « le taux de proposition le plus bas », « classement des lycées par taux de… », « les 5 lycées avec le meilleur taux… » (taux calculé dans chaque groupe, puis classé ; très petits groupes écartés et comptés), open data « quelle académie a le plus fort pourcentage de boursiers » (effectifs) ; « candidats par place » répondu sans Albert.
+
+`js/test_serie18.js` vérifie **« par spécialité »** dans un fichier de candidats : le contexte choisit la colonne (enseignement / lycée / terminale → enseignements suivis, chaque spécialité comptée une fois par candidat ; formation / accueil / mention → la formation d'accueil ; bac pro → la spécialité du bac) ; sans indice, le widget demande de préciser.
 
 `js/test_part_groupes.js` vérifie les **taux par groupe** : « pourcentage de candidats sans proposition par département », « part des boursiers par académie », « taux de remplissage des BTS par académie » donnent un taux calculé **dans** chaque groupe (avant : la répartition du total entre groupes, lue à tort comme un taux), avec la ligne « Ensemble », l'export, le graphique et les relances (« taux de proposition des boursiers » puis « et par département ? »).
 
