@@ -176,7 +176,8 @@ const RELANCE_SESSION = /^(?:et\s+)?(?:pour\s+|en\s+|a\s+|sur\s+)?(?:l an dernie
 // v27.5.66 — « combien de places ? », « combien d'admis ? » juste après « combien de BTS en Gironde » : la mesure
 // sur les MÊMES formations (avant : toute la France, 259 530 places)
 const RELANCE_MESURE_SEULE = /^(?:et\s+)?(?:(?:le|la)\s+)?(?:combien|nombre|total|somme)\s+(?:de\s+|d\s+|des\s+)?(?:places?|admis|admises|candidats?|candidates|candidatures?|voeux)(?:\s+(?:au total|en tout|cela fait|ca fait))?\s*$/;
-const RELANCE_SOUS_ENSEMBLE = /^(?:et\s+)?(?:parmi\s+(?:eux|elles|ceux ci|celles ci|ces \w+)|dont|combien\s+(?:d\s+entre\s+(?:eux|elles)|parmi\s+(?:eux|elles)|ont|sont|avaient|etaient|n\s+ont)|ceux qui|celles qui|et combien)\b/;
+// v27.5.80 — aussi « combien de boursiers parmi eux ? », « combien d'admis d'entre eux ? » (avant : tout le fichier)
+const RELANCE_SOUS_ENSEMBLE = /^(?:et\s+)?(?:combien\s+(?:de|d)\s+[a-z]+(?:\s+[a-z]+){0,3}\s+(?:parmi\s+(?:eux|elles|ceux ci|celles ci|ces \w+)|d\s+entre\s+(?:eux|elles))|parmi\s+(?:eux|elles|ceux ci|celles ci|ces \w+)|dont|combien\s+(?:d\s+entre\s+(?:eux|elles)|parmi\s+(?:eux|elles)|ont|sont|avaient|etaient|n\s+ont)|ceux qui|celles qui|et combien)\b/;
 function isFilterOnlyFollowUp(question) {
   const q = normalizeText(question || '').trim();
   if (RELANCE_LISTE.test(q)) return true;
@@ -577,6 +578,19 @@ function strictFiltersFromQuestion(table, question) {
         const nom = base.charAt(0).toUpperCase() + base.slice(1);
         out.push({ col, op: 'in', values: _arr.get(base), value: nom, label: `${nom} (${_arr.get(base).length} arrondissements)`, source: 'commune_a' });
         break;
+      }
+    }
+    // v27.5.80 — deux lieux pour deux rôles (« scolarisés à Bordeaux admis à Bordeaux », « de Pau admis à Toulouse ») :
+    // le lieu qui suit le verbe d'accueil (admis, acceptés…) = la commune d'accueil (avant : seul le premier était lu)
+    {
+      const _r = c => (typeof plannerColumnRole === 'function') ? plannerColumnRole(c) : {};
+      const comAcc2 = comCols.find(h => _r(h).accueil);
+      const mv = q.match(_VERBE_ACCUEIL_RE);
+      if (comAcc2 && mv && !out.some(f => f.col === comAcc2)) {
+        const apres = q.slice(mv.index + mv[0].length);
+        const v = _distinctValues(table, comAcc2).filter(x => normalizeText(x).length >= 3).sort((a, b) => b.length - a.length)
+          .find(x => new RegExp(`^\\s*(?:(?:en|dans|a|au|aux|de|des|du)\\s+)?(?:\\S+\\s+){0,4}?a ${normalizeText(x)}( |$)`).test(apres));
+        if (v) out.push({ col: comAcc2, value: v, op: 'eq', label: null, source: 'commune_a' });
       }
     }
     // v27.5.53 — fichier de candidats : « candidats de Pau », « des lycées de Bordeaux », « scolarisés à Bordeaux » :
@@ -3800,6 +3814,11 @@ function resolveRoleDuplicates(plan) {
     parGenre.forEach(g => {
     const cols = new Set(g.map(f => f.col));
     if (cols.size < 2) return;
+    // v27.5.80 — la valeur est citée DEUX fois, une par rôle (« scolarisés à Bordeaux admis à Bordeaux ») : les deux
+    // filtres sont voulus (avant : un seul gardé, 4 383 au lieu de 1 167)
+    const vn = normalizeText(g[0].value);
+    const occ = (` ${q} `.match(new RegExp(`(?<![a-z0-9])${vn.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9])`, 'g')) || []).length;
+    if (occ >= 2 && g.some(f => role(f.col).origine) && g.some(f => role(f.col).accueil)) return;
     const voulu = g.find(f => veutOrigine ? role(f.col).origine : role(f.col).accueil) || g[0];
     g.forEach(f => { if (f !== voulu) retirer.add(f); });
     });
