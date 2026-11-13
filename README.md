@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-69 fichiers, 2 791 tests. Depuis la racine du repo :
+70 fichiers, 2 804 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -158,6 +158,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 `js/test_serie18.js` vérifie **« par spécialité »** dans un fichier de candidats : le contexte choisit la colonne (enseignement / lycée / terminale → enseignements suivis, chaque spécialité comptée une fois par candidat ; formation / accueil / mention → la formation d'accueil ; bac pro → la spécialité du bac) ; sans indice, le widget demande de préciser.
 
 `js/test_serie19.js` reproduit sur données fictives les deux erreurs trouvées par le **banc de contrôle de 100 questions sur le vrai fichier de candidats** (gardé hors du dépôt, données réelles) : deux lieux pour deux rôles (« scolarisés à Bordeaux admis à Bordeaux »), « combien de boursiers parmi eux ? » en relance.
+
+`js/test_saio_recoupement.js` reproduit sur données fictives les erreurs trouvées en **recoupant le widget avec le bilan Parcoursup 2025 du SAIO** (académie de Bordeaux) : « au moins un vœu » (les candidats, pas tout le vivier des terminales), « par type de classe » (pas un classement). Après correction, le widget retrouve sur le vrai fichier les chiffres du SAIO : 29 543 candidats ayant confirmé un vœu, 18 222 bacheliers généraux, 409 641 vœux, 96,8 % de proposition pour les généraux.
 
 `js/test_part_groupes.js` vérifie les **taux par groupe** : « pourcentage de candidats sans proposition par département », « part des boursiers par académie », « taux de remplissage des BTS par académie » donnent un taux calculé **dans** chaque groupe (avant : la répartition du total entre groupes, lue à tort comme un taux), avec la ligne « Ensemble », l'export, le graphique et les relances (« taux de proposition des boursiers » puis « et par département ? »).
 
