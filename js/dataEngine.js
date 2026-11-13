@@ -2708,6 +2708,8 @@ const REFORMULATIONS = [
   [/^\s*(?:quelles?\s+(?:sont\s+les\s+)?formations?\s+(?:propose|offre|proposent|offrent|dispense|sont\s+propos[ée]es\s+(?:par|à|au|a)|y\s+a[- ]t[- ]il\s+(?:à|au|a|dans))|que\s+propose|qu['’]\s*est[- ]ce\s+que\s+propose)\s+(?:le\s+|la\s+|l['’]\s*|les\s+)?(?=(?:lyc[ée]e|iut|universit[ée]|[ée]cole|[ée]tablissement|institut|campus)\b)/i, 'liste des formations du '],
   // STS (sections de techniciens supérieurs) = BTS ; « licence pro » = licence professionnelle (pas toutes les licences)
   [/\bSTS\b/gi, 'BTS'],
+  // v27.5.77 — « la fac » = l'université (établissement)
+  [/\b(?:la |les |en )?(?:facs?|facult[ée]s?)\b(?!\s+de\s+(?:m[ée]decine|pharmacie))/gi, " l'université"],
   [/\blicences?\s+pros?\b(?!fess)/gi, 'licence professionnelle'],
   // « y a-t-il des BTS au lycée X ? », « existe-t-il des … » : un comptage (0 = non)
   [/\b(?:est[- ]ce\s+qu['’]\s*)?(?:il\s+)?y\s+a[- ]?t[- ]?il\s+(?:des|un|une|du|de\s+la|de\s+l['’]|de)\s+/gi, 'combien de '],
@@ -2832,7 +2834,8 @@ function etablissementDeLaQuestion(table, question) {
         if (v2.length) return { col: autre, nom: singulier, type: true, phrase: singulier, valeurs: v2, noms: v2.map(k => n2.get(k)) };
       }
     }
-    return { col, nom: singulier, type: true, phrase: singulier, valeurs, noms: valeurs.map(k => noms.get(k)) };
+    // v27.5.77 — aucun établissement de ce type (« à la fac » sans université dans les données) : arrêt, pas 0
+    return { col, nom: singulier, type: true, phrase: singulier, valeurs, noms: valeurs.map(k => noms.get(k)), introuvable: !valeurs.length };
   }
   const phrase = [generique ? '' : singulier, ...suite].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
   let valeurs = [...noms.keys()].filter(k => ` ${_compacte(k)} `.includes(` ${phrase} `));
@@ -2991,6 +2994,15 @@ const SIGLES_FORMATIONS = [
   [/\b(?:formations?\s+en\s+)?soins\s+infirmiers\b/gi, 'IFSI', null],
   [/\bifsi\b/gi, 'D.E infirmier', 'ifsi'],
   [/\bl1\b/gi, 'licence', null], // première année de licence : sur Parcoursup, toutes les licences sont des L1
+  // v27.5.77 — abréviations de la langue courante (traduites seulement si les mots existent dans les intitulés ;
+  // sinon le widget s'arrête et le dit)
+  [/\bpsycho\b/gi, 'psychologie', null], [/\bsocio\b/gi, 'sociologie', null], [/\bphilo\b/gi, 'philosophie', null],
+  [/\bcompta\b/gi, 'comptabilité', null], [/\bhisto\b/gi, 'histoire', null], [/\bhistoire[- ]g[ée]o\b/gi, 'histoire géographie', null],
+  [/(?<![a-zà-ÿ])(?:pr[ée]pas?|cpge)\s+[ée]co(?:nomiques?)?(?![a-zà-ÿ])/gi, 'classe préparatoire économique', null],
+  [/(?<![a-zà-ÿ])(?:pr[ée]pas?|cpge)\s+(?:scientifiques?|scien?t?i?f?)(?![a-zà-ÿ])/gi, 'classe préparatoire scientifique', null],
+  [/(?<![a-zà-ÿ])[ée]co(?:\s*-?\s*gestion)?(?![a-zà-ÿ])/gi, 'économie', null],
+  [/(?<![a-zà-ÿ])ing[ée]s?(?![a-zà-ÿ])/gi, 'ingénieurs', null], [/(?<![a-zà-ÿ])kin[ée]s?(?![a-zà-ÿ])/gi, 'kinésithérapie', null],
+  [/(?<![a-zà-ÿ])(?:[ée]coles?|instituts?|formations?)\s+(?:d['’]\s*|de\s+|en\s+)?(?:infirmi[eè]re?s?|soins infirmiers)(?![a-zà-ÿ])/gi, 'IFSI', null],
 ];
 function appliquerSiglesFormations(question, table) {
   let q = String(question ?? '');
@@ -3726,7 +3738,7 @@ function resolveRoleDuplicates(plan) {
 }
 
 function finalSanitizeAnalysisPlan(plan) {
-  return _exclusionsMultiples(_filiereExacte(_retirerValeursEmboitees(resolveRoleDuplicates(_finalSanitizeAnalysisPlanBase(plan)))));
+  return (_exclusionsMultiples(_filiereExacte(_retirerValeursEmboitees(resolveRoleDuplicates(_finalSanitizeAnalysisPlanBase(plan))))));
 }
 // v27.5.72 — « hors BTS et hors BUT », « sauf les BTS et les BUT », « sauf BTS, BUT et CPGE » : chaque valeur citée après
 // l'exclusion est exclue (avant : BTS exclu mais BUT EXIGÉ, « intitulé contenant BUT »)
