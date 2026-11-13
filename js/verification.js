@@ -5,11 +5,16 @@
    s'ajoute sous la réponse et l'alerte est notée dans « À revoir ». Sinon : rien ne s'affiche.
    Mesuré avant activation (scripts/essai_double_lecture.mjs, essai réel, Mistral Small 24B) : 0 fausse alerte sur
    92 lectures justes puis sur 37 lectures de questions nouvelles ; 71 à 73 % des contresens de l'ancien moteur
-   signalés ; délai médian 1,5 à 2 s. Albert indisponible ou lent : rien ne s'affiche, le widget marche comme avant.
+   signalés ; délai médian 1,5 à 2 s.
+   v27.6.4 — Mistral Small refuse toutes les demandes (HTTP 429, limite du compte) : la relecture ne tournait plus.
+   Elle passe par le modèle principal d'Albert (openweight-large). Essai réel (jeu « validation », 30 questions) :
+   78 % des contresens de l'ancien moteur signalés, 0 fausse alerte sur 41 lectures justes, délai médian 11 s (max 21 s)
+   → délai maximal porté à 25 s. La relecture se voit désormais sous chaque réponse calculée : « en cours », « même
+   lecture », « désaccord » ou « indisponible » (avant : rien en cas d'accord ou d'échec, on ne savait pas si elle avait eu lieu).
    La même logique sert à l'essai (chargée dans un contexte isolé) : ce qui a été mesuré est ce qui tourne ici. */
 
-const VERIF_MODELE = 'mistral-small-3-2-24b-instruct-2506';
-const VERIF_DELAI_MAX_MS = 9000;
+const VERIF_MODELE = 'openweight-large';
+const VERIF_DELAI_MAX_MS = 25000;
 const _nrmVerif = s => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/œ/g, 'oe').toLowerCase().replace(/[^a-z0-9%<>=.]+/g, ' ').trim();
 function familleVerif(col) {
   const c = _nrmVerif(col);
@@ -196,16 +201,43 @@ async function verifierLecture({ exec, questions, bubble = null, fetchImpl, endp
   try {
     if (!exec || !exec.plan || VERIF_SANS_OBJET.includes(exec.kind) || !exec.plan.table) return null;
     if (typeof localStorage !== 'undefined' && localStorage.getItem && localStorage.getItem('caes_verif_lecture') === 'non') return null;
-    const al = await demanderLectureAlbert(questions, exec.plan.table, { fetchImpl, endpoint });
+    if (bubble) etatVerif(bubble, 'encours');
+    let al;
+    try { al = await demanderLectureAlbert(questions, exec.plan.table, { fetchImpl, endpoint }); }
+    catch (e) { if (bubble) etatVerif(bubble, 'indisponible'); return null; }
     const d = desaccordVerif(al.lecture, lectureMoteurVerif(exec));
-    if (!d) return null;
-    if (bubble) afficherAlerteVerif(bubble, d);
+    if (!d) { if (bubble) etatVerif(bubble, 'accord'); return null; }
+    if (bubble) { etatVerif(bubble, null); afficherAlerteVerif(bubble, d); }
     if (typeof enregistrerRetour === 'function') {
       let perim = ''; try { perim = (typeof perimetreResultat === 'function') ? perimetreResultat(exec.kind, exec.plan, exec.result).texte : ''; } catch (e) { perim = ''; }
       enregistrerRetour({ type: 'alerte_lecture', question: questions[questions.length - 1], outil: exec.kind, perimetre: perim, commentaire: `Vérification automatique : ${alerteEnClair(d)} (${d})` });
     }
     return d;
   } catch (e) { return null; } // Albert indisponible, lent ou réponse illisible : on ne dit rien
+}
+// v27.6.4 — état de la relecture, visible sous la réponse (une seule ligne, mise à jour) ; null = retirée
+const ETATS_VERIF = {
+  encours: ['🔎', 'Albert relit la question pour vérifier que le calcul l\'a bien comprise…', '#475569', '#f1f5f9', '#94a3b8'],
+  accord: ['✓', 'Relecture par Albert : il comprend la question comme le calcul.', '#166534', '#f0fdf4', '#22c55e'],
+  indisponible: ['…', 'Albert n\'a pas pu relire cette question (service indisponible ou trop lent) : vérifiez vous-même la ligne « J\'ai compris ».', '#475569', '#f8fafc', '#cbd5e1'],
+};
+function etatVerif(bubble, etat) {
+  if (!bubble || !bubble.querySelector) return;
+  let p = bubble.querySelector('.de-verif-etat');
+  if (!etat) { if (p && p.parentNode && p.parentNode.removeChild) p.parentNode.removeChild(p); else if (p) { p.innerHTML = ''; p.setAttribute && p.setAttribute('style', 'display:none'); } return; }
+  const def = ETATS_VERIF[etat];
+  if (!def) return;
+  if (!p) {
+    p = (typeof document !== 'undefined' && document.createElement) ? document.createElement('p') : null;
+    if (!p) return;
+    p.className = 'de-verif-etat';
+    const perim = bubble.querySelector('.de-perimetre');
+    if (perim && perim.parentNode) perim.parentNode.insertBefore(p, perim.nextSibling); else bubble.appendChild(p);
+  }
+  const [ic, txt, coul, fond, bord] = def;
+  p.setAttribute('style', `font-size:11.5px;line-height:1.5;color:${coul};background:${fond};border-left:3px solid ${bord};border-radius:4px;padding:4px 10px;margin:4px 0 8px`);
+  p.setAttribute('data-etat', etat);
+  p.innerHTML = `${ic} ${txt}`;
 }
 function afficherAlerteVerif(bubble, desaccord) {
   if (!bubble || !bubble.querySelector || bubble.querySelector('.de-verif')) return;

@@ -27,9 +27,10 @@ function bulle() {
   const perim = { className: 'de-perimetre', parentNode: null };
   const b = {
     enfants,
-    querySelector(sel) { if (sel === '.de-perimetre') return perim; if (sel === '.de-verif') return enfants.find(e => e.className === 'de-verif') || null; return null; },
-    appendChild(e) { enfants.push(e); },
-    insertBefore(e) { enfants.push(e); },
+    querySelector(sel) { if (sel === '.de-perimetre') return perim; if (sel === '.de-verif' || sel === '.de-verif-etat') return enfants.find(e => e.className === sel.slice(1)) || null; return null; },
+    appendChild(e) { enfants.push(e); e.parentNode = b; },
+    insertBefore(e) { enfants.push(e); e.parentNode = b; },
+    removeChild(e) { const i = enfants.indexOf(e); if (i >= 0) enfants.splice(i, 1); },
   };
   perim.parentNode = b;
   return b;
@@ -71,7 +72,9 @@ await describe('Désaccord important : avertissement sous la réponse, noté dan
   const d = await run(ctx, 'verifierLecture')({ exec: faux, questions: ["combien d'académies proposent des PASS"], bubble: b,
     fetchImpl: albertRepond({ operation: 'compter_distinct', objet: 'academies', filtres: [{ colonne: 'formation', valeurs: ['PASS'] }], exclusions: [], regroupement: null }, { verifier: (u, body) => { appel = body; } }) });
   assert(/opération : Albert compter_distinct, moteur compter/.test(d || ''), `désaccord détecté (${d})`);
-  assert(appel && appel.model === 'mistral-small-3-2-24b-instruct-2506' && appel.temperature === 0, 'modèle rapide (Mistral Small), température 0');
+  // règle changée (v27.6.4) : Mistral Small refuse tout (HTTP 429) ; la relecture passe par le modèle principal d'Albert
+  assert(appel && appel.model === 'openweight-large' && appel.temperature === 0, 'modèle principal d\'Albert (openweight-large), température 0');
+  assert(!b.enfants.some(x => x.className === 'de-verif-etat'), 'désaccord : la ligne « en cours » est remplacée par l\'avertissement');
   const alerte = b.enfants.find(x => x.className === 'de-verif');
   assert(alerte && /⚠️ <strong>Vérification<\/strong> : la question peut demander un nombre d'éléments différents/.test(alerte.innerHTML) && /J'ai compris/.test(alerte.innerHTML), 'avertissement en clair, renvoie à « J\'ai compris »');
   const retours = JSON.parse(st[run(ctx, 'RETOURS_CLE')] || '[]');
@@ -80,17 +83,20 @@ await describe('Désaccord important : avertissement sous la réponse, noté dan
   assert(b.enfants.filter(x => x.className === 'de-verif').length === 1, 'jamais deux avertissements sur la même réponse');
 });
 
-await describe('Accord, ou Albert absent : rien ne s\'affiche', async () => {
+// règle changée (v27.6.4) : avant, rien ne s'affichait en cas d'accord ou d'échec — on ne savait pas si la relecture avait
+// eu lieu. Désormais une ligne discrète le dit (« même lecture », « indisponible ») ; jamais d'avertissement dans ces cas.
+await describe('Accord, ou Albert absent : une ligne d\'état, jamais d\'avertissement', async () => {
   const ctx = makeCtx();
   const e = ask(ctx, 'combien de BTS en Gironde');
   const b = bulle();
   const ok = await run(ctx, 'verifierLecture')({ exec: e, questions: ['combien de BTS en Gironde'], bubble: b,
     fetchImpl: albertRepond({ operation: 'compter', filtres: [{ colonne: 'formation', valeurs: ['BTS'] }, { colonne: "Département de l'établissement", valeurs: ['Gironde'] }], exclusions: [], regroupement: null }) });
-  assert(ok === null && !b.enfants.length, 'même lecture : aucun avertissement');
+  const etat = b2 => b2.enfants.find(x => x.className === 'de-verif-etat');
+  assert(ok === null && !b.enfants.some(x => x.className === 'de-verif') && etat(b)?.['data-etat'] === 'accord' && /comprend la question comme le calcul/.test(etat(b).innerHTML), 'même lecture : « ✓ Relecture par Albert… », aucun avertissement');
   for (const [nom, f] of [['indisponible (HTTP 503)', async () => ({ ok: false, status: 503 })], ['réponse sans JSON', albertRepond('Je ne sais pas')], ['erreur réseau', async () => { throw new Error('réseau'); }]]) {
     const b2 = bulle();
     const r = await run(ctx, 'verifierLecture')({ exec: e, questions: ['combien de BTS en Gironde'], bubble: b2, fetchImpl: f });
-    assert(r === null && !b2.enfants.length, `Albert ${nom} : rien ne s'affiche, aucune erreur`);
+    assert(r === null && !b2.enfants.some(x => x.className === 'de-verif') && etat(b2)?.['data-etat'] === 'indisponible' && /pas pu relire/.test(etat(b2).innerHTML) && b2.enfants.length === 1, `Albert ${nom} : une ligne d'état (${etat(b2)?.['data-etat']}), aucun avertissement, aucune erreur`);
   }
   const lent = await run(ctx, 'demanderLectureAlbert')(['combien de BTS'], e.plan.table, { fetchImpl: (u, req) => new Promise((res, rej) => { req.signal.addEventListener('abort', () => rej(new Error('abandon'))); }), delaiMaxMs: 50 }).then(() => 'fini', er => er.message);
   assert(lent === 'abandon', 'Albert trop lent : abandon au bout du délai maximal');
