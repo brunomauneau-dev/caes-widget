@@ -253,10 +253,14 @@ function rowsToTable(rows) {
   return { headers: keep, objects };
 }
 
+// v27.5.84 — octets 0x80–0x9F de Windows-1252 (œ, ’, €, …) : certains moteurs (Node 20) les décodent comme du Latin-1
+// (caractères de contrôle) ; « vœux » devenait illisible et la colonne des vœux n'était plus reconnue. Remis ici.
+const CP1252_C1 = { 0x80: '€', 0x82: '‚', 0x83: 'ƒ', 0x84: '„', 0x85: '…', 0x86: '†', 0x87: '‡', 0x88: 'ˆ', 0x89: '‰', 0x8a: 'Š', 0x8b: '‹', 0x8c: 'Œ', 0x8e: 'Ž',
+  0x91: '‘', 0x92: '’', 0x93: '“', 0x94: '”', 0x95: '•', 0x96: '–', 0x97: '—', 0x98: '˜', 0x99: '™', 0x9a: 'š', 0x9b: '›', 0x9c: 'œ', 0x9e: 'ž', 0x9f: 'Ÿ' };
 function decodeText(buffer) {
   const utf8 = new TextDecoder('utf-8').decode(buffer);
   if (!utf8.includes('�')) return utf8.replace(/^﻿/, '');
-  try { return new TextDecoder('windows-1252').decode(buffer); } catch (e) { return utf8; }
+  try { return new TextDecoder('windows-1252').decode(buffer).replace(/[\u0080-\u009f]/g, c => CP1252_C1[c.charCodeAt(0)] || c); } catch (e) { return utf8; }
 }
 
 function parseDelimitedText(text) {

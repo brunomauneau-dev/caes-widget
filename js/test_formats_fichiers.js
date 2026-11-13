@@ -84,8 +84,10 @@ const QUESTIONS = [
 ];
 
 // ── Import par le vrai chemin du widget (Excel : SheetJS simulé ; CSV : octets) ──
-async function importer({ nom = 'BDD.xlsx', onglets = null, lignes = null, octets = null }) {
+async function importer({ nom = 'BDD.xlsx', onglets = null, lignes = null, octets = null, latin1 = false }) {
   const c = makeCtx();
+  // moteur qui décode « windows-1252 » comme du Latin-1 (cas de Node 20) : œ, ’, € deviennent des caractères de contrôle
+  if (latin1) c.TextDecoder = class { constructor(enc) { this.enc = enc; } decode(b) { if (!/1252/.test(this.enc)) return new TextDecoder(this.enc).decode(b); let t = ''; for (const x of new Uint8Array(b)) t += String.fromCharCode(x); return t; } };
   const feuilles = onglets || { BDD: lignes };
   c.XLSX.read = () => ({ SheetNames: Object.keys(feuilles), Sheets: Object.fromEntries(Object.keys(feuilles).map(k => [k, k])) });
   c.XLSX.utils.sheet_to_json = ws => (feuilles[ws] || []).map(r => r.slice());
@@ -145,6 +147,13 @@ for (const [titre, opts, complet] of VARIANTES) {
     else assert(res.filter(x => x.ok).length >= res.length - 1, `au plus une question sans réponse (${res.filter(x => !x.ok).map(x => x.q).join(', ') || 'aucune'})`);
   });
 }
+
+await describe('CSV Windows-1252 décodé comme du Latin-1 (Node 20) : « vœux » réparé', async () => {
+  const c = await importer({ nom: 'BDD.csv', octets: cp1252(csv(ROWS)), latin1: true });
+  const t = run(c, 'getActiveQueryTables()[0]');
+  assert(t.headers.includes(H[VX]), `en-tête « ${H[VX]} » lu correctement (obtenu : ${JSON.stringify(t.headers.find(h => /^Nb total/.test(h)))})`);
+  assert(valeur(asker(c)('combien de candidats')) === nf(V), `« combien de candidats » : ${nf(V)} (avant, sous Node 20 : ${L.length})`);
+});
 
 await describe('« O/N » : le critère « proposition » gardé', async () => {
   const c = await importer({ lignes: ROWS.map((r, i) => i ? ON(r) : r) });
