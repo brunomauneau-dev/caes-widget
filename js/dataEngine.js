@@ -168,7 +168,8 @@ const RELANCE_LESQUELS = /^(lesquel(?:le)?s|lesquels|quel(?:le)?s sont[- ]?(?:el
 // comptage : les mêmes lignes, détaillées (avant : export de tout le fichier, 14 252 lignes sans aucun filtre)
 const RELANCE_LISTE = /^(?:(?:et |alors |ok |d accord )?(?:donne|donnez|affiche|affichez|montre|montrez|fais|faites|sors|sortez|peux tu me donner|pouvez vous me donner|je veux|je voudrais|j aimerais)(?: moi| nous)? )?(?:la |une |leur )?liste(?: des| de ces)? ?(etablissements?|lycees?|formations?|ecoles?|universites?|iut|intitules?)?(?: concernee?s?| correspondante?s?| en question)?\s*\??$|^(?:quel(?:le)?s sont (?:les|ces) (etablissements|lycees|formations|ecoles|universites)|(?:et )?(?:les|ces) (etablissements|lycees|formations)\s*\?)\s*\??$|^(?:et )?(?:dans )?quel(?:le)?s (etablissements|lycees|formations|ecoles|universites)(?: (?:sont[- ]?ils|sont[- ]?elles|exactement|concernes|concernees|precisement))?\s*\??$/;
 // question qui demande des établissements (« quels établissements proposent… », « liste des lycées qui… »)
-const LISTE_ETAB_RE = /\b(?:quel(?:le)?s|liste(?: des)?|lister|nommer|citer)\s+(?:les |des )?(etablissements|lycees|universites|ecoles|iut)\b/;
+// v27.5.83 — « liste des établissement » (singulier, faute courante) aussi (avant : refus « ce calcul compterait des formations »)
+const LISTE_ETAB_RE = /\b(?:quel(?:le)?s|liste(?: des)?|lister|nommer|citer)\s+(?:les |des )?(etablissements?|lycees|universites|ecoles|iut)\b/;
 // v27.25 — « et l'an dernier ? », « et en 2024 ? » : la même question sur une autre session
 const RELANCE_SESSION = /^(?:et\s+)?(?:pour\s+|en\s+|a\s+|sur\s+)?(?:l an dernier|l annee derniere|l annee precedente|la session precedente|l an passe|l annee passee|20[12]\d|la session 20[12]\d)\s*\??$/;
 // v27.5.56 — « combien ont eu une proposition ? », « et parmi eux combien de boursiers ? », « dont combien de filles ? » :
@@ -454,7 +455,31 @@ function _horsSpecialitesLycee(table, q) {
   return sp.filtres.length && sp.reste !== undefined ? sp.reste : q;
 }
 
+// v27.5.83 — un lieu qui ouvre le nom d'un établissement (« Bordeaux » de « à Bordeaux Montaigne ») n'est pas un filtre de
+// lieu (avant : commune = Bordeaux ajoutée, alors que l'université est à Pessac → 0 affiché comme exact)
 function strictFiltersFromQuestion(table, question) {
+  const out = _strictFiltersFromQuestionBase(table, question);
+  if (!out.length) return out;
+  const q = normalizeText(question || '');
+  return out.filter(f => !(f && (f.op || 'eq') === 'eq' && /^(commune|ville|academie|departement)/.test(_hx(f.col)) && _lieuDansNomEtablissement(table, q, f.value)));
+}
+const _nomsEtabCache = new WeakMap();
+function _lieuDansNomEtablissement(table, q, valeur) {
+  const v = normalizeText(valeur || '');
+  if (!v || !table) return null;
+  const m = q.match(new RegExp(`(?:^| )${v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} ([a-z0-9]+)(?: ([a-z0-9]+))?`));
+  if (!m || m[1].length < 3 || MOTS_QUESTION.has(m[1])) return null;
+  const col = _colEtablissement(table);
+  if (!col) return null;
+  let noms = _nomsEtabCache.get(table);
+  if (!noms) { noms = new Map(); (table.objects || []).forEach(r => { const n = r?.[col]; if (n) noms.set(normalizeText(n), String(n).trim()); }); _nomsEtabCache.set(table, noms); }
+  for (const phrase of [m[2] ? `${v} ${m[1]} ${m[2]}` : null, `${v} ${m[1]}`].filter(Boolean)) {
+    const trouves = [...noms.entries()].filter(([k]) => ` ${k} `.includes(` ${phrase} `));
+    if (trouves.length) return { col, phrase, trouves };
+  }
+  return null;
+}
+function _strictFiltersFromQuestionBase(table, question) {
   const q = normalizeText(question || '');
   const out = [];
   const add = (col, value, op='eq', label=null) => {
@@ -1373,7 +1398,44 @@ function makeFormationTermsFilter(table, terms, labels) {
 
 // Ajoute au plan le filtre « intitulé contient » quand la question cite des mots d'intitulés
 // que les filtres déjà trouvés ne couvrent pas.
+/* v27.5.83 — LAS (licences accès santé) : une catégorie officielle (« Filière très agrégée » = Licence_Las), pas un mot
+   d'intitulé. Avant : « licences LAS » → Licence + intitulé contenant « las » = 0, affiché comme calcul exact ;
+   « licence accès santé » → licences dont l'intitulé contient « santé » (19 au lieu des LAS). */
+const LAS_RE = /\blas\b|\bl a s\b|\blicences? (?:d |en )?acces (?:a la )?sante\b|\bacces sante\b/;
+const _MOTS_LAS = new Set(['licence', 'licences', 'las', 'acces', 'sante', 'l', 'a', 's']);
 function applyFormationTerms(plan) {
+  plan = _applyFormationTermsBase(plan);
+  if (!plan || !plan.table || ['compare', 'chart_current', 'export_current_excel', 'export_current_csv'].includes(plan.tool)) return plan;
+  const _ql = normalizeText(plan.question || '');
+  if (!LAS_RE.test(_ql)) return plan;
+  const info = formationTermsInfo(plan.table);
+  const cat = info.cols.length ? _colonneCategories(plan.table, info) : null;
+  if (!cat) return plan;
+  const las = (plan.table.objects || []).map(r => r?.[cat]).find(v => normalizeText(v) === 'licence las');
+  if (!las) return plan;
+  const formCols = new Set(info.cols);
+  // « licences hors LAS », « sauf les LAS » : une exclusion (avant : intitulé contenant « las » → 0)
+  const exclusion = /\b(?:hors|sauf|sans|pas|excepte|autres? que)\s+(?:les |des |la |de )?(?:las|licences? (?:d |en )?acces|acces sante)\b/.test(_ql);
+  plan.filters = (plan.filters || []).filter(f => {
+    if (!f) return false;
+    if (f.col === cat && f.op === 'eq') return exclusion; // « Licence » remplacé par la catégorie LAS (gardé si exclusion)
+    if (f.op === 'contains_all' && f.source === 'termes_formation') {
+      const garder = (f.terms || []).map((t, k) => ({ t, l: String(f.label || '').split(' + ')[k] })).filter(x => ![].concat(x.t).some(w => _MOTS_LAS.has(normalizeText(w))));
+      if (!garder.length) return false;
+      Object.assign(f, { terms: garder.map(x => x.t), label: garder.map(x => x.l).join(' + '), value: garder.map(x => x.l).join(' + ') });
+      return true;
+    }
+    // valeur d'intitulé lue sur « santé » ou « LAS » seuls
+    if (f.op === 'eq' && formCols.has(f.col) && normalizeText(f.value).split(' ').every(w => _MOTS_LAS.has(w))) return false;
+    return true;
+  });
+  if (exclusion) plan.filters.push({ col: cat, op: 'neq', value: las, label: las, source: 'categorie_formation' }); // dit, même si « Licence » l'exclut déjà
+  else plan.filters.push({ col: cat, op: 'eq', value: las, label: `${las} (LAS, licences accès santé)`, source: 'categorie_formation' });
+  delete plan.categorieExclue;
+  if (plan.unresolvedTerms) plan.unresolvedTerms = plan.unresolvedTerms.filter(t => ![].concat(t).some(w => _MOTS_LAS.has(normalizeText(w))));
+  return plan;
+}
+function _applyFormationTermsBase(plan) {
   if (!plan || !plan.table || ['compare', 'chart_current', 'export_current_excel', 'export_current_csv'].includes(plan.tool)) return plan;
   const info = formationTermsInfo(plan.table);
   if (!info.cols.length) return plan;
@@ -2832,6 +2894,10 @@ const REFORMULATIONS = [
   [/^\s*(?:quelles?\s+(?:sont\s+les\s+)?formations?\s+(?:propose|offre|proposent|offrent|dispense|sont\s+propos[ée]es\s+(?:par|à|au|a)|y\s+a[- ]t[- ]il\s+(?:à|au|a|dans))|que\s+propose|qu['’]\s*est[- ]ce\s+que\s+propose)\s+(?:le\s+|la\s+|l['’]\s*|les\s+)?(?=(?:lyc[ée]e|iut|universit[ée]|[ée]cole|[ée]tablissement|institut|campus)\b)/i, 'liste des formations du '],
   // STS (sections de techniciens supérieurs) = BTS ; « licence pro » = licence professionnelle (pas toutes les licences)
   [/\bSTS\b/gi, 'BTS'],
+  // v27.5.83 — « vœux confirmés » : « confirmés » qualifie les vœux (pas les formations de langue « … - confirmé »)
+  [/\b(v(?:œ|oe)ux|candidatures?)\s+confirm[ée]e?s?\b/gi, '$1'],
+  // « vœux confirmés par les candidats » : les auteurs des vœux, pas une répartition « par candidat »
+  [/(\bv(?:œ|oe)ux\b[^?]{0,30}?)\s+par\s+(?:les|des)\s+(candidat(?:e)?s|lyc[ée]ens|[ée]l[èe]ves)\b/gi, '$1 des $2'],
   // v27.5.77 — « la fac » = l'université (établissement)
   [/\b(?:la |les |en )?(?:facs?|facult[ée]s?)\b(?!\s+de\s+(?:m[ée]decine|pharmacie))/gi, " l'université"],
   [/\blicences?\s+pros?\b(?!fess)/gi, 'licence professionnelle'],
@@ -3015,6 +3081,20 @@ function _colonneGeoObjet(table, mot, q) {
   return { col, nom: _NOMS_GEO[mot] };
 }
 const COMPTER_ETAB_RE = /\b(?:combien|nombre)\s+(?:d\s+|de\s+|des\s+)?(etablissements?|lycees|universites|iut)\b/;
+/* v27.5.83 — « à Bordeaux Montaigne », sans « université » : le nom d'un établissement qui commence par un lieu.
+   Avant : « Bordeaux » lu comme la commune, puis arrêt sur « montaigne » (et l'université est à Pessac). Si le lieu lu
+   par le planner et le mot qui le suit forment, dans cet ordre, une partie du nom d'établissements, c'est l'établissement. */
+function _etablissementNomCompose(plan, q) {
+  const geo = (plan.filters || []).filter(f => f && f.op === 'eq' && /^(commune|ville|academie|departement)/.test(_hx(f.col)));
+  for (const g of geo) {
+    const r = _lieuDansNomEtablissement(plan.table, q, g.value);
+    if (!r) continue;
+    const libelle = r.trouves.length <= 4 ? r.trouves.map(([, x]) => `« ${x} »`).join(', ') : `${r.trouves.length} établissements dont le nom contient « ${r.phrase} »`;
+    const filtre = { col: r.col, op: 'in', values: r.trouves.map(([k]) => k), value: r.phrase, label: libelle, source: 'etablissement', noms: r.trouves.map(([, x]) => x) };
+    return { filtres: [...(plan.filters || []).filter(f => f !== g), filtre], e: { col: r.col, phrase: r.phrase, noms: filtre.noms, valeurs: filtre.values } };
+  }
+  return null;
+}
 function applyEtablissements(plan) {
   if (!plan || !plan.table || ['compare', 'chart_current', 'export_current_excel', 'export_current_csv'].includes(plan.tool)) return plan;
   const q = normalizeText(plan.question || '');
@@ -3048,6 +3128,9 @@ function applyEtablissements(plan) {
     });
     plan.filters = [...filtres, filtre];
     plan.etablissement = e;
+  } else {
+    const r = _etablissementNomCompose(plan, q);
+    if (r) { plan.filters = r.filtres; plan.etablissement = r.e; }
   }
   // v27.5.61 — « combien d'académies proposent des PASS », « combien de communes ont un BTS » : des valeurs
   // différentes de la colonne, pas des formations (avant : 67 = le nombre de PASS, sans avertissement)

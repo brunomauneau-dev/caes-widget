@@ -158,6 +158,9 @@ const GROUPES_OD = [
   { nom: 'PASS de l\'académie de Bordeaux', type: 'count', v: m(o => o.fili === 'PASS' && o.aca === 'Bordeaux'), variantes: [
     "combien de PASS dans l'académie de Bordeaux", "nombre de PASS dans l'académie de Bordeaux", "combien de PASS sur l'académie de Bordeaux",
     "dans l'académie de Bordeaux, combien de PASS ?", "combien de PASS académie de Bordeaux"] },
+  // v27.5.83 — LAS : catégorie « Licence_Las » (bug vu sur l'open data réel : « licences LAS » = 0, « licence accès santé » = 19)
+  { nom: 'LAS (licences accès santé)', type: 'count', v: m(o => o.fili === 'Licence_Las'), variantes: [
+    'combien de licences las en france', 'combien de licence accès santé en france', 'combien de LAS', 'nombre de licences accès santé', 'combien de LAS en France'] },
   { nom: 'PASS hors académie de Bordeaux', type: 'count', v: m(o => o.fili === 'PASS' && o.aca !== 'Bordeaux'), variantes: [
     "combien de PASS hors académie de Bordeaux", "combien de PASS en dehors de l'académie de Bordeaux", "combien de PASS qui ne sont pas dans l'académie de Bordeaux"] },
   // v27.22 — sigles absents des intitulés (open data réel : « BTS MCO » comptait tous les BTS)
