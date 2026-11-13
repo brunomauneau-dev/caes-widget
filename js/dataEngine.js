@@ -1852,9 +1852,38 @@ function conditionsChiffrees(table, question) {
   }
   return out.map(f => ({ ...f, label: `${SYMBOLES_OPS[f.op]} ${String(f.value).replace('.', ',')}`, source: 'condition_chiffree' }));
 }
+/* v27.5.82 — Définition SAIO des « candidats » dans un fichier académique (une ligne = un élève de terminale, avec une
+   colonne « Nb total de vœux confirmés ») : le fichier contient tout le vivier, y compris les élèves sans vœu confirmé.
+   Pour le SAIO, un candidat a confirmé au moins un vœu (bilan 2025 : 29 543 candidats, pas les 35 286 lignes du fichier).
+   « combien de candidats », « taux de proposition des bacheliers généraux » : filtre « au moins 1 vœu » ajouté et annoncé.
+   « combien d'élèves », « combien de lignes », « y compris sans vœu » : tout le fichier, comme avant. Open data : inchangé. */
+const _UNIVERS_TOUT = /\b(eleves?|lyceens?|lyceennes?|lignes?|vivier|promotions?|tout le fichier|y compris|meme sans|sans (?:aucun |de )?voeux?|aucun voeux?|pas (?:de |d )?voeux?|pas confirme|0 voeux?|zero voeux?)\b/;
+function _colVoeuxCandidats(table) {
+  if (!table || table.rowUnit === 'formation' || !Array.isArray(table.objects) || !table.objects.length) return null;
+  const headers = (table.headers || Object.keys(table.objects[0] || {})).filter(Boolean);
+  return headers.find(h => /^nb.*voeux|nombre.*voeux/.test(_hx(h)) && _estNumerique(table, h)) || null;
+}
+function conditionUniversCandidats(plan, conds) {
+  if (!plan || !plan.table) return null;
+  const col = _colVoeuxCandidats(plan.table);
+  if (!col) return null;
+  const q = normalizeText(plan.question || '');
+  if ([...(conds || []), ...(plan.filters || [])].some(f => f && f.col === col)) return null; // condition déjà posée sur les vœux
+  if (_UNIVERS_TOUT.test(q)) return null;
+  const candidats = /\bcandidat(e)?s?\b/.test(q);
+  const tauxCandidature = PART_CUE.test(q) && /\b(propositions?|admission|acceptation)\b/.test(q);
+  if (!candidats && !tauxCandidature) return null;
+  // une case vide = aucun vœu confirmé : rien à filtrer si toutes les lignes ont au moins un vœu
+  const objs = plan.table.objects;
+  if (!objs.some(r => { const n = _nombreCellule(r?.[col]); return n === null || n < 1; })) return null;
+  return { col, op: 'gte', value: 1, label: 'candidats ayant confirmé au moins un vœu (définition SAIO)', source: 'condition_chiffree', univers: true };
+}
 function applyConditionsChiffrees(plan) {
+  // comparaison : la définition SAIO s'applique à chaque groupe (filtre commun), les autres conditions restent ignorées
   if (!plan || !plan.table || ['compare', 'chart_current', 'export_current_excel', 'export_current_csv'].includes(plan.tool)) return plan;
   const conds = conditionsChiffrees(plan.table, plan.question);
+  const univ = conditionUniversCandidats(plan, conds);
+  if (univ) { conds.push(univ); plan.universCandidats = univ; }
   if (!conds.length) return plan;
   // le nombre cité n'est pas une valeur de colonne à égaler ailleurs (« 0 », « 100 ») : on retire les filtres = nombre
   const nombres = new Set(conds.map(c => String(c.value)));
@@ -2065,6 +2094,12 @@ function executerPart(plan) {
   nettoyerPerimetrePart(plan);
   // la colonne des groupes n'est pas un filtre (« des boursiers et des non boursiers » : les deux groupes)
   if (d.groupe) plan.filters = (plan.filters || []).filter(f => f && f.col !== d.groupe);
+  // v27.5.82 — définition SAIO des candidats : elle délimite le périmètre (dénominateur), jamais la seule condition du numérateur
+  const _u = plan.universCandidats || [...(plan.filters || []), ...(d.condition || [])].find(f => f && f.univers);
+  if (_u) {
+    if (d.condition) d.condition = d.condition.filter(f => !(f && f.univers));
+    if (!(plan.filters || []).some(f => f && f.univers)) plan.filters = [...(plan.filters || []), _u];
+  }
   if (d.manque) return unresolvedConceptExecution(plan, [], `les colonnes nécessaires pour calculer la part de ${d.manque} ne sont pas dans les données`);
   const base = applyLocalActionFilters(plan.table.objects || [], plan.filters || []);
   let result;
@@ -2479,7 +2514,7 @@ const CONCEPTS_A_FILTRER = [
   { re: /\bpubli(c|cs|que|ques)\b|\bprive(e|s|es)?\b/, mot: 'public / privé', ok: t => /publi|priv|statut|secteur|contrat/.test(t) },
   { re: /\bselecti(f|fs|ve|ves)\b/, mot: 'sélective', ok: t => /selecti/.test(t) },
   // v27.5.53 — « n'ont confirmé aucun vœu » : la colonne du nombre de vœux est vide, pas à 0 → arrêt, pas tout le fichier
-  { re: /\baucuns? v(oe|œ)?ux?\b|\bsans v(oe|œ)ux?\b|\bpas de v(oe|œ)ux?\b|\b0 v(oe|œ)ux?\b|\bzero v(oe|œ)ux?\b/, mot: 'aucun vœu', ok: (t, f) => f && f.source === 'condition_chiffree' && /v(oe|œ)u/.test(t) },
+  { re: /\baucuns? v(oe|œ)?ux?\b|(?<!\b(?:y compris|meme|y compris ceux|y compris les eleves) )\bsans v(oe|œ)ux?\b|\bpas de v(oe|œ)ux?\b|\b0 v(oe|œ)ux?\b|\bzero v(oe|œ)ux?\b/, mot: 'aucun vœu', ok: (t, f) => f && f.source === 'condition_chiffree' && /v(oe|œ)u/.test(t) },
 ];
 const LIEUX_AMBIGUS = new Set('somme manche nord lot var ain cher orne oise eure gers aube aude gard jura tarn indre doubs loire marne meuse vienne creuse rhone yonne'.split(' '));
 /* v27.22 — Mot de la question qui n'a servi à rien : arrêt, au lieu de compter plus large.
@@ -2487,7 +2522,7 @@ const LIEUX_AMBIGUS = new Set('somme manche nord lot var ain cher orne oise eure
    source où une ligne = une formation, chaque mot porteur de sens doit correspondre à un filtre, à une colonne
    utilisée ou à un mot connu (outils de la question, lieux, mesures). Sinon le moteur s'arrête et le nomme. */
 const MOTS_QUESTION = new Set(`
-  eux elles ceux celles entre parmi exception excepte exceptes dehors
+  eux elles ceux celles entre parmi exception excepte exceptes dehors compris meme vivier promotion
   croise croisee croises croisees croiser pivot
   seul seule seuls seules
   suivi suivie suivis suivies terminale terminales
@@ -4496,6 +4531,11 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
   if (plan && plan.tool === 'export_pdf') return executerPdf(plan);
   plan = finalSanitizeAnalysisPlan(plan);
   if (!plan || !plan.table) return null;
+  // v27.5.82 — définition SAIO des candidats : filtre gardé jusqu'au calcul (certaines étapes reconstruisent les filtres) ;
+  // retiré si la question demande tout le fichier (« combien d'élèves » après « combien de candidats »)
+  if (plan.tool === 'compare' && !plan.universCandidats && !(plan.compareGroups || []).some(g => (g.filters || []).some(f => f && f.col === _colVoeuxCandidats(plan.table)))) { const u = conditionUniversCandidats(plan, []); if (u) plan.universCandidats = u; }
+  if (plan.universCandidats && !(plan.filters || []).some(f => f && f.col === plan.universCandidats.col)) plan.filters = [...(plan.filters || []), plan.universCandidats];
+  else if (!plan.universCandidats && _UNIVERS_TOUT.test(normalizeText(plan.question || ''))) plan.filters = (plan.filters || []).filter(f => !(f && f.univers));
   // v27.16 — comparaison entre sessions : le même calcul rejoué sur chaque session
   if (plan.sessionsDemandees && !plan._sousSession) {
     // filtres persistants ajoutés une fois, ici, puis transmis aux calculs de chaque session
@@ -5066,6 +5106,7 @@ const _nf = n => Number(n || 0).toLocaleString('fr-FR');
 const _VALEURS_ETAT = { oui: 'oui', vrai: 'oui', true: 'oui', '1': 'oui', non: 'non', faux: 'non', false: 'non', '0': 'non' };
 function _filtreEnClair(f) {
   if (!f) return '';
+  if (f.univers) return `candidats ayant confirmé au moins un vœu (définition SAIO : « ${f.col} » au moins 1)`;
   if (f.op === 'in') return `« ${f.col} » : ${f.label || f.value}`;
   if (f.op === 'or') return `(${f.label || f.value})`;
   if (f.op === 'contains_words') return `« ${f.col} » contient « ${f.label || f.value} »`;
@@ -5090,6 +5131,9 @@ function _sourceEnClair(table) {
 // Retourne { texte, html } ; texte sert aussi au contexte transmis à Albert
 function _noteSpecialiteLycee(plan, filtres) {
   const table = plan.table;
+  // v27.5.82 — « candidats » au sens du SAIO : la note compte dans le même univers que le chiffre (au moins un vœu)
+  const _u = filtres.find(f => f && f.univers);
+  const _objs = _u ? applyLocalActionFilters(table.objects || [], [_u]) : (table.objects || []);
   const L = _colonnesLycee(table);
   if (!L.ens) return '';
   const formCols = formationTermsInfo(table).cols;
@@ -5100,7 +5144,7 @@ function _noteSpecialiteLycee(plan, filtres) {
     if (filtres.some(f => f.op === 'contains_all' || (f.op === 'eq' && formSet.has(f.col)))) return ''; // les deux sont demandés
     const parts = spe.map(f => {
       const mots = (f.terms || []).map(t => [].concat(t));
-      const n = (table.objects || []).filter(r => { const ws = new Set(normalizeText(formCols.map(c => r?.[c] ?? '').join(' ')).split(' ')); return mots.length && mots.every(t => t.some(w => ws.has(w))); }).length;
+      const n = _objs.filter(r => { const ws = new Set(normalizeText(formCols.map(c => r?.[c] ?? '').join(' ')).split(' ')); return mots.length && mots.every(t => t.some(w => ws.has(w))); }).length;
       // mots écrits comme dans le nom de la spécialité (accents)
       const orig = String(f.label || '').split(/[^A-Za-zÀ-ÿ0-9]+/).filter(Boolean);
       const joli = w => orig.find(o => normalizeText(o) === w) || w;
@@ -5122,7 +5166,7 @@ function _noteSpecialiteLycee(plan, filtres) {
   const sujets = _sujetsLycee(table).filter(x => { const ws = new Set(normalizeText(x.nom).split(' ')); return groupes.every(g => g.some(w => ws.has(w))); });
   if (!sujets.length) return '';
   const noms = new Set(sujets.map(x => normalizeText(x.nom)));
-  const n = (table.objects || []).filter(r => L.cols.some(c => String(r?.[c] ?? '').split('|').some(x => noms.has(normalizeText(x.replace(/^\s*Msgn\/\s*/i, '')))))).length;
+  const n = _objs.filter(r => L.cols.some(c => String(r?.[c] ?? '').split('|').some(x => noms.has(normalizeText(x.replace(/^\s*Msgn\/\s*/i, '')))))).length;
   if (!n) return '';
   // suggestion : le nom le plus proche du mot (le plus court), pas le plus fréquent
   const proche = sujets.slice().sort((a, b) => a.nom.length - b.nom.length)[0];
@@ -5247,8 +5291,22 @@ function perimetreResultat(kind, plan, result) {
     const nonAffiche = (result.total || 0) - (result.matrix || []).reduce((t, r) => t + (r.total || 0), 0);
     if (nonAffiche > 0) notes.push(`${_nf(nonAffiche)} ${mot(nonAffiche)} dans des valeurs moins fréquentes, non affichées dans le tableau`);
   }
+  // v27.5.82 — définition SAIO : élèves du périmètre sans vœu confirmé, laissés de côté et comptés
+  const _fu = filtres.find(f => f.univers);
+  if (_fu) {
+    const sansU = applyLocalActionFilters(table.objects || [], filtres.filter(f => f !== _fu)).length;
+    const avecU = applyLocalActionFilters(table.objects || [], filtres).length;
+    if (sansU > avecU) notes.push(`${_nf(sansU - avecU)} élève${sansU - avecU > 1 ? 's' : ''} sans vœu confirmé ne ${sansU - avecU > 1 ? 'sont' : 'est'} pas compté${sansU - avecU > 1 ? 's' : ''} comme candidat${sansU - avecU > 1 ? 's' : ''} (définition du SAIO) ; pour tout le fichier, demandez « combien d'élèves »`);
+  } else if ((kind === 'count' || kind === 'count_rows') && !result.etablissements && !result.valeurs) {
+    // fichier académique, question sans « candidats » (« combien de boursiers ») : tout le vivier, élèves sans vœu inclus — dit
+    const cv = _colVoeuxCandidats(table);
+    if (cv && !filtres.some(f => f.col === cv)) {
+      const sans = applyLocalActionFilters(table.objects || [], filtres).filter(r => { const n = _nombreCellule(r?.[cv]); return n === null || n < 1; }).length;
+      if (sans > 0) notes.push(`dont ${_nf(sans)} élève${sans > 1 ? 's' : ''} sans vœu confirmé ; pour les candidats au sens du SAIO (au moins un vœu), ajoutez « candidats » à la question`);
+    }
+  }
   const texte = `Périmètre : ${parties.join(' · ')}${notes.length ? `. À noter : ${notes.join(' ; ')}` : ''}.`;
-  const compris = questionComprise(kind, plan, result);
+  const compris = String(questionComprise(kind, plan, result) || '').replace(/\bde (?=[éèêaeiouh])/g, "d'");
   const html = `<p class="de-perimetre" style="font-size:12px;line-height:1.5;color:var(--gris6,#4b5563);background:var(--gris0,#f8fafc);border-left:3px solid var(--bleu,#003189);border-radius:4px;padding:6px 10px;margin:6px 0 10px">`
     + (compris ? `🧭 <strong>J'ai compris</strong> : ${escapeHtml(compris)}.<br>` : '')
     + `📌 <strong>Sur quoi porte ce calcul</strong> : ${escapeHtml(parties.join(' · '))}.`
@@ -5262,7 +5320,9 @@ function perimetreResultat(kind, plan, result) {
 function questionComprise(kind, plan, result) {
   if (!plan || !result) return '';
   const table = plan.table || {};
-  const unite = table.rowUnit === 'formation' ? 'formations' : (table.source === 'Fichier' ? 'candidats (lignes du fichier)' : 'lignes');
+  // v27.5.82 — fichier académique : « élèves » = toutes les lignes ; « candidats » = au moins un vœu (définition SAIO)
+  const _eleves = /\beleves?\b/.test(normalizeText(plan.question || '')) && !(plan.filters || []).some(f => f && f.univers);
+  const unite = table.rowUnit === 'formation' ? 'formations' : (table.source === 'Fichier' ? ((plan.filters || []).some(f => f && f.univers) ? 'candidats ayant confirmé au moins un vœu' : _eleves ? 'élèves (lignes du fichier)' : 'candidats (lignes du fichier)') : 'lignes');
   const col = c => `« ${_shortColName(c || '') || c} »`;
   try {
     if (kind === 'count' || kind === 'count_rows') {

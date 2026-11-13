@@ -82,8 +82,12 @@ await run(cf, 'importSpreadsheetFile')({ name: 'BDD.xlsx', size: 1000, arrayBuff
 const qf = asker(cf);
 const H = D.EXPORT_ACADEMIQUE_ENTETES;
 const [DEP, , , , ETAB, , PROP, ACC, APP, BOURS, , , TYPE, , , ENS, , GRP, , , , COMA] = H;
-const L = ROWS.slice(1).map(r => Object.fromEntries(H.map((h, i) => [h, r[i]])));
+// v27.5.82 — définition SAIO : un « candidat » a confirmé au moins un vœu ; les valeurs attendues portent sur ces lignes
+// (les élèves sans vœu, case vide, ne sont plus comptés comme candidats). L_TOUT = toutes les lignes du fichier.
+const L_TOUT = ROWS.slice(1).map(r => Object.fromEntries(H.map((h, i) => [h, r[i]])));
+const L = L_TOUT.filter(r => String(r['Nb total de vœux confirmés en phase principale'] ?? '').trim() !== '' && Number(r['Nb total de vœux confirmés en phase principale']) >= 1);
 const nb = p => L.filter(p).length;
+const nbt = p => L_TOUT.filter(p).length; // questions sans « candidats » : tout le fichier (élèves sans vœu compris)
 const B = r => r[BOURS] === 'Boursier des lycées';
 const sujets = r => String(r[ENS]).split('|').map(x => x.trim());
 
@@ -94,7 +98,7 @@ await describe('Fichier de candidats : l\'une ou l\'autre valeur', () => {
   c('combien de candidats de Gironde et des Landes', nb(r => r[DEP] === 'Gironde' || r[DEP] === 'Landes'));
   c('combien de candidats hors Gironde et hors Landes', nb(r => r[DEP] !== 'Gironde' && r[DEP] !== 'Landes'));
   c('combien de candidats de bac pro et de bac techno', nb(r => r[TYPE] === 'Professionnelle' || r[TYPE] === 'Technologique'));
-  c("combien de boursiers admis en CPGE ou en école d'ingénieurs", nb(r => B(r) && r[ACC] === 'Oui' && (r[GRP] === 'CPGE - CPES' || r[GRP] === "Formations d'ingénieurs")), 'avant : 0');
+  c("combien de boursiers admis en CPGE ou en école d'ingénieurs", nbt(r => B(r) && r[ACC] === 'Oui' && (r[GRP] === 'CPGE - CPES' || r[GRP] === "Formations d'ingénieurs")), 'avant : 0');
   c('combien de candidats du lycée Montaigne ou du lycée Victor Louis', nb(r => r[ETAB] === 'Lycée Montaigne' || r[ETAB] === 'Lycée Victor Louis'));
   c('combien de candidats ayant suivi les spécialités maths et physique et admis en licence ou en BUT',
     nb(r => sujets(r).includes('Mathématiques') && sujets(r).some(x => x.startsWith('Physique')) && r[ACC] === 'Oui' && (r[GRP].startsWith('L1') || r[GRP] === 'DUT')), 'deux coordinations : « et » entre spécialités, « ou » entre formations');
@@ -104,7 +108,7 @@ await describe('Faux positifs : « les deux à la fois » inchangé', () => {
   const m = qf('combien de candidats ayant suivi les spécialités maths et physique');
   assert(cnt(m) === nb(r => sujets(r).includes('Mathématiques') && sujets(r).some(x => x.startsWith('Physique'))) && !(m.plan.filters || []).some(f => f.op === 'or'), 'maths et physique : les deux spécialités');
   const a = qf('combien de boursiers et apprentis');
-  assert(cnt(a) === nb(r => B(r) && r[APP] === 'Oui') && !(a.plan.filters || []).some(f => f.op === 'or'), 'boursiers et apprentis : les deux à la fois');
+  assert(cnt(a) === nbt(r => B(r) && r[APP] === 'Oui') && !(a.plan.filters || []).some(f => f.op === 'or'), 'boursiers et apprentis : les deux à la fois');
   const d = qf('combien de candidats ayant la spécialité droit et économie');
   assert(cnt(d) === nb(r => sujets(r).includes('Droit et Economie')), '« Droit et Economie » : un seul nom');
   const t = qf('taux de proposition des boursiers et des non boursiers');

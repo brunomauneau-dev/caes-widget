@@ -109,13 +109,17 @@ await describe('Exclusions multiples (open data)', () => {
 
 // ── Fichier de candidats ──
 const ROWS = D.exportAcademique(3000, 21);
-const L = ROWS.slice(1);
+// v27.5.82 — définition SAIO : un « candidat » a confirmé au moins un vœu ; les valeurs attendues portent sur ces lignes
+// (les élèves sans vœu, case vide, ne sont plus comptés comme candidats). L_TOUT = toutes les lignes du fichier.
+const L_TOUT = ROWS.slice(1);
+const L = L_TOUT.filter(r => String(r[16] ?? '').trim() !== '' && Number(r[16]) >= 1);
 const cf = makeCtx();
 cf.XLSX.read = () => ({ SheetNames: ['BDD'], Sheets: { BDD: 'ws' } });
 cf.XLSX.utils.sheet_to_json = () => ROWS.map(r => r.slice());
 await run(cf, 'importSpreadsheetFile')({ name: 'BDD.xlsx', size: 1000, arrayBuffer: async () => new ArrayBuffer(8) });
 const qf = asker(cf);
 const nf = f => L.filter(f).length;
+const nft = f => L_TOUT.filter(f).length; // questions sans « candidats » : tout le fichier (élèves sans vœu compris)
 const ADM = 7, BOURS = 9, TYPE = 12, GRP = 17;
 const B = r => r[BOURS] === 'Boursier des lycées';
 
@@ -123,11 +127,11 @@ await describe('Fichier de candidats : négations et exclusions', () => {
   const vf = q => v(qf(q));
   const types = [...new Set(L.map(r => r[TYPE]))];
   assert(types.includes('Générale'), `colonne « Type de la classe » : ${types.join(', ')}`);
-  let a = nf(r => B(r) && r[TYPE] !== 'Générale' && r[TYPE] !== '');
+  let a = nft(r => B(r) && r[TYPE] !== 'Générale' && r[TYPE] !== '');
   assert(vf('combien de boursiers qui ne sont pas en série générale') === a, `boursiers pas en série générale : ${a} (obtenu : ${vf('combien de boursiers qui ne sont pas en série générale')} ; avant : boursiers EN série générale)`);
   a = nf(r => r[TYPE] !== 'Professionnelle' && r[TYPE] !== '');
   assert(vf('combien de candidats hors bac pro') === a, `hors bac pro : ${a}`);
-  assert(vf('combien de boursiers en série générale') === nf(r => B(r) && r[TYPE] === 'Générale'), 'faux positif : « en série générale » inchangé');
+  assert(vf('combien de boursiers en série générale') === nft(r => B(r) && r[TYPE] === 'Générale'), 'faux positif : « en série générale » inchangé');
   const hors = g => r => r[ADM] === 'Oui' && r[GRP] !== '' && !g.includes(r[GRP]);
   a = nf(hors(['CPGE - CPES', 'BTS - BTSA - DTS - DMA']));
   assert(vf('combien de candidats admis sauf en CPGE et en BTS') === a, `admis sauf en CPGE et en BTS : ${a} (obtenu : ${vf('combien de candidats admis sauf en CPGE et en BTS')} ; avant : CPGE ou BTS)`);

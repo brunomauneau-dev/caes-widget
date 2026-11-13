@@ -144,13 +144,17 @@ await describe('Open data : la formation, le lieu, la mesure', () => {
 
 // ── Fichier de candidats ──
 const ROWS = D.exportAcademique(3000, 21);
-const L = ROWS.slice(1);
+// v27.5.82 — définition SAIO : un « candidat » a confirmé au moins un vœu ; les valeurs attendues portent sur ces lignes
+// (les élèves sans vœu, case vide, ne sont plus comptés comme candidats). L_TOUT = toutes les lignes du fichier.
+const L_TOUT = ROWS.slice(1);
+const L = L_TOUT.filter(r => String(r[16] ?? '').trim() !== '' && Number(r[16]) >= 1);
 const cf = makeCtx();
 cf.XLSX.read = () => ({ SheetNames: ['BDD'], Sheets: { BDD: 'ws' } });
 cf.XLSX.utils.sheet_to_json = () => ROWS.map(r => r.slice());
 await run(cf, 'importSpreadsheetFile')({ name: 'BDD.xlsx', size: 1000, arrayBuffer: async () => new ArrayBuffer(8) });
 const qf = asker(cf);
 const nf = f => L.filter(f).length;
+const nft = f => L_TOUT.filter(f).length; // questions sans « candidats » : tout le fichier (élèves sans vœu compris)
 const DEP = 0, ORI = 2, PROP = 6, ADM = 7, APP = 8, BOURS = 9, GRP = 17, ACC = 21;
 const B = r => r[BOURS] === 'Boursier des lycées';
 const BTS = r => r[GRP] === 'BTS - BTSA - DTS - DMA', CPGE = r => r[GRP] === 'CPGE - CPES';
@@ -167,8 +171,8 @@ await describe('Fichier de candidats : population, sous-population, lieu', () =>
     ['et les boursiers ?', nf(r => r[ADM] === 'Oui' && CPGE(r) && B(r))],
   ], 'F2');
   chaine(qf, [
-    ['combien de boursiers', nf(B)],
-    ['et de Pau ?', nf(r => B(r) && r[ORI] === 'Pau')],
+    ['combien de boursiers', nft(B)],
+    ['et de Pau ?', nft(r => B(r) && r[ORI] === 'Pau')],
   ], 'F3');
   chaine(qf, [
     ['taux d\'admission des boursiers', `${nf(r => B(r) && r[ADM] === 'Oui')}/${nf(B)}`],
@@ -179,8 +183,8 @@ await describe('Fichier de candidats : population, sous-population, lieu', () =>
     ['et des Landes ?', nf(r => r[DEP] === 'Landes')],
   ], 'F6');
   chaine(qf, [
-    ['combien d\'apprentis', nf(r => r[APP] === 'Oui')],
-    ['dont combien admis en BTS ?', nf(r => r[APP] === 'Oui' && r[ADM] === 'Oui' && BTS(r))],
+    ['combien d\'apprentis', nft(r => r[APP] === 'Oui')],
+    ['dont combien admis en BTS ?', nft(r => r[APP] === 'Oui' && r[ADM] === 'Oui' && BTS(r))],
   ], 'F7');
   chaine(qf, [
     ['combien de candidats de Pau', nf(r => r[ORI] === 'Pau')],
@@ -193,13 +197,13 @@ await describe('Fichier de candidats : population, sous-population, lieu', () =>
     ['et à Pessac ?', nf(r => r[ADM] === 'Oui' && r[ACC] === 'Pessac')],
   ], 'F10');
   chaine(qf, [
-    ['combien de boursiers admis en CPGE', nf(r => B(r) && r[ADM] === 'Oui' && CPGE(r))],
-    ['et les non boursiers ?', nf(r => !B(r) && r[ADM] === 'Oui' && CPGE(r))],
-    ['et en BTS ?', nf(r => !B(r) && r[ADM] === 'Oui' && BTS(r))],
+    ['combien de boursiers admis en CPGE', nft(r => B(r) && r[ADM] === 'Oui' && CPGE(r))],
+    ['et les non boursiers ?', nft(r => !B(r) && r[ADM] === 'Oui' && CPGE(r))],
+    ['et en BTS ?', nft(r => !B(r) && r[ADM] === 'Oui' && BTS(r))],
   ], 'F11');
   chaine(qf, [
-    ['répartition des admis par grand groupe de formation', grouper(L.filter(r => r[ADM] === 'Oui'), r => r[GRP])],
-    ['et pour les boursiers ?', grouper(L.filter(r => r[ADM] === 'Oui' && B(r)), r => r[GRP])],
+    ['répartition des admis par grand groupe de formation', grouper(L_TOUT.filter(r => r[ADM] === 'Oui'), r => r[GRP])],
+    ['et pour les boursiers ?', grouper(L_TOUT.filter(r => r[ADM] === 'Oui' && B(r)), r => r[GRP])],
   ], 'F8');
   chaine(qf, [
     ['combien de candidats de Pau', nf(r => r[ORI] === 'Pau')],

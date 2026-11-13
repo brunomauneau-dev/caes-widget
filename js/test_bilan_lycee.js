@@ -51,8 +51,12 @@ ctx.XLSX = { read: () => ({ SheetNames: ['BDD'], Sheets: { BDD: 'ws' } }), utils
 await run(ctx, 'importSpreadsheetFile')({ name: 'BDD.xlsx', size: 1000, arrayBuffer: async () => new ArrayBuffer(8) });
 const H = D.EXPORT_ACADEMIQUE_ENTETES;
 const [, , , , ETAB, , PROP, ACC, APP, BOURS, , , , , , , , GRP, , , ETABA] = H;
-const L = ROWS.slice(1).map(r => Object.fromEntries(H.map((h, i) => [h, r[i]])));
+// v27.5.82 — définition SAIO : un « candidat » a confirmé au moins un vœu ; les valeurs attendues portent sur ces lignes
+// (les élèves sans vœu, case vide, ne sont plus comptés comme candidats). L_TOUT = toutes les lignes du fichier.
+const L_TOUT = ROWS.slice(1).map(r => Object.fromEntries(H.map((h, i) => [h, r[i]])));
+const L = L_TOUT.filter(r => String(r['Nb total de vœux confirmés en phase principale'] ?? '').trim() !== '' && Number(r['Nb total de vœux confirmés en phase principale']) >= 1);
 const nb = pred => L.filter(pred).length;
+const nbt = pred => L_TOUT.filter(pred).length; // questions sans « candidats » : tout le fichier
 const B = r => r[BOURS] === 'Boursier des lycées';
 const M = r => r[ETAB] === 'Lycée Montaigne';
 
@@ -74,7 +78,7 @@ await describe('Relances sur une partie de la population', () => {
   assert(cnt(c) === nb(r => M(r) && r[PROP] === 'Oui' && B(r) && r[ACC] === 'Oui' && r[GRP] === 'CPGE - CPES'), '>> « dont combien admis en CPGE »');
   ask('combien de boursiers');
   const e = ask("combien d'entre eux sont admis en BTS", true);
-  assert(cnt(e) === nb(r => B(r) && r[ACC] === 'Oui' && r[GRP].startsWith('BTS')), '« combien de boursiers » >> « combien d\'entre eux sont admis en BTS »');
+  assert(cnt(e) === nbt(r => B(r) && r[ACC] === 'Oui' && r[GRP].startsWith('BTS')), '« combien de boursiers » >> « combien d\'entre eux sont admis en BTS »');
   ask('combien de boursiers');
   const f = ask('combien de candidats ont eu une proposition', true);
   assert(cnt(f) === nb(r => r[PROP] === 'Oui'), 'faux positif : une question complète (« combien de candidats ont… ») repart de tout le fichier');
@@ -88,7 +92,7 @@ await describe('Taux de deux groupes, parts « des candidats admis en X »', () 
   const a = ask('part des candidats admis en BTS');
   assert(a?.kind === 'part' && a.result.num === nb(r => r[ACC] === 'Oui' && r[GRP].startsWith('BTS')) && a.result.den === L.length, `part des candidats admis en BTS = admis en BTS / tous (avant : 100 % ; obtenu : ${a?.result?.num} / ${a?.result?.den})`);
   const c = ask('part des boursiers admis en CPGE');
-  assert(c?.kind === 'part' && c.result.num === nb(r => B(r) && r[ACC] === 'Oui' && r[GRP] === 'CPGE - CPES') && c.result.den === nb(r => r[ACC] === 'Oui' && r[GRP] === 'CPGE - CPES'), 'faux positif : « part des boursiers admis en CPGE » = boursiers parmi les admis en CPGE');
+  assert(c?.kind === 'part' && c.result.num === nbt(r => B(r) && r[ACC] === 'Oui' && r[GRP] === 'CPGE - CPES') && c.result.den === nbt(r => r[ACC] === 'Oui' && r[GRP] === 'CPGE - CPES'), 'faux positif : « part des boursiers admis en CPGE » = boursiers parmi les admis en CPGE');
   const ap = ask('part des candidats admis en BTS chez les apprentis et les non apprentis');
   const go = ap?.result?.groupes?.find(x => x.valeur === 'Oui');
   assert(ap?.kind === 'part_groupes' && go && go.den === nb(r => r[APP] === 'Oui') && go.num === nb(r => r[APP] === 'Oui' && r[ACC] === 'Oui' && r[GRP].startsWith('BTS')), 'apprentis et non-apprentis : part des admis en BTS dans chacun');
@@ -126,9 +130,9 @@ await describe('Comparer deux établissements', () => {
   assert(hors && hors.num === nb(r => M(r) && r[ACA] && r[ACA] !== 'Bordeaux') && hors.den === nb(r => M(r) && r[ACA]), 'admis hors académie, parmi les admis du lycée');
   assert(/Taux de chaque groupe/.test(c.html) && /calculés dans le groupe/.test(run(ctx, 'dataEngineResultToContext')(c)), 'affiché et transmis à Albert');
   const v = ask('lycée Max Linder versus lycée Louis Barthou');
-  assert(v?.kind === 'compare' && v.result.rows[0].count === nb(x => x[ETAB] === 'Lycée Max Linder'), '« versus »');
+  assert(v?.kind === 'compare' && v.result.rows[0].count === nbt(x => x[ETAB] === 'Lycée Max Linder'), '« versus »');
   const bo = ask('comparer boursiers et non boursiers');
-  assert(bo?.kind === 'compare' && bo.result.rows[0].count === nb(B), 'faux positif : comparaison boursiers / non-boursiers inchangée');
+  assert(bo?.kind === 'compare' && bo.result.rows[0].count === nbt(B), 'faux positif : comparaison boursiers / non-boursiers inchangée');
   const ib = run(ctx, 'compareIndicateurs')(bo.plan.table, bo.result.rows);
   assert(!ib.some(i => i.label === 'Boursiers') && ib.some(i => i.label === 'A eu une proposition'), 'la colonne qui fait les groupes (boursier) n\'est pas un indicateur');
 });

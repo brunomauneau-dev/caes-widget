@@ -76,6 +76,11 @@ const ROWS0 = D.exportAcademique(3000, 21);
 // un tout petit lycée : 1 candidat, boursier (taux de 100 % sur une ligne : ne doit pas être classé premier)
 const ROWS = [...ROWS0, ROWS0[1].map((c, k) => k === 4 ? 'Lycée Minuscule' : k === 9 ? 'Boursier des lycées' : c)];
 const L = ROWS.slice(1);
+// v27.5.82 — définition SAIO : un « candidat » a confirmé au moins un vœu (colonne 16 non vide et ≥ 1). Les questions qui
+// disent « candidats », et les taux de proposition / d'admission, portent sur LC ; les autres sur tout le fichier (L).
+const CAND = r => String(r[16] ?? '').trim() !== '' && Number(r[16]) >= 1;
+const LC = L.filter(CAND);
+const nfc = f => LC.filter(f).length;
 const cf = makeCtx();
 cf.XLSX.read = () => ({ SheetNames: ['BDD'], Sheets: { BDD: 'ws' } });
 cf.XLSX.utils.sheet_to_json = () => ROWS.map(r => r.slice());
@@ -104,7 +109,7 @@ await describe('Fichier de candidats : classement selon un taux', () => {
   const t = qf('les 5 lycées avec le meilleur taux de proposition');
   assert(t?.kind === 'part_groupes' && t.result.groupes.length === 5, '« les 5 lycées » : 5 lignes');
   const g = qf('taux de proposition des boursiers');
-  assert(g?.kind === 'part' && g.result.num === L.filter(r => B(r) && r[PROP] === 'Oui').length, 'faux positif : « taux de proposition des boursiers » reste un taux simple');
+  assert(g?.kind === 'part' && g.result.num === LC.filter(r => B(r) && r[PROP] === 'Oui').length, 'faux positif : « taux de proposition des boursiers » reste un taux simple');
 });
 
 const OD = D.openData(3000, 17);

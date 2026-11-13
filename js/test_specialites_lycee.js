@@ -53,8 +53,12 @@ await run(ctx, 'importSpreadsheetFile')({ name: 'BDD.xlsx', size: 1000, arrayBuf
 
 const H = D.EXPORT_ACADEMIQUE_ENTETES;
 const [, , , , , , , ACC, , , , , , , SPE, ENS, , GRP, , MENT] = H;
-const L = ROWS.slice(1).map(r => Object.fromEntries(H.map((h, i) => [h, r[i]])));
+// v27.5.82 — définition SAIO : un « candidat » a confirmé au moins un vœu ; les valeurs attendues portent sur ces lignes
+// (les élèves sans vœu, case vide, ne sont plus comptés comme candidats). L_TOUT = toutes les lignes du fichier.
+const L_TOUT = ROWS.slice(1).map(r => Object.fromEntries(H.map((h, i) => [h, r[i]])));
+const L = L_TOUT.filter(r => String(r['Nb total de vœux confirmés en phase principale'] ?? '').trim() !== '' && Number(r['Nb total de vœux confirmés en phase principale']) >= 1);
 const nb = pred => L.filter(pred).length;
+const nbt = pred => L_TOUT.filter(pred).length; // questions sans « candidats » : tout le fichier (élèves sans vœu compris)
 const mots = v => new Set(String(v ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().split(/[^a-z0-9]+/));
 const sujets = r => [...String(r[ENS]).split('|'), String(r[SPE])].map(x => x.trim().replace(/^Msgn\/\s*/, '')).filter(Boolean);
 const a = (r, nom) => sujets(r).includes(nom);
@@ -114,7 +118,7 @@ await describe('Les deux à la fois, et repère de formation d\'accueil', () => 
 await describe('Faux positifs : rien ne change sans mot commun', () => {
   const b = compte('combien de candidats en BTS', nb(r => r[GRP].startsWith('BTS')));
   assert(!/autre chose/.test(perim(b)), 'BTS : aucune note');
-  const s = compte('combien de boursiers', nb(r => r['Boursier des lycées'] === 'Boursier des lycées'));
+  const s = compte('combien de boursiers', nbt(r => r['Boursier des lycées'] === 'Boursier des lycées'));
   assert(!lycee(s) && !/autre chose/.test(perim(s)), 'boursiers : aucune spécialité');
   const c = ask("combien de candidats ont eu une proposition mais ne l'ont pas acceptée");
   assert(c?.kind === 'count' && !lycee(c), 'question sans spécialité : aucune spécialité ajoutée');

@@ -71,6 +71,11 @@ const grouper = (rows, cle, val = () => 1) => { const m = {}; rows.forEach(r => 
 
 const ROWS = D.exportAcademique(3000, 21);
 const L = ROWS.slice(1);
+// v27.5.82 — définition SAIO : un « candidat » a confirmé au moins un vœu (colonne 16 non vide et ≥ 1). Les questions qui
+// disent « candidats », et les taux de proposition / d'admission, portent sur LC ; les autres sur tout le fichier (L).
+const CAND = r => String(r[16] ?? '').trim() !== '' && Number(r[16]) >= 1;
+const LC = L.filter(CAND);
+const nfc = f => LC.filter(f).length;
 const cf = makeCtx();
 cf.XLSX.read = () => ({ SheetNames: ['BDD'], Sheets: { BDD: 'ws' } });
 cf.XLSX.utils.sheet_to_json = () => ROWS.map(r => r.slice());
@@ -88,16 +93,16 @@ await describe('Parts : « viennent de », « admis hors académie »', () => {
   assert(part(qf('quelle part des admis en CPGE viennent de Gironde')) === `${nf(r => CPGE(r) && r[DEP] === 'Gironde')}/${nf(CPGE)}`, `admis en CPGE venant de Gironde (avant : 100 % ; obtenu : ${part(qf('quelle part des admis en CPGE viennent de Gironde'))})`);
   assert(part(qf('quelle part des admis en CPGE sont originaires des Landes')) === `${nf(r => CPGE(r) && r[DEP] === 'Landes')}/${nf(CPGE)}`, '« sont originaires des Landes »');
   const G = r => r[DEP] === 'Gironde';
-  assert(part(qf('part des candidats de Gironde admis hors académie')) === `${nf(r => G(r) && r[ACA] !== 'Bordeaux' && r[ACA] !== '')}/${nf(G)}`, `candidats de Gironde admis hors académie (avant : / ${L.length})`);
+  assert(part(qf('part des candidats de Gironde admis hors académie')) === `${nfc(r => G(r) && r[ACA] !== 'Bordeaux' && r[ACA] !== '')}/${nfc(G)}`, `candidats de Gironde admis hors académie (avant : / ${L.length})`);
   assert(part(qf('part des boursiers admis en CPGE')) === `${nf(r => B(r) && CPGE(r))}/${nf(CPGE)}`, 'faux positif : « part des boursiers admis en CPGE » = parmi les admis en CPGE (lecture habituelle)');
-  assert(part(qf('part des boursiers ayant eu une proposition')) === `${nf(r => B(r) && r[6] === 'Oui')}/${nf(B)}`, 'faux positif : « ayant eu une proposition » inchangé');
+  assert(part(qf('part des boursiers ayant eu une proposition')) === `${nfc(r => B(r) && r[6] === 'Oui')}/${nfc(B)}`, 'faux positif : « ayant eu une proposition » inchangé');
 });
 
 await describe('« D\'où viennent… », « où vont… » : répartitions calculées', () => {
   assert(meme(lignes(qf('d\'où viennent les admis en CPGE')), parCol(L.filter(CPGE), DEP)), 'd\'où viennent les admis en CPGE : par département d\'origine (avant : Albert)');
   assert(meme(lignes(qf('de quels lycées viennent les admis en CPGE')), (() => { const m = parCol(L.filter(CPGE), ETAB); return Object.fromEntries(Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, Object.keys(lignes(qf('de quels lycées viennent les admis en CPGE'))).length)); })()), 'de quels lycées viennent… : par lycée d\'origine');
   assert(meme(lignes(qf('où vont les boursiers')), parCol(L.filter(B), ACA)), 'où vont les boursiers : par académie d\'accueil');
-  assert(meme(lignes(qf('où partent les candidats de Gironde')), parCol(L.filter(r => r[DEP] === 'Gironde'), ACA)), 'où partent les candidats de Gironde');
+  assert(meme(lignes(qf('où partent les candidats de Gironde')), parCol(LC.filter(r => r[DEP] === 'Gironde'), ACA)), 'où partent les candidats de Gironde');
   assert(meme(lignes(qf('dans quelles formations vont les boursiers')), parCol(L.filter(B), GRP)), 'dans quelles formations vont les boursiers : par grand groupe');
 });
 

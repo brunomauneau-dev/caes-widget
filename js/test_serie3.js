@@ -64,13 +64,17 @@ const n = f => OD.filter(f).length;
 // ── Fichier de candidats ──
 const H = D.EXPORT_ACADEMIQUE_ENTETES;
 const ROWS = D.exportAcademique(3000, 21);
-const L = ROWS.slice(1);
+// v27.5.82 — définition SAIO : un « candidat » a confirmé au moins un vœu ; les valeurs attendues portent sur ces lignes
+// (les élèves sans vœu, case vide, ne sont plus comptés comme candidats). L_TOUT = toutes les lignes du fichier.
+const L_TOUT = ROWS.slice(1);
+const L = L_TOUT.filter(r => String(r[16] ?? '').trim() !== '' && Number(r[16]) >= 1);
 const cf = makeCtx();
 cf.XLSX.read = () => ({ SheetNames: ['BDD'], Sheets: { BDD: 'ws' } });
 cf.XLSX.utils.sheet_to_json = () => ROWS.map(r => r.slice());
 await run(cf, 'importSpreadsheetFile')({ name: 'BDD.xlsx', size: 1000, arrayBuffer: async () => new ArrayBuffer(8) });
 const qf = asker(cf);
 const nf = f => L.filter(f).length;
+const nft = f => L_TOUT.filter(f).length; // questions sans « candidats » : tout le fichier (élèves sans vœu compris)
 const ORI = 2, ACC = 21, PROP = 6, ADM = 7, BOURS = 9, GRP = 17;
 const estBoursier = r => /^boursier/i.test(String(r[BOURS])) && !/non/i.test(String(r[BOURS]));
 
@@ -98,7 +102,7 @@ await describe('Relance de lieu : « et de Bayonne ? », « et à Bayonne ? »',
   const [a, b] = conv(qf, ['combien de candidats de Pau', 'et de Bayonne ?']);
   assert(a?.result?.count === pau && b?.result?.count === bay, `Pau ${pau} puis Bayonne ${bay} (obtenu : ${a?.result?.count} puis ${b?.result?.count} ; avant : ${pau} redonné)`);
   const [, c] = conv(qf, ['combien de candidats de Pau', 'et à Bayonne ?']);
-  assert(c?.result?.count === bay && (c.plan.filters || []).length === 1 && c.plan.filters[0].col === H[ORI], `« et à Bayonne ? » : même colonne (scolarité), ${bay} (obtenu : ${c?.result?.count})`);
+  assert(c?.result?.count === bay && (c.plan.filters || []).filter(f => !f.univers).length === 1 && c.plan.filters.filter(f => !f.univers)[0].col === H[ORI], `« et à Bayonne ? » : même colonne (scolarité), ${bay} (obtenu : ${c?.result?.count})`);
   const [, d] = conv(qo, ['combien de BTS en Gironde', 'et en Dordogne ?']);
   assert(d?.result?.count === n(o => o.fili === 'BTS' && o.dep === 'Dordogne'), 'open data : « et en Dordogne ? » garde BTS, change le département');
   const [, x] = conv(qf, ['combien de candidats admis à Pau', 'et à Toulouse ?']);
@@ -161,10 +165,10 @@ await describe('Comparer deux lieux', () => {
   assert(e?.kind === 'compare' && gi?.count === n(o => o.fili === 'BTS' && o.dep === 'Gironde') && la?.count === n(o => o.fili === 'BTS' && o.dep === 'Landes'), `BTS Gironde ${n(o => o.fili === 'BTS' && o.dep === 'Gironde')} / Landes ${n(o => o.fili === 'BTS' && o.dep === 'Landes')} (BTS gardé ; obtenu : ${gi?.count} / ${la?.count})`);
   const b = qf('comparer les boursiers de Pau et de Bayonne');
   const bg = b?.result?.rows || [];
-  assert(b?.kind === 'compare' && bg.map(x => x.label).join('/') === 'Pau/Bayonne' && bg[0].count === nf(r => estBoursier(r) && r[ORI] === 'Pau'), `boursiers de Pau contre Bayonne (avant : boursiers contre non-boursiers ; obtenu : ${bg.map(x => `${x.label} ${x.count}`).join(' / ')})`);
+  assert(b?.kind === 'compare' && bg.map(x => x.label).join('/') === 'Pau/Bayonne' && bg[0].count === nft(r => estBoursier(r) && r[ORI] === 'Pau'), `boursiers de Pau contre Bayonne (avant : boursiers contre non-boursiers ; obtenu : ${bg.map(x => `${x.label} ${x.count}`).join(' / ')})`);
   const nb = qf('comparer boursiers et non boursiers');
   const ng = nb?.result?.rows || [];
-  assert(nb?.kind === 'compare' && /Boursiers/.test(ng[0]?.label || '') && ng[0].count === nf(estBoursier), 'faux positif : « boursiers et non boursiers » reste boursiers contre non-boursiers');
+  assert(nb?.kind === 'compare' && /Boursiers/.test(ng[0]?.label || '') && ng[0].count === nft(estBoursier), 'faux positif : « boursiers et non boursiers » reste boursiers contre non-boursiers');
 });
 
 await describe('v27.5.65 — « quels lycées envoient le plus de candidats en école de commerce » : les lycées d\'origine', () => {

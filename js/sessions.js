@@ -502,7 +502,8 @@ function extractBlockTitle(exec, question) {
   const filters = exec.plan?.filters || [];
 
   // Résumé court des filtres (valeurs, pas noms de colonnes)
-  const fSummary = filters.slice(0, 3).map(_shortFilterValue).join(' · ');
+  // v27.5.82 — le filtre « au moins 1 vœu » (définition SAIO des candidats) est expliqué sous le titre, pas résumé par « 1 »
+  const fSummary = filters.filter(f => !f?.univers).slice(0, 3).map(_shortFilterValue).join(' · ');
   const fPart = fSummary ? ` — ${fSummary}` : '';
 
   if (tool === 'count_rows') {
@@ -513,7 +514,9 @@ function extractBlockTitle(exec, question) {
     if (exec.result?.valeurs) { const nom = String(exec.result.valeurs); return `${n} ${count > 1 ? nom : nom.replace(/s$/, '')}${fPart}`; }
     if (exec.result?.etablissements === true) return `${n} établissement${count > 1 ? 's' : ''}${fPart}`;
     // v27.7 — open data : une ligne = une formation (pas un candidat)
-    const unite = exec.plan?.table?.rowUnit === 'formation' ? 'formation' : 'candidat';
+    // v27.5.82 — « combien d'élèves » (fichier académique, tout le vivier) : des élèves, pas des candidats
+    const _eleves = /(?<![a-zà-ÿ])[ée]l[èe]ves?\b/i.test(String(exec.plan?.question || '')) && !filters.some(f => f?.univers);
+    const unite = exec.plan?.table?.rowUnit === 'formation' ? 'formation' : _eleves ? 'élève' : 'candidat';
     return `${n} ${unite}${count > 1 ? 's' : ''}${fPart}`;
   }
   if (tool === 'sum') {

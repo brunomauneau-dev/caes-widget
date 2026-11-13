@@ -55,6 +55,8 @@ function lectureMoteurVerif(exec) {
   const ajoute = (cible, fam, vals) => { if (!fam) return; (cible[fam] = cible[fam] || []).push(vals.map(_nrmVerif).filter(Boolean)); };
   (p.filters || []).forEach(f => {
     if (!f) return;
+    // v27.5.82 — « au moins un vœu » (définition SAIO des candidats) : une définition, pas un critère lu dans la question
+    if (f.univers) return;
     if (f.op === 'contains_all') (f.terms || []).forEach(t => ajoute(filtres, 'formation', [].concat(t)));
     else if (f.op === 'or') { const g = (f.groupes || []).flat(); const fam = familleVerif(g[0]?.col || f.col); filtres[fam] = filtres[fam] || []; (f.groupes || []).forEach(gr => filtres[fam].push(gr.flatMap(x => x.op === 'contains_all' ? (x.terms || []).flat() : [x.value, ...(x.values || [])]).map(_nrmVerif))); }
     else if (f.op === 'neq') ajoute(exclus, familleVerif(f.col), [f.value]);
