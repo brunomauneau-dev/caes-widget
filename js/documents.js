@@ -78,8 +78,27 @@ function uniteDesLignes(headers) {
   const effectifs = h.some(x => /effectif total des candidats pour une formation|effectif total des candidats ayant/.test(x));
   return capacite && effectifs ? 'formation' : undefined;
 }
+// v27.5.84 — tableau déjà calculé (une ligne = un département, un lycée, une formation… avec « Nombre de candidats »,
+// « Admis ») : les personnes sont dans des colonnes chiffrées, pas dans les lignes. Avant : « combien de candidats »
+// comptait les lignes (6 départements) au lieu d'additionner la colonne.
+const COLONNE_EFFECTIF_RE = /^(?:(?:nombre|nb|effectifs?)(?: total)?(?: de| d| des)? )?(?:candidat(?:e)?s?|eleves?|admis(?:es)?|inscrit(?:e)?s?|lyceen(?:ne)?s?|boursiers?|apprentis?|etudiant(?:e)?s?)\b/;
+function colonnesEffectifs(headers, objects) {
+  const objs = (objects || []).slice(0, 400);
+  return (headers || []).filter(h => {
+    const n = normalizeText(String(h || ''));
+    if (!COLONNE_EFFECTIF_RE.test(n) || /\b(taux|pourcentage|part|moyenne?|ratio|rang|code)\b|%/.test(n)) return false;
+    const vals = objs.map(o => o?.[h]).filter(v => v !== '' && v !== null && v !== undefined);
+    if (!(vals.length >= Math.max(2, objs.length * 0.6) && vals.every(v => typeof v === 'number' || /^\s*-?\d[\d\s\u00a0\u202f]*([.,]\d+)?\s*$/.test(String(v))))) return false;
+    // une colonne d'état codée 1 / 0 (« Boursier », « Admis ») décrit une personne, ce n'est pas un effectif
+    return vals.some(v => Number(String(v).replace(/[\s\u00a0\u202f]/g, '').replace(',', '.')) > 1);
+  });
+}
 function avecUnite(t) {
-  if (t && !t.rowUnit) { const u = uniteDesLignes(t.headers); if (u) t.rowUnit = u; }
+  if (t && !t.rowUnit) {
+    const u = uniteDesLignes(t.headers);
+    if (u) t.rowUnit = u;
+    else if (colonnesEffectifs(t.headers, t.objects).length) t.rowUnit = 'agregat';
+  }
   return t;
 }
 
@@ -223,16 +242,25 @@ function rowsToTable(rows) {
       && /^(total|totaux|sous[- ]?total|ensemble|somme)\b/i.test(String(vals[0]).trim());
   };
   for (let i = objects.length - 1; i >= 0; i--) if (estTotal(objects[i])) objects.splice(i, 1);
+  // v27.5.84 — ligne de total entièrement remplie (« Total académie », « Ensemble ») en bas d'un tableau déjà calculé :
+  // retirée aussi (avant : gardée, donc comptée deux fois dans une somme). Seulement en fin de tableau, et « Ensemble »
+  // seul (« Ensemble scolaire Saint-… » est un établissement).
+  const libelleTotal = o => { const v = headers.map(hd => o[hd]).find(x => x !== '' && x !== null && x !== undefined); return /^(total|totaux|sous[- ]?total)\b|^ensemble$/i.test(String(v ?? '').trim()); };
+  while (objects.length > 2 && libelleTotal(objects[objects.length - 1])) objects.pop();
   // Colonnes entièrement vides et sans en-tête : retirées
   const keep = headers.filter((hd, i) => String(raw[i] ?? '').trim() !== '' || objects.some(o => o[hd] !== ''));
   if (keep.length !== headers.length) objects.forEach(o => headers.forEach(hd => { if (!keep.includes(hd)) delete o[hd]; }));
   return { headers: keep, objects };
 }
 
+// v27.5.84 — octets 0x80–0x9F de Windows-1252 (œ, ’, €, …) : certains moteurs (Node 20) les décodent comme du Latin-1
+// (caractères de contrôle) ; « vœux » devenait illisible et la colonne des vœux n'était plus reconnue. Remis ici.
+const CP1252_C1 = { 0x80: '€', 0x82: '‚', 0x83: 'ƒ', 0x84: '„', 0x85: '…', 0x86: '†', 0x87: '‡', 0x88: 'ˆ', 0x89: '‰', 0x8a: 'Š', 0x8b: '‹', 0x8c: 'Œ', 0x8e: 'Ž',
+  0x91: '‘', 0x92: '’', 0x93: '“', 0x94: '”', 0x95: '•', 0x96: '–', 0x97: '—', 0x98: '˜', 0x99: '™', 0x9a: 'š', 0x9b: '›', 0x9c: 'œ', 0x9e: 'ž', 0x9f: 'Ÿ' };
 function decodeText(buffer) {
   const utf8 = new TextDecoder('utf-8').decode(buffer);
   if (!utf8.includes('�')) return utf8.replace(/^﻿/, '');
-  try { return new TextDecoder('windows-1252').decode(buffer); } catch (e) { return utf8; }
+  try { return new TextDecoder('windows-1252').decode(buffer).replace(/[\u0080-\u009f]/g, c => CP1252_C1[c.charCodeAt(0)] || c); } catch (e) { return utf8; }
 }
 
 function parseDelimitedText(text) {

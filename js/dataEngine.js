@@ -1669,6 +1669,44 @@ function sommesParGroupe(rows, col, sumCol) {
     .map(([value, total]) => ({ value, count: Math.round(total * 100) / 100, pct: somme ? total / somme * 100 : 0 }));
   return { filled, distinct: m.size, top, somme: Math.round(somme * 100) / 100, sansValeur };
 }
+/* v27.5.84 — tableau déjà calculé (rowUnit 'agregat', documents.js) : « combien de candidats / d'admis / de boursiers »
+   additionne la colonne correspondante ; un mot de personne sans colonne : arrêt (jamais le nombre de lignes). */
+const PERSONNES_AGREGAT = [
+  { re: /\bboursi/, col: /boursier/, unite: 'boursiers' },
+  { re: /\bapprenti/, col: /apprenti/, unite: 'apprentis' },
+  { re: /\b(admis|admises|acceptes?|inscrits?)\b/, col: /admis|accept|inscrit/, unite: 'admis' },
+  { re: /\bpropositions?\b/, col: /proposition/, unite: 'candidats ayant reçu une proposition' },
+  { re: /\b(candidat(e)?s?|eleves?|lyceens?|lyceennes?|etudiants?|effectifs?|personnes?)\b/, col: /candidat|eleve|lyceen|etudiant|effectif/, unite: 'candidats' },
+];
+function _colonnesAgregat(table) {
+  return typeof colonnesEffectifs === 'function' ? colonnesEffectifs(table.headers || [], table.objects || []) : [];
+}
+function _colonneAgregat(table, def) {
+  const cols = _colonnesAgregat(table).filter(h => def.col.test(_hx(h)));
+  // « Nombre de candidats » plutôt que « Candidats ayant reçu une proposition » : la colonne au nom le plus simple
+  const autres = PERSONNES_AGREGAT.filter(d => d !== def && d.unite !== 'candidats');
+  const purs = cols.filter(h => !autres.some(d => d.col.test(_hx(h))));
+  return (purs.length ? purs : cols).sort((a, b) => a.length - b.length)[0] || null;
+}
+function _mesureAgregat(plan) {
+  const groupe = ['group_by', 'top', 'pivot'].includes(plan.tool) && !plan.listMode;
+  if (plan.tool !== 'count_rows' && !groupe) return plan;
+  const q = normalizeText(plan.question || '');
+  if (/\b(combien|nombre|liste|repartition) (?:de |d |des )?(lignes?|departements?|academies?|regions?|communes?|villes?|lycees?|etablissements?|formations?|filieres?)\b/.test(q)) return plan;
+  const def = PERSONNES_AGREGAT.find(d => d.re.test(q));
+  if (!def) return plan;
+  const col = _colonneAgregat(plan.table, def);
+  if (!col) { plan.mesureIntrouvable = def.unite; return plan; }
+  if (groupe) {
+    if (col === plan.targetCol) return plan;
+    if (plan.tool === 'pivot') { plan.mesurePivot = def.unite; return plan; }
+    plan.groupSumCol = col; plan.sumUnit = def.unite; return plan;
+  }
+  plan.tool = 'sum'; plan.sumCol = col; plan.sumUnit = def.unite;
+  // le mot de la mesure n'est pas un filtre (« admis » lu comme une valeur)
+  plan.filters = (plan.filters || []).filter(f => !(f && f.col === col));
+  return plan;
+}
 function applyMeasureSum(plan) {
   // v27.5.73 — fichier de candidats : « nombre total de vœux confirmés », « combien de vœux au total » = la somme de la
   // colonne des vœux (avant : le nombre de candidats, 35 286, affiché comme un nombre de vœux)
@@ -1680,6 +1718,7 @@ function applyMeasureSum(plan) {
       plan.mesureIntrouvable = 'vœux'; return plan;
     }
   }
+  if (plan && plan.table && plan.table.rowUnit === 'agregat') return _mesureAgregat(plan);
   if (!plan || !plan.table || plan.table.rowUnit !== 'formation') return plan;
   // v27.18 — répartition (« places en BTS par académie ») : somme par groupe, pas le nombre de formations
   // (avant : « Paris : 315 » = 315 formations, affiché comme des places)
@@ -1921,7 +1960,7 @@ function conditionsChiffrees(table, question) {
    « combien d'élèves », « combien de lignes », « y compris sans vœu » : tout le fichier, comme avant. Open data : inchangé. */
 const _UNIVERS_TOUT = /\b(eleves?|lyceens?|lyceennes?|lignes?|vivier|promotions?|tout le fichier|y compris|meme sans|sans (?:aucun |de )?voeux?|aucun voeux?|pas (?:de |d )?voeux?|pas confirme|0 voeux?|zero voeux?)\b/;
 function _colVoeuxCandidats(table) {
-  if (!table || table.rowUnit === 'formation' || !Array.isArray(table.objects) || !table.objects.length) return null;
+  if (!table || table.rowUnit === 'formation' || table.rowUnit === 'agregat' || !Array.isArray(table.objects) || !table.objects.length) return null;
   const headers = (table.headers || Object.keys(table.objects[0] || {})).filter(Boolean);
   return headers.find(h => /^nb.*voeux|nombre.*voeux/.test(_hx(h)) && _estNumerique(table, h)) || null;
 }
@@ -1992,11 +2031,27 @@ function _phrasePart(q) {
   const m = q.match(/\b(?:part|parts|pourcentage|proportion|ratio|pour ?cent|taux)\s+(?:de |d |des |du |de la |de l )?(.+?)(?=\s+(?:parmi|chez|au sein|sur l ensemble|par rapport|relativement)\b|$)/);
   return m ? m[1].trim() : '';
 }
+// v27.5.84 — taux dans un tableau déjà calculé : somme du numérateur ÷ somme du dénominateur (jamais la moyenne des
+// pourcentages de chaque ligne, ni des lignes comptées). Sans les deux colonnes : arrêt.
+function _partAgregat(table, q, brut) {
+  if (/\b(repartition|ventilation|moyen|moyenne|median|mediane)\b/.test(q)) return null;
+  const P = u => PERSONNES_AGREGAT.find(d => d.unite === u);
+  const num = /\bpropositions?\b/.test(q) ? P('candidats ayant reçu une proposition') : /\b(admission|admis|admises|acceptation)\b/.test(q) ? P('admis') : /\bboursi/.test(q) ? P('boursiers') : /\bapprenti/.test(q) ? P('apprentis') : null;
+  let groupe = null;
+  if (/\bpar (?!rapport\b|le\b|la\b|les\b|l\b|un\b|une\b|des\b)\w/.test(q)) { groupe = _dimensionPart(table, brut); if (!groupe) return null; }
+  const base = { mode: 'effectifs', groupe, mot: num ? num.re : /\btaux\b/ };
+  if (!num) return { ...base, manque: 'ce taux (colonnes du numérateur et du dénominateur)' };
+  const sur = /\bparmi les admis\b|\bdes admis\b/.test(q) && num.unite !== 'admis' ? P('admis') : P('candidats');
+  const cn = _colonneAgregat(table, num), cd = _colonneAgregat(table, sur);
+  if (!cn || !cd || cn === cd) return { ...base, manque: `${num.unite} / ${sur.unite}` };
+  return { ...base, num: cn, den: cd, quoi: num.unite, sur: sur.unite };
+}
 function detecterPart(table, question) {
   if (!table || !Array.isArray(table.objects) || !table.objects.length) return null;
   const brut = String(question || '');
   let q = normalizeText(brut.replace(/%/g, ' pourcentage '));
   if (!PART_CUE.test(q) || /\btaux d ?acces\b/.test(q)) return null;
+  if (table.rowUnit === 'agregat') return _partAgregat(table, q, brut);
   if (/\b(repartition|ventilation|moyen|moyenne|median|mediane)\b/.test(q)) return null; // répartition en %, moyenne d'une colonne de %
   // v27.5.54 — « pourcentage de candidats sans proposition par département » : un taux DANS chaque département
   // (avant : la répartition des candidats sans proposition entre départements, lue « Gironde : 50 % »)
@@ -2572,6 +2627,10 @@ const CONCEPTS_A_FILTRER = [
   { re: /\b(plus de|moins de|au moins|au plus|superieure? a|inferieure? a|depasse\w*|au dela de|en dessous de)\s+\d/, mot: 'condition chiffrée', ok: (t, f) => f && f.source === 'condition_chiffree' },
   // v27.13 — « combien de refusés » sans colonne de statut comptait tout le fichier
   { re: /\brefus(e|es|ee|ees)?\b|\bliste d ?attente\b|\ben attente\b|\bdesist(e|es|ee|ees|ement)?\b/, mot: 'statut de candidature (refusé, liste d\'attente…)', ok: t => /refus|attente|desist|statut|admi|candidature/.test(t) },
+  // v27.5.84 — « ont eu une proposition », « sans proposition », « taux de proposition » sans colonne de proposition :
+  // arrêt (avant : tout le fichier, ou la part des boursiers, affichés comme exacts). « A répondu favorablement à une
+  // proposition » est une autre information (l'acceptation).
+  { re: /\b(?:eu|recu|recus|obtenu|obtenus)\b[^.]{0,15}\bpropositions?\b|\bsans (?:aucune )?propositions?\b|\bpas (?:eu |recu )?(?:de |d )propositions?\b|\btaux de propositions?\b/, mot: 'proposition', ok: t => /proposition/.test(t) && !/favorabl|accept|repondu/.test(t) },
   { re: /\bbasques?\b/, mot: 'Pays Basque', ok: t => /basque/.test(t) },
   { re: /\bpubli(c|cs|que|ques)\b|\bprive(e|s|es)?\b/, mot: 'public / privé', ok: t => /publi|priv|statut|secteur|contrat/.test(t) },
   { re: /\bselecti(f|fs|ve|ves)\b/, mot: 'sélective', ok: t => /selecti/.test(t) },
@@ -5374,6 +5433,9 @@ function perimetreResultat(kind, plan, result) {
     const nonAffiche = (result.total || 0) - (result.matrix || []).reduce((t, r) => t + (r.total || 0), 0);
     if (nonAffiche > 0) notes.push(`${_nf(nonAffiche)} ${mot(nonAffiche)} dans des valeurs moins fréquentes, non affichées dans le tableau`);
   }
+  // v27.5.84 — tableau déjà calculé : la moyenne d'une colonne de taux n'est pas le taux d'ensemble
+  if (kind === 'stats' && table.rowUnit === 'agregat' && /taux|pourcentage|%|part\b/.test(_hx(result.col || plan.statsCol || plan.targetCol || '')))
+    notes.push('moyenne simple des pourcentages des lignes, qui ne tient pas compte de leur taille ; pour le taux d\'ensemble (somme ÷ somme), demandez par exemple « taux de proposition »');
   // v27.5.82 — définition SAIO : élèves du périmètre sans vœu confirmé, laissés de côté et comptés
   const _fu = filtres.find(f => f.univers);
   if (_fu) {

@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-72 fichiers, 2 872 tests. Depuis la racine du repo :
+73 fichiers, 2 930 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -164,6 +164,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 `js/test_definition_candidats.js` vérifie la **définition des « candidats » dans un fichier académique**, alignée sur le SAIO : le fichier contient tout le vivier des terminales, mais un candidat est un élève qui a confirmé au moins un vœu. « Combien de candidats », « taux de proposition des bacheliers généraux » portent sur ces élèves, et la réponse le dit (avec le nombre d'élèves sans vœu laissés de côté) ; « combien d'élèves », « combien de lignes », « y compris sans vœu » donnent tout le fichier ; « combien de boursiers » donne tous les boursiers, avec une note sur ceux qui n'ont pas de vœu. Le taux applique la définition au numérateur et au dénominateur, les comparaisons et les questions qui s'enchaînent aussi. L'open data n'est pas concerné, et la double lecture ne compte pas cette définition comme un critère lu dans la question.
 
 `js/test_las_etablissements.js` reproduit des erreurs vues en usage réel sur l'open data : « licences LAS », « licence accès santé » (la catégorie officielle Licence_Las, pas 0 ni les licences « santé » ; « licences hors LAS » = une exclusion), « liste des établissement » au singulier (la liste, pas un refus), et « vœux confirmés par les candidats … à Bordeaux Montaigne » (l'établissement, situé à Pessac, pas la commune de Bordeaux ; « confirmés » n'est pas un mot d'intitulé, « par les candidats » n'est pas une répartition).
+
+`js/test_formats_fichiers.js` est un **banc de formats** : le même fichier académique fictif présenté de 16 façons (colonnes dans un autre ordre, titre avant les en-têtes, onglet de notice, ligne « Total », CSV `;` ou `,` en UTF-8 ou Windows-1252, « O/N », colonnes renommées, MAJUSCULES, « 0 » au lieu de case vide, en-têtes en double…), plus un **tableau déjà calculé** (une ligne = un département, comme le classeur régional du SAIO). Chaque réponse doit être juste, ou le moteur s'arrête et le dit. Dans un tableau déjà calculé, « combien de candidats » additionne la colonne « Nombre de candidats » (pas les lignes), un taux se calcule somme ÷ somme, et la ligne « Total » est retirée.
 
 `js/test_part_groupes.js` vérifie les **taux par groupe** : « pourcentage de candidats sans proposition par département », « part des boursiers par académie », « taux de remplissage des BTS par académie » donnent un taux calculé **dans** chaque groupe (avant : la répartition du total entre groupes, lue à tort comme un taux), avec la ligne « Ensemble », l'export, le graphique et les relances (« taux de proposition des boursiers » puis « et par département ? »).
 
