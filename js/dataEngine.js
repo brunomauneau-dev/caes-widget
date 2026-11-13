@@ -1695,7 +1695,35 @@ function detecterClassement(table, question) {
   }
   return null;
 }
+// v27.5.78 — « quels lycées ont le plus fort taux de boursiers », « quelle académie a le plus fort pourcentage de
+// boursiers », « classement des lycées par taux de proposition », « le taux … le plus bas » : un TAUX calculé dans chaque
+// groupe, puis classé (avant : un seul taux global, « Oui / Non », ou un nombre présenté comme un taux)
+const _ENTITES_TAUX = /\b(lycees?|etablissements?|universites?|departements?|academies?|regions?|communes?|villes?|series?|filieres?)\b/;
+const _TAUX_MOTS = /\b(taux|pourcentage|part|proportion)\b/;
+function _classementParTaux(table, question) {
+  const q = normalizeText(String(question || '').replace(/%/g, ' pourcentage '));
+  if (!_TAUX_MOTS.test(q) || /\btaux d ?acces\b/.test(q)) return null;
+  const sup = /\b(?:le|la|les)\s+(?:plus|moins)\s+(?:fort|forte|forts|fortes|eleve|elevee|eleves|elevees|haut|haute|bas|basse|faible|faibles|grand|grande)\b|\b(?:meilleur|meilleure|meilleurs|meilleures|pire|pires)\b|\bclassement\b|\bclasse[rz]?\b|\btop\s*\d*\b|\b(?:le|la)\s+plus\s+(?:bas|basse|faible)\b/;
+  if (!sup.test(q)) return null;
+  const ent = q.match(_ENTITES_TAUX);
+  if (!ent) return null;
+  const mot = ent[1];
+  const col = _colonneDimension(table, `par ${mot}`);
+  if (!col) return null;
+  const tauxM = q.match(/\b(?:taux|pourcentage|part|proportion)\b.*$/);
+  if (!tauxM) return null;
+  // la phrase du taux sans les superlatifs ni le sujet (« taux de boursiers », « taux de proposition des boursiers »)
+  let phrase = tauxM[0].replace(/\b(?:le|la|les)\s+(?:plus|moins)\s+(?:fort|forte|forts|fortes|eleve|elevee|eleves|elevees|haut|haute|bas|basse|faible|faibles|grand|grande)\b/g, ' ')
+    .replace(/\b(?:meilleur|meilleure|meilleurs|meilleures|pire|pires)\b/g, ' ').replace(new RegExp(`\\b(?:les |des |par )?${mot}\\b`, 'g'), ' ').replace(/\s+/g, ' ').trim();
+  const croissant = /\b(?:plus|moins)\s+(?:bas|basse|faible|faibles)\b|\bmoins\s+(?:fort|forte|eleve|elevee|haut|haute)\b|\bpires?\b/.test(q);
+  const n = (q.match(/\b(?:top|les|des)\s+(\d{1,3})\b/) || [])[1];
+  return { col, phrase, croissant, limit: n ? Math.min(Number(n), 100) : null };
+}
 function applyClassement(plan) {
+  if (plan && plan.table && !['compare', 'chart_current', 'export_current_excel', 'export_current_csv', 'export_excel', 'export_csv'].includes(plan.tool)) {
+    const ct = _classementParTaux(plan.table, plan.question);
+    if (ct) { plan._classementTaux = ct; plan.tool = 'count_rows'; plan.targetCol = null; return plan; }
+  }
   if (!plan || !plan.table || ['compare', 'chart_current', 'export_current_excel', 'export_current_csv', 'export_excel', 'export_csv'].includes(plan.tool)) return plan;
   const c = detecterClassement(plan.table, plan.question);
   if (!c) return plan;
@@ -1917,7 +1945,15 @@ function _filtresDePhrase(table, phrase) {
 }
 function applyPart(plan) {
   if (!plan || !plan.table || ['compare', 'chart_current', 'export_current_excel', 'export_current_csv', 'export_excel', 'export_csv', 'classement'].includes(plan.tool)) return plan;
-  const d = detecterPart(plan.table, plan.question);
+  let d;
+  if (plan._classementTaux) {
+    const ct = plan._classementTaux;
+    // le taux est rejoué « par X » (même calcul que « taux de proposition par lycée »), puis classé
+    d = detecterPart(plan.table, `${ct.phrase} par ${ct.col}`) || detecterPart(plan.table, ct.phrase);
+    if (d) { d.groupe = ct.col; d.classe = { croissant: ct.croissant, limit: ct.limit }; }
+    // les filtres tirés du sujet (« lycées » : nom contenant lycée) ne restreignent pas le classement
+    plan.filters = (plan.filters || []).filter(f => !(f && f.source === 'etablissement' && f.col === ct.col) && !(f && f.op === 'eq' && /^\d+$/.test(String(f.value)) && _estNumerique(plan.table, f.col)));
+  } else d = detecterPart(plan.table, plan.question);
   if (!d) return plan;
   plan.tool = 'part';
   plan.part = d;
@@ -2035,7 +2071,14 @@ function executerPartGroupes(plan, base, ensemble) {
     }
     const num = applyLocalActionFilters(rs, d.condition).length;
     return { valeur, num, den: rs.length, pct: rs.length ? num / rs.length * 100 : null };
-  }).filter(g => g.den > 0).sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1) || a.valeur.localeCompare(b.valeur, 'fr'));
+  }).filter(g => g.den > 0).sort((a, b) => (d.classe && d.classe.croissant ? (a.pct ?? 1e9) - (b.pct ?? 1e9) : (b.pct ?? -1) - (a.pct ?? -1)) || a.valeur.localeCompare(b.valeur, 'fr'));
+  // v27.5.78 — classement par taux : les très petits groupes (1 candidat sur 1 = 100 %) sont mis à part, et dits
+  if (d.classe && d.mode !== 'effectifs') {
+    const min = Math.max(10, Math.ceil(base.length * 0.002));
+    const petits = lignes.filter(g => g.den < min);
+    if (petits.length && petits.length < lignes.length) { for (let i = lignes.length - 1; i >= 0; i--) if (lignes[i].den < min) lignes.splice(i, 1); d.classe.petits = { n: petits.length, min }; }
+  }
+  if (d.classe && d.classe.limit && lignes.length > d.classe.limit) lignes.splice(d.classe.limit);
   if (!lignes.length) return unresolvedConceptExecution(plan, [], `aucune ligne avec une valeur dans « ${col} » : le taux par groupe ne peut pas être calculé`);
   const result = { mode: d.mode, groupe: col, groupes: lignes, ensemble, total: base.length, sansGroupe };
   const p2 = { ...plan, tool: 'part', targetCol: col }; // outil « part » gardé : les relances reprennent la part
@@ -2060,7 +2103,9 @@ function renderPartGroupesHtml(plan, r) {
   const methode = `<p style="font-size:12px;color:var(--gris3)">Chaque part est calculée à l'intérieur du groupe : ${escapeHtml(quoi)} du groupe ÷ ${escapeHtml(sur)} du groupe.${r.groupes.length > 40 ? ` 40 groupes affichés sur ${r.groupes.length}.` : ''}</p>`;
   const perim = perimetreResultat('part_groupes', plan, r).html;
   const debug = `<details class="msg-sources"><summary>Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : part par groupe (${escapeHtml(r.mode)}) · ${escapeHtml(r.groupe)}</div></details>`;
-  return `${deTitleHtml(titre, plan.blockId, plan.originalTitle || titre)}${perim}${table}${methode}${debug}`;
+  const cl = plan.part && plan.part.classe;
+  const noteClasse = cl ? `<p style="font-size:12px;color:var(--gris3)">Classement du taux ${cl.croissant ? 'le plus bas au plus haut' : 'le plus haut au plus bas'}${cl.petits ? ` ; ${_nf(cl.petits.n)} groupe(s) de moins de ${_nf(cl.petits.min)} lignes écarté(s) (un taux sur quelques lignes n'est pas comparable, ex. 1 sur 1 = 100 %)` : ''}.</p>` : '';
+  return `${deTitleHtml(titre, plan.blockId, plan.originalTitle || titre)}${perim}${noteClasse}${table}${methode}${debug}`;
 }
 function renderPartHtml(plan, result) {
   const d = plan.part;
@@ -2403,6 +2448,7 @@ const MOTS_QUESTION = new Set(`
   eux elles ceux celles entre parmi exception excepte exceptes dehors
   croise croisee croises croisees croiser pivot
   seul seule seuls seules
+  meilleur meilleure meilleurs meilleures pire pires fort forte forts fortes eleve elevee eleves elevees faible faibles
   fais faites fait faire mets mettre trace tracer dessine dessiner camembert diagramme histogramme barres courbe forme visualise visualiser
   combien quel quelle quels quelles nombre nombres total totale totaux somme effectif effectifs compte compter
   formation formations filiere filieres ligne lignes dont avec sans pour par dans sur des les une aux leur
@@ -5311,7 +5357,8 @@ function shouldAnswerLocallyWithoutAlbert(exec) {
   // Les requêtes de comptage/répartition simples doivent être résolues par le moteur,
   // sinon Albert risque de répondre à partir d'un résumé incomplet.
   // v27.7 — « unresolved » : terme introuvable, on le dit plutôt que de laisser Albert inventer
-  return ['count','group_by','top','pivot','stats','export','compare','unresolved','sum','classement','part','evolution','evolution_groupes','stats_groupes','part_groupes','pdf'].includes(exec.kind);
+  // v27.5.78 — « ratio » (candidats par place) : calculé, affiché sans Albert (avant : un appel à Albert inutile)
+  return ['count','group_by','top','pivot','stats','export','compare','unresolved','sum','classement','part','evolution','evolution_groupes','stats_groupes','part_groupes','pdf','ratio'].includes(exec.kind);
 }
 /* ═══════════════ v27.9 — Chiffres écrits par Albert : vérifiés contre les données fournies ═══════════════
    Albert rédige ; il ne doit pas produire de chiffres. Chaque nombre de sa réponse est comparé aux nombres
