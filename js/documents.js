@@ -78,8 +78,27 @@ function uniteDesLignes(headers) {
   const effectifs = h.some(x => /effectif total des candidats pour une formation|effectif total des candidats ayant/.test(x));
   return capacite && effectifs ? 'formation' : undefined;
 }
+// v27.5.84 — tableau déjà calculé (une ligne = un département, un lycée, une formation… avec « Nombre de candidats »,
+// « Admis ») : les personnes sont dans des colonnes chiffrées, pas dans les lignes. Avant : « combien de candidats »
+// comptait les lignes (6 départements) au lieu d'additionner la colonne.
+const COLONNE_EFFECTIF_RE = /^(?:(?:nombre|nb|effectifs?)(?: total)?(?: de| d| des)? )?(?:candidat(?:e)?s?|eleves?|admis(?:es)?|inscrit(?:e)?s?|lyceen(?:ne)?s?|boursiers?|apprentis?|etudiant(?:e)?s?)\b/;
+function colonnesEffectifs(headers, objects) {
+  const objs = (objects || []).slice(0, 400);
+  return (headers || []).filter(h => {
+    const n = normalizeText(String(h || ''));
+    if (!COLONNE_EFFECTIF_RE.test(n) || /\b(taux|pourcentage|part|moyenne?|ratio|rang|code)\b|%/.test(n)) return false;
+    const vals = objs.map(o => o?.[h]).filter(v => v !== '' && v !== null && v !== undefined);
+    if (!(vals.length >= Math.max(2, objs.length * 0.6) && vals.every(v => typeof v === 'number' || /^\s*-?\d[\d\s\u00a0\u202f]*([.,]\d+)?\s*$/.test(String(v))))) return false;
+    // une colonne d'état codée 1 / 0 (« Boursier », « Admis ») décrit une personne, ce n'est pas un effectif
+    return vals.some(v => Number(String(v).replace(/[\s\u00a0\u202f]/g, '').replace(',', '.')) > 1);
+  });
+}
 function avecUnite(t) {
-  if (t && !t.rowUnit) { const u = uniteDesLignes(t.headers); if (u) t.rowUnit = u; }
+  if (t && !t.rowUnit) {
+    const u = uniteDesLignes(t.headers);
+    if (u) t.rowUnit = u;
+    else if (colonnesEffectifs(t.headers, t.objects).length) t.rowUnit = 'agregat';
+  }
   return t;
 }
 
@@ -223,6 +242,11 @@ function rowsToTable(rows) {
       && /^(total|totaux|sous[- ]?total|ensemble|somme)\b/i.test(String(vals[0]).trim());
   };
   for (let i = objects.length - 1; i >= 0; i--) if (estTotal(objects[i])) objects.splice(i, 1);
+  // v27.5.84 — ligne de total entièrement remplie (« Total académie », « Ensemble ») en bas d'un tableau déjà calculé :
+  // retirée aussi (avant : gardée, donc comptée deux fois dans une somme). Seulement en fin de tableau, et « Ensemble »
+  // seul (« Ensemble scolaire Saint-… » est un établissement).
+  const libelleTotal = o => { const v = headers.map(hd => o[hd]).find(x => x !== '' && x !== null && x !== undefined); return /^(total|totaux|sous[- ]?total)\b|^ensemble$/i.test(String(v ?? '').trim()); };
+  while (objects.length > 2 && libelleTotal(objects[objects.length - 1])) objects.pop();
   // Colonnes entièrement vides et sans en-tête : retirées
   const keep = headers.filter((hd, i) => String(raw[i] ?? '').trim() !== '' || objects.some(o => o[hd] !== ''));
   if (keep.length !== headers.length) objects.forEach(o => headers.forEach(hd => { if (!keep.includes(hd)) delete o[hd]; }));

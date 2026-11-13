@@ -350,7 +350,12 @@
 
   function booleanValue(entry, yes) {
     const wanted = yes ? ['oui','yes','true','vrai','1'] : ['non','no','false','faux','0'];
-    return (entry.values || []).find(v => wanted.includes(nrm(v.value))) || null;
+    const found = (entry.values || []).find(v => wanted.includes(nrm(v.value)));
+    if (found) return found;
+    // v27.5.84 — colonne écrite « O / N » (avant : « ont eu une proposition » perdait son filtre → tout le fichier)
+    const vals = new Set((entry.values || []).map(v => nrm(v.value)));
+    if (vals.size <= 3 && vals.has('o') && vals.has('n')) return (entry.values || []).find(v => nrm(v.value) === (yes ? 'o' : 'n')) || null;
+    return null;
   }
 
   function aliasesForValue(entry, value) {
@@ -404,8 +409,8 @@
     }
 
     if (entry.kind === 'apprentissage') {
-      if (/^(oui|true|1|vrai)$/.test(v) || /^apprenti/.test(v)) add('apprenti','apprentis','apprentie','apprenties','en apprentissage','en alternance');
-      if (/^(non|false|0|faux)$/.test(v) || /non apprenti|hors apprentissage/.test(v)) add('non apprenti','non apprentis','hors apprentissage','pas en apprentissage');
+      if (/^(oui|o|yes|true|1|vrai)$/.test(v) || /^apprenti/.test(v)) add('apprenti','apprentis','apprentie','apprenties','en apprentissage','en alternance');
+      if (/^(non|n|no|false|0|faux)$/.test(v) || /non apprenti|hors apprentissage/.test(v)) add('non apprenti','non apprentis','hors apprentissage','pas en apprentissage');
     }
 
     if (entry.kind === 'sexe') {
@@ -808,7 +813,11 @@
         const _premier = (e.norm.split(' ')[0] || '');
         const _memeMot = t => t && t.length >= 4 && (_premier === t || _premier === t.replace(/s$/, ''));
         const _motsPh = ph.split(/\s+/).filter(w => w.length >= 4); // mots bruts (« académie » est un mot vide pour tokens())
-        if (_premier.length >= 4 && _memeMot(_motsPh[0])) s += 300;
+        // v27.5.84 — « par type de classe » : « type » seul ne suffit pas (avant : « Type de contrat établissement »,
+        // quand la colonne de la classe a un autre nom) ; le mot qui suit (« classe ») doit être dans la colonne
+        const _qualif = /^(types?|natures?|categories?|niveaux?|modes?)$/.test(_motsPh[0] || '') && _motsPh.length >= 2;
+        if (_qualif && !e.norm.includes(_motsPh[1].replace(/s$/, ''))) s -= 150;
+        else if (_premier.length >= 4 && _memeMot(_motsPh[0])) s += 300;
         else if (_premier.length >= 4 && _motsPh.some(_memeMot)) s += 60;
         // v27.10 — « par statut » / « public ou privé » : la colonne Statut (ou Secteur), pas une colonne d'effectifs boursiers
         if (/\bstatuts?\b|\bsecteurs?\b|\bpubli|\bprive/.test(ph) && /^(statut|secteur)\b/.test(e.norm) && !/boursier/.test(e.norm)) s += 160;
