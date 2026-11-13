@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-64 fichiers, 2 734 tests. Depuis la racine du repo :
+65 fichiers, 2 745 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -148,6 +148,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 `js/test_serie13.js` vérifie les **spécialités combinées et comparaisons de formations** : « SES ou HGGSP » (l'une ou l'autre ; « et » : les deux), « comparer les admis en CPGE et en BTS », « comparer les boursiers admis en CPGE et en BTS » (deux formations, pas admis / non admis ni boursiers / non-boursiers), open data « comparer les BTS et les BUT en Gironde », et arrêt pour « comparer le nombre de places » (une comparaison compte des formations).
 
 `js/test_serie14.js` vérifie la **mobilité des candidats** (fichier de candidats) : « quelle part des admis en CPGE viennent de Gironde » (parmi les admis en CPGE), « part des candidats de Gironde admis hors académie » (parmi les candidats de Gironde), « d'où viennent les admis en CPGE » (par département ou lycée d'origine), « où vont les boursiers » (par académie d'accueil), « dans quelles formations vont… » ; pas de réécriture sur l'open data.
+
+`js/test_serie15.js` vérifie les **écarts, rangs et « environ »** : « combien de BTS de plus en Gironde que dans les Landes », « différence / écart entre… », « y a-t-il plus de … ou … » (comparaison avec l'écart affiché, groupes dans l'ordre de la question), « la deuxième académie pour le nombre de BTS » (classement), « environ combien… » ; une valeur comparée n'est jamais un filtre commun aux deux groupes.
 
 `js/test_part_groupes.js` vérifie les **taux par groupe** : « pourcentage de candidats sans proposition par département », « part des boursiers par académie », « taux de remplissage des BTS par académie » donnent un taux calculé **dans** chaque groupe (avant : la répartition du total entre groupes, lue à tort comme un taux), avec la ligne « Ensemble », l'export, le graphique et les relances (« taux de proposition des boursiers » puis « et par département ? »).
 
