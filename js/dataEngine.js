@@ -300,6 +300,30 @@ const _MATIERES_LYCEE = [
 // v27.5.55 — colonnes qui décrivent le LYCÉE du candidat : enseignements de spécialité de terminale (« Mathématiques |
 // Physique-Chimie ») et spécialité de la classe (bac pro, STMG : « Mercatique », « Gestion et finance »). Distinctes de la
 // formation d'accueil (« Spécialité / mention formation d'accueil acceptée »), dont beaucoup de mots sont communs.
+// v27.5.79 — « par spécialité » dans un fichier de candidats : trois colonnes possibles. Le contexte de la question
+// décide ; sans indice, le widget demande de préciser (avant : la spécialité du bac pro, presque toujours vide, même pour
+// « les admis en PASS par spécialité »)
+function _dimensionSpecialite(table, question) {
+  const q = normalizeText(question || '');
+  if (!/\bpar\s+(?:enseignements?\s+de\s+)?specialites?\b|\bpar\s+enseignements?\b|\bpar\s+doublettes?\b/.test(q)) return null;
+  const L = _colonnesLycee(table);
+  const hs = (table?.headers || []).filter(Boolean);
+  const acc = hs.find(h => /^specialite.*mention.*accueil|specialite.*formation d accueil/.test(normalizeText(h))) || null;
+  const choix = [L.ens && 'enseignements de spécialité suivis au lycée', acc && 'spécialité / mention de la formation d\'accueil', L.spe && 'spécialité du bac (bac pro)'].filter(Boolean);
+  if (choix.length < 2) return null; // une seule colonne : rien d'ambigu
+  if (L.ens && /\benseignements?\b|\blycee\b|\bterminale\b|\bsuivie?s?\b|\bdoublettes?\b|\bpremiere\b/.test(q)) return { col: L.ens, eclater: true };
+  if (acc && /\b(?:de la |de leur |d )?formation(?:s)?(?: d accueil)?\b|\baccueil\b|\bmentions?\b/.test(q.replace(/^.*?\bpar\b/, ''))) return { col: acc };
+  if (L.spe && /\bbac(?:s|heliers?)? pros?\b|\bprofessionnel(?:le)?s?\b/.test(q)) return { col: L.spe };
+  return { ambigu: true, choix };
+}
+// colonne à plusieurs valeurs (« Mathématiques | Physique-Chimie ») : chaque valeur comptée (un candidat compte dans
+// chacune de ses spécialités) ; pct = part des lignes qui ont cette valeur
+function _comptesEclates(rows, col) {
+  const m = new Map(); let filled = 0;
+  rows.forEach(r => { const parts = String(r?.[col] ?? '').split('|').map(x => x.trim().replace(/^Msgn\/\s*/, '')).filter(Boolean); if (!parts.length) return; filled++; [...new Set(parts)].forEach(p => m.set(p, (m.get(p) || 0) + 1)); });
+  const top = [...m].map(([value, count]) => ({ value, count, pct: filled ? count / filled * 100 : 0 })).sort((a, b) => b.count - a.count || a.value.localeCompare(b.value, 'fr'));
+  return { top, filled, distinct: top.length, eclate: true };
+}
 function _colonnesLycee(table) {
   const hs = (table?.headers || []).filter(Boolean);
   const ens = hs.find(h => /enseignements? .*specialite|specialites? .*suivi/.test(normalizeText(h))) || null;
@@ -2448,6 +2472,7 @@ const MOTS_QUESTION = new Set(`
   eux elles ceux celles entre parmi exception excepte exceptes dehors
   croise croisee croises croisees croiser pivot
   seul seule seuls seules
+  suivi suivie suivis suivies terminale terminales
   meilleur meilleure meilleurs meilleures pire pires fort forte forts fortes eleve elevee eleves elevees faible faibles
   fais faites fait faire mets mettre trace tracer dessine dessiner camembert diagramme histogramme barres courbe forme visualise visualiser
   combien quel quelle quels quelles nombre nombres total totale totaux somme effectif effectifs compte compter
@@ -4468,6 +4493,17 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     if (toAdd.length) plan.filters = [...(plan.filters || []), ...toAdd];
   }
   // v27.7 — terme de formation introuvable, ou termes jamais réunis : on s'arrête (pas de total faux)
+  if ((plan.tool === 'group_by' || plan.tool === 'top' || plan.tool === 'pivot') && !plan._speResolue) {
+    const sp = _dimensionSpecialite(plan.table, plan.question);
+    if (sp && sp.ambigu) return unresolvedConceptExecution(plan, [], `« par spécialité » peut désigner ${sp.choix.map(c => `« ${c} »`).join(', ')} : précisez (par exemple « par enseignement de spécialité », « par spécialité de la formation d'accueil », « par spécialité du bac pro »)`);
+    if (sp && sp.col) {
+      // « au lycée », « en terminale » : pas un établissement d'accueil « lycée » ni un intitulé « terminale »
+      const _motsSpe = /^(suivie?s?|terminales?|lycees?|enseignements?|specialites?|classes?|premieres?)$/;
+      const filtres = (plan.filters || []).filter(f => !(f && f.source === 'etablissement' && f.op === 'in' && normalizeText(String(f.value || '')) === 'lycee' && /\b(?:au|du|en) lycee\b/.test(normalizeText(plan.question || ''))))
+        .filter(f => !(f && f.op === 'contains_all' && f.source === 'termes_formation' && (f.terms || []).every(t => [].concat(t).some(w => _motsSpe.test(normalizeText(w))))));
+      return runDataEnginePlan({ ...plan, tool: plan.tool === 'pivot' ? 'group_by' : plan.tool, targetCol: sp.col, eclater: sp.eclater, filters: filtres, unresolvedTerms: [], clarification: null, _speResolue: true }, persistentFiltersOverride);
+    }
+  }
   if (plan.clarification) return unresolvedConceptExecution(plan, [], plan.clarification);
   if (plan.tool !== 'compare' && plan.tool !== 'chart_current' && plan.tool !== 'export_current_excel' && plan.tool !== 'export_current_csv') {
     // v27.5.61 — la question demande des établissements / des académies… : un calcul qui compte autre chose s'arrête
@@ -4627,7 +4663,7 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     const col = plan.targetCol || plan.mentionedCols?.[0];
     if (!col) return null;
     const limit = plan.listMode ? 300 : (plan.limit || detectLimit(plan.question) || (plan.tool === 'top' ? 10 : 30));
-    let counts = plan.distinctCol ? distinctParGroupe(rows, col, plan.distinctCol, plan.table)
+    let counts = plan.eclater ? _comptesEclates(rows, col) : plan.distinctCol ? distinctParGroupe(rows, col, plan.distinctCol, plan.table)
       : plan.groupSumCol ? sommesParGroupe(rows, col, plan.groupSumCol) : topCountsForRows(rows, col, Math.max(limit, 30));
     if (plan.croissant && !plan.distinctCol && !plan.groupSumCol) {
       // le moins : tous les groupes du fichier, y compris ceux à 0 (sinon un département sans licence serait oublié)
@@ -4638,6 +4674,7 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     }
     const topRows = counts.top.slice(0, limit);
     const _res = { total: rows.length, filled: counts.filled, distinct: counts.distinct, rows: topRows };
+    if (counts.eclate) _res.eclate = true;
     if (plan.groupSumCol) _res.somme = { col: plan.groupSumCol, unite: plan.sumUnit, total: counts.somme, sansValeur: counts.sansValeur };
     if (plan.distinctCol) _res.etablissements = { col: plan.distinctCol, total: counts.totalDistinct };
     // v27.17 — liste d'intitulés remplie pour moins de 80 % des formations (options des PASS) :
@@ -5107,6 +5144,7 @@ function perimetreResultat(kind, plan, result) {
     const vides = (result.total || 0) - (result.filled ?? result.total ?? 0);
     if (vides > 0) notes.push(`${_nf(vides)} ${mot(vides)} sans valeur dans « ${plan.targetCol} »`);
     const affichees = Math.min((result.rows || []).length, 20);
+    if (result.eclate) notes.push(`un candidat suit plusieurs spécialités : il est compté dans chacune (le total dépasse le nombre de candidats) ; chaque % est la part des ${_nf(result.filled)} candidats qui ont suivi cette spécialité`);
     if ((result.distinct || 0) > affichees && !plan.lesquelles) notes.push(`seules les ${_nf(affichees)} valeurs les ${plan.croissant ? 'moins' : 'plus'} fréquentes sont affichées, sur ${_nf(result.distinct)}${plan.croissant ? ' (y compris celles à 0)' : ''}`);
   }
   // v27.17 — 0 dans la commune de Bordeaux, mais des formations dans l'académie de Bordeaux (PASS à Talence) :
