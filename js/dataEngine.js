@@ -2955,6 +2955,7 @@ const REFORMULATIONS = [
   [/\bSTS\b/gi, 'BTS'],
   // v27.5.83 — « vœux confirmés » : « confirmés » qualifie les vœux (pas les formations de langue « … - confirmé »)
   [/\b(v(?:œ|oe)ux|candidatures?)\s+confirm[ée]e?s?\b/gi, '$1'],
+  [/(\bv(?:œ|oe)ux\b(?:\s+[^\s?]+){0,2}?)\s+(?:ont\s+été|a\s+été|sont|été)\s+confirm[ée]e?s?\b/gi, '$1'],
   // « vœux confirmés par les candidats » : les auteurs des vœux, pas une répartition « par candidat »
   [/(\bv(?:œ|oe)ux\b[^?]{0,30}?)\s+par\s+(?:les|des)\s+(candidat(?:e)?s|lyc[ée]ens|[ée]l[èe]ves)\b/gi, '$1 des $2'],
   // v27.5.77 — « la fac » = l'université (établissement)
@@ -4727,6 +4728,20 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     if (_precision) return unresolvedPrecisionExecution(plan, _precision);
     if (plan.unresolvedTerms && plan.unresolvedTerms.length) return unresolvedFormationExecution(plan, plan.unresolvedTerms, termFilter);
     if (termFilter && !applyLocalActionFilters(plan.table.objects || [], [termFilter]).length) return unresolvedFormationExecution(plan, [], termFilter);
+    // v27.5.85 — les mots d'intitulé doivent exister AVEC la formation demandée (catégorie, filière) : « vœux ont été
+    // confirmés en LAS » cherchait « confirmés » parmi les LAS → 0 affiché comme exact (le mot n'existe que dans des
+    // licences de langues « … confirmé »). Les lieux ne comptent pas ici : 0 BTS MCO dans une commune est une vraie réponse.
+    if (termFilter) {
+      const _fc = new Set(formationTermsInfo(plan.table).cols);
+      const _forme = (plan.filters || []).filter(f => f && f !== termFilter && f.op === 'eq' && (f.source === 'categorie_formation' || _fc.has(f.col)));
+      if (_forme.length && !applyLocalActionFilters(plan.table.objects || [], [termFilter, ..._forme]).length) {
+        const ex = unresolvedFormationExecution(plan, [], termFilter);
+        const quoi = `aucune formation « ${_forme.map(f => String(f.value)).join(' » / « ')} » dont l'intitulé contient « ${termFilter.label.split(' + ').join(' » et « ')} »`;
+        ex.text = `NON TROUVÉ : ${quoi}`;
+        ex.html = ex.html.replace(/<p>Je n'ai trouvé [\s\S]*?<\/strong>\. /, `<p>Je n'ai trouvé ${escapeHtml(quoi)} dans <strong>${escapeHtml(plan.table.name || 'la table active')}</strong>. `);
+        return ex;
+      }
+    }
     // v27.22 — un mot de la question n'a correspondu à rien (« khâgnes », « NDRC ») : arrêt, pas un compte plus large
     // (après les messages plus précis : formation non trouvée, option non précisée)
     const inconnus = motsNonReconnus(plan);
@@ -5432,6 +5447,13 @@ function perimetreResultat(kind, plan, result) {
   if (kind === 'pivot') {
     const nonAffiche = (result.total || 0) - (result.matrix || []).reduce((t, r) => t + (r.total || 0), 0);
     if (nonAffiche > 0) notes.push(`${_nf(nonAffiche)} ${mot(nonAffiche)} dans des valeurs moins fréquentes, non affichées dans le tableau`);
+  }
+  // v27.5.85 — résultat nul : quel critère vide le résultat (sans lui, combien de lignes) — un 0 ne passe jamais sans explication
+  if (['count', 'count_rows', 'sum'].includes(kind) && retenues === 0 && filtres.length) {
+    const pistes = filtres.map(f => ({ f, n: applyLocalActionFilters(table.objects || [], filtres.filter(g => g !== f)).length })).filter(x => x.n > 0);
+    notes.push(pistes.length
+      ? `résultat nul : ${pistes.slice(0, 3).map(x => `sans le critère ${_filtreEnClair(x.f)}, ${_nf(x.n)} ${mot(x.n)}`).join(' ; ')} — vérifiez que ce critère correspond bien à la question`
+      : 'résultat nul : aucune ligne ne remplit ces critères, même pris séparément — vérifiez la ligne « J\'ai compris »');
   }
   // v27.5.84 — tableau déjà calculé : la moyenne d'une colonne de taux n'est pas le taux d'ensemble
   if (kind === 'stats' && table.rowUnit === 'agregat' && /taux|pourcentage|%|part\b/.test(_hx(result.col || plan.statsCol || plan.targetCol || '')))

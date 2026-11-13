@@ -7,6 +7,10 @@
 // - « combien de vœux confirmés par les candidats en licence d'histoire à Bordeaux Montaigne » : arrêt (« confirmés » pris
 //   pour un mot d'intitulé, « Bordeaux » pour la commune — l'université est à Pessac —, « par les candidats » pour une
 //   répartition). Après correction, « Bordeaux » ne filtre plus la commune quand il ouvre le nom d'un établissement.
+// - « combien de vœux ont été confirmés en LAS » : 0 affiché comme exact (« confirmés » cherché dans les intitulés des
+//   LAS ; le mot n'existe que dans des licences de langues « … - confirmé »), et la relecture par Albert ne l'a pas vu.
+//   Désormais : « ont été confirmés » qualifie les vœux ; un mot d'intitulé absent de la formation demandée arrête le
+//   calcul ; tout résultat à 0 dit quel critère le vide.
 // Données FICTIVES (js/fixtures/donnees_simulees.mjs) ; chaque valeur attendue est recalculée sur les lignes.
 // node js/test_las_etablissements.js
 
@@ -132,6 +136,35 @@ await describe('« vœux confirmés … à Bordeaux Montaigne » : l\'établisse
   assert(q2('combien de BTS à Bordeaux en Gironde')?.result?.count === OD2.filter(o => o.fili === 'BTS' && o.commune === 'Bordeaux' && o.dep === 'Gironde').length, 'faux positif : « à Bordeaux en Gironde »');
   const l = q2('combien de licences au lycée Montaigne');
   assert(l?.result?.count === OD2.filter(o => o.fili === 'Licence' && o.etab === 'Lycée Montaigne').length, 'faux positif : « lycée Montaigne » reste le lycée');
+});
+
+await describe('« vœux ont été confirmés en LAS » : la somme des vœux, pas 0', () => {
+  const OD3 = D.openData(1500, 17);
+  const lic = OD3.find(o => o.fili === 'Licence');
+  OD3.push({ ...lic, fil_det: 'Licence - Langues', detail: 'Anglais - confirmé', nom: 'Licence - Langues - Anglais - confirmé', voe: 300 });
+  const c3 = makeCtx(); c3.__t = D.tableOpenData(OD3);
+  run(c3, "defaultOpenDataTable = __t; defaultOpenDataState = 'ready';");
+  const q3 = asker(c3);
+  const vLas = OD3.filter(o => o.fili === 'Licence_Las').reduce((t, o) => t + Number(o.voe || 0), 0);
+  for (const q of ['combien de voeux ont été confirmés en LAS ?', 'combien de vœux confirmés en LAS', 'combien de vœux ont été confirmés en licence accès santé']) {
+    const e = q3(q);
+    assert(e?.kind === 'sum' && e.result.sum === vLas, `« ${q} » : ${vLas} (avant : 0 ; obtenu : ${e?.kind} ${e?.result?.sum})`);
+  }
+  // mot d'intitulé qui existe ailleurs, mais pas dans la formation demandée : arrêt, pas 0
+  const a = q3('combien de LAS anglais');
+  assert(a?.kind === 'unresolved' && /aucune formation « Licence_Las » dont l'intitulé contient « anglais »/.test(a.text), `« LAS anglais » : arrêt nommé (obtenu : ${a?.kind} ${String(a?.text).slice(0, 90)})`);
+  const l = q3('combien de licences anglais');
+  assert(l?.kind === 'count' && l.result.count === 1, 'faux positif : « licences anglais » trouvée (le mot existe dans cette catégorie)');
+});
+
+await describe('Résultat à 0 : la réponse dit quel critère le vide', () => {
+  const villes = new Set(OD.filter(MCO).map(o => o.commune));
+  const vide = [...new Set(OD.map(o => o.commune))].find(c => !villes.has(c) && c && OD.some(o => o.commune === c));
+  const e = qo(`combien de BTS MCO à ${vide}`);
+  assert(e?.kind === 'count' && e.result.count === 0, `jeu de données : aucun BTS MCO à ${vide} (obtenu : ${e?.kind} ${e?.result?.count})`);
+  const h = String(e?.html || '').replace(/&#39;|&apos;/g, "'");
+  assert(/résultat nul : /.test(h) && new RegExp(`sans le critère « Commune de l'établissement » = [^,]+, ${n(MCO)} formations`).test(h), 'la note nomme le critère qui vide le résultat (la commune) et le total sans lui');
+  assert(!/résultat nul/.test(qo('combien de BTS MCO')?.html || ''), 'faux positif : pas de note quand le résultat n\'est pas nul');
 });
 
 console.log(`\nRésultat : ${passed} ✓  ${failed} ✗  (${passed + failed} tests)`);
