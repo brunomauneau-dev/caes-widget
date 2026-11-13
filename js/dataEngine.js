@@ -1653,7 +1653,8 @@ function applyMeasureSum(plan) {
    « les formations les plus demandées », « les 10 BTS les plus sélectifs », « les académies avec le plus de places ».
    Les lignes (ou les groupes : académies, régions…) sont triées sur une colonne chiffrée ; les lignes sans valeur
    sont écartées et comptées. Un taux ne s'additionne pas : pas de classement de groupes sur un taux (arrêt). */
-const CLASSEMENT_CUE = /\b(les?|la) (plus|moins)\b|\b(plus|moins) (grandes?|petites?|nombreu)|\bclassement\b|\bclasse[rz]?\b|\bmeilleur(e|es|s)?\b|\btop\s*\d*\b|\bpalmares\b/;
+// v27.5.81 — « type de (la) classe », « série de la classe », « en classe de » : la classe du lycée, pas « classer »
+const CLASSEMENT_CUE = /\b(les?|la) (plus|moins)\b|\b(plus|moins) (grandes?|petites?|nombreu)|\bclassement\b|(?<!\b(?:type de la|type de|de la|serie de la|en|par)\s)\bclasse[rz]?\b(?!\s+(?:de|d)\s)|\bmeilleur(e|es|s)?\b|\btop\s*\d*\b|\bpalmares\b/;
 const CLASSEMENT_MESURES = [
   // « plus sélectif » = taux d'accès le plus bas
   { re: /\bselecti(f|fs|ve|ves)\b|\bselectivite\b/, col: /taux d acces/, inverse: true, libelle: "taux d'accès", additif: false, mot: /\bselecti(f|fs|ve|ves)\b|\bselectivite\b/ },
@@ -1817,9 +1818,12 @@ function conditionsChiffrees(table, question) {
   const opPour = txt => (COMPARATEURS.find(([re]) => re.test(txt)) || [])[1];
   const out = [];
   // 1. « plus de 100 places », « au moins 30 admis », « moins de 50 candidats »
-  for (const m of q.matchAll(new RegExp(`\\b(plus de|moins de|au moins|au plus|superieure? ou egale? a|inferieure? ou egale? a|superieure? a|inferieure? a)\\s+(\\d+(?:[.,]\\d+)?)\\s*(?:%\\s*)?(places?|candidats?|admis|voeux|boursiers?)\\b`, 'g'))) {
-    const col = colPour(m[3]); const op = opPour(m[1]);
-    if (col && op) out.push({ col, op, value: Number(m[2].replace(',', '.')) });
+  // v27.5.81 — aussi « au moins un vœu », « plus d'un vœu » (avant : « au moins un vœu » ignoré, tout le fichier compté
+  // au lieu des 29 543 candidats ayant confirmé un vœu)
+  for (const m of q.matchAll(new RegExp(`\\b(plus de|plus d|moins de|moins d|au moins|au plus|superieure? ou egale? a|inferieure? ou egale? a|superieure? a|inferieure? a)\\s+(\\d+(?:[.,]\\d+)?|un|une)\\s*(?:%\\s*)?(places?|candidats?|admis|voeux|voeu|boursiers?)\\b`, 'g'))) {
+    const col = colPour(m[3]); const op = opPour(m[1].replace(/ d$/, ' de'));
+    const val = /^une?$/.test(m[2]) ? 1 : Number(m[2].replace(',', '.'));
+    if (col && op) out.push({ col, op, value: val });
   }
   // 2. « taux d'accès inférieur à 20 % », « capacité supérieure à 50 », « un taux d'accès de 0 »
   for (const m of q.matchAll(new RegExp(`\\b(taux d ?acces|capacites?|nombre de places|nombre de candidats|nombre d admis)\\s+(?:est\\s+|de la formation\\s+)?${_CMP}\\s+(\\d+(?:[.,]\\d+)?)\\s*(?:%|pour ?cent)?`, 'g'))) {
