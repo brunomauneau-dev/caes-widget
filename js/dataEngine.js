@@ -1390,41 +1390,12 @@ function formationTermsFromQuestion(table, question, otherFilters = []) {
   return out;
 }
 
-/* v27.5.86 — intitulé de regroupement : « Licence - Sciences - santé - STAPS » regroupe des formations « STAPS » et
-   « Sciences pour la santé ». Le mot « STAPS » ne doit retenir que les premières (avant : tout le regroupement, 261 au
-   lieu de 126). Règle : la valeur d'une colonne ne compte pour un mot que si aucune des formations qu'elle regroupe ne
-   porte ce mot ailleurs ; sinon, seules ces formations-là sont retenues. « santé » garde tous les PASS (« Parcours
-   d'Accès Spécifique Santé » : aucune option ne contient le mot). */
-function _regroupementsNonDecisifs(table, cols, terms) {
-  const objs = table.objects || [];
-  return terms.map(t => {
-    const formes = new Set([].concat(t));
-    const a = w => normalizeText(w).split(' ').some(x => formes.has(x));
-    // « col\u0001valeur » dont le libellé porte le mot → [des lignes le portent aussi ailleurs, des lignes ne le portent qu'ici]
-    const groupes = new Map();
-    objs.forEach(r => {
-      cols.forEach(c => {
-        const v = r?.[c];
-        if (v === undefined || v === null || v === '' || !a(v)) return;
-        const k = c + '\u0001' + v;
-        const g = groupes.get(k) || [false, false];
-        if (cols.some(c2 => c2 !== c && a(r?.[c2] ?? ''))) g[0] = true; else g[1] = true;
-        groupes.set(k, g);
-      });
-    });
-    // groupe partagé (certaines formations portent le mot, d'autres non) : son libellé ne suffit pas
-    const ignorer = new Set();
-    groupes.forEach(([oui, non], k) => { if (oui && non) ignorer.add(k); });
-    return ignorer.size ? [...ignorer] : null;
-  });
-}
 function makeFormationTermsFilter(table, terms, labels) {
   const info = formationTermsInfo(table);
   const label = labels.join(' + ');
-  const f = { col: FORMATION_TERMS_COL, op: 'contains_all', cols: info.cols.slice(), terms: terms.slice(), value: label, label, source: 'termes_formation' };
-  const ign = _regroupementsNonDecisifs(table, f.cols, f.terms);
-  if (ign.some(Boolean)) f.libellesNonDecisifs = ign;
-  return f;
+  // v27.5.86 — essai retiré : écarter les libellés de regroupement « partagés » (cas STAPS des données fictives) cassait
+  // « licences de droit » sur l'open data réel (7 au lieu de 273 : les parcours ne répètent pas toujours le mot « droit »)
+  return { col: FORMATION_TERMS_COL, op: 'contains_all', cols: info.cols.slice(), terms: terms.slice(), value: label, label, source: 'termes_formation' };
 }
 
 // Ajoute au plan le filtre « intitulé contient » quand la question cite des mots d'intitulés

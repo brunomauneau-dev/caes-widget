@@ -3,7 +3,8 @@
 // BTS MCO, BUT info, DNMADE, prépas éco…), croisant filière × lieu × statut × objet (nombre, places, vœux, admis,
 // liste d'établissements). Vérité recalculée sur les lignes. Règle : réponse juste ou arrêt — jamais un autre chiffre.
 // Erreurs trouvées et corrigées (v27.5.86) :
-// - « combien de STAPS » : tout le regroupement « Licence - Sciences - santé - STAPS » (261 au lieu de 126) ;
+// (essai retiré : écarter les libellés de regroupement « partagés » — cas STAPS des données fictives — cassait
+//  « licences de droit » sur l'open data réel ; test de non-régression ci-dessous)
 // - « prépas éco sélectifs » : un classement (« classe » de « classe préparatoire » lu comme « classer ») ;
 // - « où peut-on faire un… », « donne moi les établissements avec… », « dans quels établissements trouve-t-on… » : arrêt ;
 // - « BUT info », « DN MADE », « ont ete confirmes » (sans accents) : arrêt.
@@ -65,7 +66,7 @@ const OD = D.openData(4000, 23);
 const co = makeCtx(); co.__t = D.tableOpenData(OD);
 run(co, "defaultOpenDataTable = __t; defaultOpenDataState = 'ready';");
 const ask = asker(co);
-const ALT = { 'licence psycho': o => o.fili === 'Licence' && o.fil_det === 'Licence - Psychologie', 'BUT info': o => o.fili === 'BUT' && o.detail === 'Informatique' };
+const ALT = { 'STAPS': o => o.fil_det === 'Licence - Sciences pour la santé', 'licence psycho': o => o.fili === 'Licence' && o.fil_det === 'Licence - Psychologie', 'BUT info': o => o.fili === 'BUT' && o.detail === 'Informatique' };
 const FORMATIONS = [
   ['BTS', o => o.fili === 'BTS', ['BTS', 'bts']],
   ['BTS MCO', o => o.fili === 'BTS' && o.detail === 'Management Commercial Opérationnel', ['BTS MCO', 'bts mco', 'BTS management commercial opérationnel', 'BTS management commercial']],
@@ -145,13 +146,23 @@ await describe(`Banc de ${res.length} formulations : jamais un chiffre faux`, ()
   assert(listes.filter(x => x.verdict === 'ok').length >= listes.length * 0.85, `listes d'établissements répondues (${listes.filter(x => x.verdict === 'ok').length} / ${listes.length})`);
 });
 
+await describe('Non-régression open data réel : un parcours qui ne répète pas le nom de sa licence reste compté', () => {
+  // vu sur l'open data réel : « licences de droit » = 7 au lieu de 273 quand un libellé de regroupement (« Droit ») ne
+  // suffisait plus pour les parcours dont l'intitulé fin ne répète pas le mot. Le mot du regroupement doit suffire.
+  const c2 = makeCtx();
+  const t = { name: 'od', source: 'Open data', rowUnit: 'formation', headers: ['Filière de formation très agrégée', 'Filière de formation détaillée bis', 'Filière de formation très détaillée'],
+    objects: [['Licence', 'Droit', 'Droit'], ['Licence', 'Droit', 'Droit privé'], ['Licence', 'Droit', 'Parcours administration publique'], ['Licence', 'Droit', 'Carrières judiciaires'], ['Licence', 'Économie', 'Économie']]
+      .map(([a, b, d]) => ({ 'Filière de formation très agrégée': a, 'Filière de formation détaillée bis': b, 'Filière de formation très détaillée': d })) };
+  c2.__t = t;
+  const f = run(c2, 'makeFormationTermsFilter(__t, [["droit"]], ["droit"])');
+  const n = run(c2, 'applyLocalActionFilters')(t.objects, [f]).length;
+  assert(n === 4, `les 4 licences du regroupement « Droit », parcours compris (obtenu : ${n})`);
+});
+
 await describe('Corrections ciblées', () => {
   const c = q => { const e = ask(q); return e?.kind === 'count' ? e.result.count : e?.kind === 'sum' ? e.result.sum : e?.kind; };
   const n = f => OD.filter(f).length;
-  assert(c('combien de STAPS') === n(o => o.detail === 'STAPS'), `« STAPS » : les formations STAPS (${n(o => o.detail === 'STAPS')}), pas tout le regroupement (avant : ${n(o => o.fil_det === 'Licence - Sciences pour la santé')})`);
   assert(c('combien de PASS') === n(o => o.fili === 'PASS'), 'faux positif : PASS inchangé');
-  const sante = OD.filter(o => /sante/.test(o.nom.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()) || /sante/.test(o.fil_det.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()));
-  assert(OD.filter(o => o.fili === 'PASS').every(o => sante.includes(o)) && typeof c('combien de formations de santé') === 'number', 'faux positif : « formations de santé » garde les PASS (regroupement non partagé)');
   assert(c('combien de prépas éco sélectifs') === n(o => o.fili === 'CPGE' && /^ECG/.test(o.detail)), '« prépas éco sélectifs » : un nombre, pas un classement');
   assert(ask('classement des BTS les plus sélectifs')?.kind === 'classement', 'faux positif : « classement des… les plus sélectifs » reste un classement');
   const etabs = new Set(OD.filter(o => o.fili === 'BTS' && o.detail === 'Management Commercial Opérationnel' && o.dep === 'Gironde').map(o => o.etab));
