@@ -1390,10 +1390,41 @@ function formationTermsFromQuestion(table, question, otherFilters = []) {
   return out;
 }
 
+/* v27.5.86 — intitulé de regroupement : « Licence - Sciences - santé - STAPS » regroupe des formations « STAPS » et
+   « Sciences pour la santé ». Le mot « STAPS » ne doit retenir que les premières (avant : tout le regroupement, 261 au
+   lieu de 126). Règle : la valeur d'une colonne ne compte pour un mot que si aucune des formations qu'elle regroupe ne
+   porte ce mot ailleurs ; sinon, seules ces formations-là sont retenues. « santé » garde tous les PASS (« Parcours
+   d'Accès Spécifique Santé » : aucune option ne contient le mot). */
+function _regroupementsNonDecisifs(table, cols, terms) {
+  const objs = table.objects || [];
+  return terms.map(t => {
+    const formes = new Set([].concat(t));
+    const a = w => normalizeText(w).split(' ').some(x => formes.has(x));
+    // « col\u0001valeur » dont le libellé porte le mot → [des lignes le portent aussi ailleurs, des lignes ne le portent qu'ici]
+    const groupes = new Map();
+    objs.forEach(r => {
+      cols.forEach(c => {
+        const v = r?.[c];
+        if (v === undefined || v === null || v === '' || !a(v)) return;
+        const k = c + '\u0001' + v;
+        const g = groupes.get(k) || [false, false];
+        if (cols.some(c2 => c2 !== c && a(r?.[c2] ?? ''))) g[0] = true; else g[1] = true;
+        groupes.set(k, g);
+      });
+    });
+    // groupe partagé (certaines formations portent le mot, d'autres non) : son libellé ne suffit pas
+    const ignorer = new Set();
+    groupes.forEach(([oui, non], k) => { if (oui && non) ignorer.add(k); });
+    return ignorer.size ? [...ignorer] : null;
+  });
+}
 function makeFormationTermsFilter(table, terms, labels) {
   const info = formationTermsInfo(table);
   const label = labels.join(' + ');
-  return { col: FORMATION_TERMS_COL, op: 'contains_all', cols: info.cols.slice(), terms: terms.slice(), value: label, label, source: 'termes_formation' };
+  const f = { col: FORMATION_TERMS_COL, op: 'contains_all', cols: info.cols.slice(), terms: terms.slice(), value: label, label, source: 'termes_formation' };
+  const ign = _regroupementsNonDecisifs(table, f.cols, f.terms);
+  if (ign.some(Boolean)) f.libellesNonDecisifs = ign;
+  return f;
 }
 
 // Ajoute au plan le filtre « intitulé contient » quand la question cite des mots d'intitulés
@@ -1755,7 +1786,7 @@ function applyMeasureSum(plan) {
    Les lignes (ou les groupes : académies, régions…) sont triées sur une colonne chiffrée ; les lignes sans valeur
    sont écartées et comptées. Un taux ne s'additionne pas : pas de classement de groupes sur un taux (arrêt). */
 // v27.5.81 — « type de (la) classe », « série de la classe », « en classe de » : la classe du lycée, pas « classer »
-const CLASSEMENT_CUE = /\b(les?|la) (plus|moins)\b|\b(plus|moins) (grandes?|petites?|nombreu)|\bclassement\b|(?<!\b(?:type de la|type de|de la|serie de la|en|par)\s)\bclasse[rz]?\b(?!\s+(?:de|d)\s)|\bmeilleur(e|es|s)?\b|\btop\s*\d*\b|\bpalmares\b/;
+const CLASSEMENT_CUE = /\b(les?|la) (plus|moins)\b|\b(plus|moins) (grandes?|petites?|nombreu)|\bclassement\b|(?<!\b(?:type de la|type de|de la|serie de la|en|par)\s)\bclasse[rz]?\b(?!\s+(?:de|d)\s|s?\s+prepa)|\bmeilleur(e|es|s)?\b|\btop\s*\d*\b|\bpalmares\b/;
 const CLASSEMENT_MESURES = [
   // « plus sélectif » = taux d'accès le plus bas
   { re: /\bselecti(f|fs|ve|ves)\b|\bselectivite\b/, col: /taux d acces/, inverse: true, libelle: "taux d'accès", additif: false, mot: /\bselecti(f|fs|ve|ves)\b|\bselectivite\b/ },
@@ -2729,9 +2760,12 @@ function motsNonReconnus(plan) {
   const couvert = w => connus.has(w) || [...connus].some(c => c.length >= 4 && w.length >= 4 && prefixe(c) === prefixe(w));
   const q = normalizeText(plan.question || '');
   const manque = [];
-  q.split(' ').forEach(w => {
+  const mots = q.split(' ');
+  mots.forEach((w, i) => {
     // mots de 2 lettres : seuls les mots outils sont ignorés (« Sciences Po », « BUT TC » : « po », « tc » comptent)
     if (!w || /^\d/.test(w) || (w.length < 3 && MOTS_COURTS.has(w)) || w.length === 1) return;
+    // v27.5.86 — « DN MADE » : « dn » est un mot d'intitulé, collé à « made » qui a servi au filtre (avant : arrêt sur « dn »)
+    if (w.length === 2 && info.words.has(w) && [mots[i - 1], mots[i + 1]].some(v => v && v.length >= 3 && couvert(v))) return;
     if (FORMATION_TERM_STOP.has(w) || MOTS_QUESTION.has(w) || info.geo.has(w) || couvert(w)) return;
     if (_fichierCandidats && MOTS_FICHIER_CANDIDATS.has(w)) return;
     manque.push(w);
@@ -2955,9 +2989,15 @@ const REFORMULATIONS = [
   [/\bSTS\b/gi, 'BTS'],
   // v27.5.83 — « vœux confirmés » : « confirmés » qualifie les vœux (pas les formations de langue « … - confirmé »)
   [/\b(v(?:œ|oe)ux|candidatures?)\s+confirm[ée]e?s?\b/gi, '$1'],
-  [/(\bv(?:œ|oe)ux\b(?:\s+[^\s?]+){0,2}?)\s+(?:ont\s+été|a\s+été|sont|été)\s+confirm[ée]e?s?\b/gi, '$1'],
+  [/(\bv(?:œ|oe)ux\b(?:\s+[^\s?]+){0,2}?)\s+(?:ont\s+[ée]t[ée]|a\s+[ée]t[ée]|sont|[ée]t[ée])\s+confirm[ée]e?s?\b/gi, '$1'],
   // « vœux confirmés par les candidats » : les auteurs des vœux, pas une répartition « par candidat »
   [/(\bv(?:œ|oe)ux\b[^?]{0,30}?)\s+par\s+(?:les|des)\s+(candidat(?:e)?s|lyc[ée]ens|[ée]l[èe]ves)\b/gi, '$1 des $2'],
+  // v27.5.86 — demandes de liste d'établissements dites autrement (avant : arrêt) : « où peut-on faire un BTS MCO ? »,
+  // « donne-moi les établissements avec un BUT », « dans quels établissements trouve-t-on des CPGE »
+  [/^\s*o[uù]\s+(?:peut[- ]on|puis[- ]je|pourrait[- ]on|est[- ]il possible de|peux[- ]tu)?\s*(?:faire|suivre|pr[ée]parer|trouver|passer)\s+/i, 'liste des établissements proposant '],
+  [/^\s*o[uù]\s+(?:se trouvent|sont|trouve[- ]t[- ]on|y a[- ]t[- ]il)\s+/i, 'liste des établissements proposant '],
+  [/\b(?:donne|donnez|montre|montrez|affiche|affichez|cite|citez)(?:[- ]?moi|[- ]?nous)?\s+(?:la liste des |les )([ée]tablissements?)\s+(?:avec|ayant|qui ont|qui proposent|proposant|offrant|o[uù] (?:il y a|on trouve))\s+/i, 'liste des $1 proposant '],
+  [/\bdans quels?\s+([ée]tablissements?)\s+(?:trouve[- ]t[- ]on|peut[- ]on (?:faire|trouver|suivre)|y a[- ]t[- ]il|propose[- ]t[- ]on|sont propos[ée]e?s|est propos[ée]e?)\s+/i, 'liste des $1 proposant '],
   // v27.5.77 — « la fac » = l'université (établissement)
   [/\b(?:la |les |en )?(?:facs?|facult[ée]s?)\b(?!\s+de\s+(?:m[ée]decine|pharmacie))/gi, " l'université"],
   [/\blicences?\s+pros?\b(?!fess)/gi, 'licence professionnelle'],
@@ -3268,6 +3308,9 @@ const SIGLES_FORMATIONS = [
   [/(?<![a-zà-ÿ])(?:pr[ée]pas?|cpge)\s+[ée]co(?:nomiques?)?(?![a-zà-ÿ])/gi, 'classe préparatoire économique', null],
   [/(?<![a-zà-ÿ])(?:pr[ée]pas?|cpge)\s+(?:scientifiques?|scien?t?i?f?)(?![a-zà-ÿ])/gi, 'classe préparatoire scientifique', null],
   [/(?<![a-zà-ÿ])[ée]co(?:\s*-?\s*gestion)?(?![a-zà-ÿ])/gi, 'économie', null],
+  // v27.5.86 — « BUT info », « licence info », « DNMADE » (avant : arrêt sur « info », « dn », « dnmade »)
+  [/\b(but|dut|bts|licences?|l1|master)\s+info\b/gi, '$1 informatique', null],
+  [/\bdn\s*-?\s*made\b/gi, 'DN MADE', null],
   [/(?<![a-zà-ÿ])ing[ée]s?(?![a-zà-ÿ])/gi, 'ingénieurs', null], [/(?<![a-zà-ÿ])kin[ée]s?(?![a-zà-ÿ])/gi, 'kinésithérapie', null],
   [/(?<![a-zà-ÿ])(?:[ée]coles?|instituts?|formations?)\s+(?:d['’]\s*|de\s+|en\s+)?(?:infirmi[eè]re?s?|soins infirmiers)(?![a-zà-ÿ])/gi, 'IFSI', null],
 ];

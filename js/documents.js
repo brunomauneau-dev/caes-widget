@@ -612,7 +612,22 @@ function rowContainsAllTerms(row, filter) {
     byCols.set(key, words);
   }
   // chaque terme : une forme ou plusieurs (singulier / pluriel)
-  return (filter.terms || []).every(t => (Array.isArray(t) ? t : [t]).some(w => words.has(w)));
+  if (!filter.libellesNonDecisifs) return (filter.terms || []).every(t => (Array.isArray(t) ? t : [t]).some(w => words.has(w)));
+  // v27.5.86 — libellé de regroupement qui ne suffit pas pour ce mot (dataEngine.js, _regroupementsNonDecisifs) :
+  // le mot doit se trouver dans une autre colonne de la ligne
+  return (filter.terms || []).every((t, i) => {
+    const formes = Array.isArray(t) ? t : [t];
+    if (!formes.some(w => words.has(w))) return false;
+    const ign = filter.libellesNonDecisifs[i];
+    if (!ign) return true;
+    const exclus = new Set(ign);
+    return (filter.cols || []).some(c => {
+      const v = row[c];
+      if (v === undefined || v === null || v === '' || exclus.has(c + '\u0001' + v)) return false;
+      const ws = normalizeText(String(v)).split(' ');
+      return formes.some(w => ws.includes(w));
+    });
+  });
 }
 
 // v27.14 — conditions chiffrées (« plus de 100 places », « taux d'accès inférieur à 20 ») ; une case vide ne satisfait aucune condition
