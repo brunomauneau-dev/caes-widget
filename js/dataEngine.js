@@ -4328,6 +4328,29 @@ function detectCompareGroups(table, question) {
     }
   }
 
+  // ── 0d. v27.5.88 — types de bac (« comparer bac général et bac technologique ») et séries (« STMG et STI2D »)
+  // (avant : un seul groupe lu, pas de calcul). Dans l'ordre de la question.
+  {
+    const tcol = (table.headers || []).find(h => /^type de la classe$|^type de bac$|^voie$/.test(normalizeText(h)));
+    if (tcol) {
+      const vals = _distinctValues(table, tcol);
+      const TYPES = [
+        [/\b(?:bacs? |bacheliers? )?(?:generaux|generale?s?)\b/, /^gen/],
+        [/\b(?:bacs? |bacheliers? )?(?:technos?|technologiques?)\b/, /^techno/],
+        [/\b(?:bacs? |bacheliers? )?(?:pros?|professionnel(?:le)?s?)\b/, /^profession/],
+      ];
+      const cites = TYPES.map(([re, vre]) => { const m = re.exec(q); const v = vals.find(x => vre.test(normalizeText(x))); return m && v ? { v, i: m.index } : null; }).filter(Boolean).sort((a, b) => a.i - b.i);
+      if (cites.length >= 2) { cites.slice(0, 2).forEach(o => addGroup(o.v, [{ col: tcol, op: 'eq', value: o.v }])); return groups; }
+    }
+    const scol = (table.headers || []).find(h => /^serie de la classe$|^serie$|^serie du bac$/.test(normalizeText(h)));
+    if (scol) {
+      const vals = _distinctValues(table, scol);
+      const SERIES = [['stmg', /management/], ['sti2d', /industrie/], ['st2s', /sante et du social/], ['stl', /laboratoire/], ['stav', /agronomie/], ['std2a', /design/], ['sthr', /hotellerie/]];
+      const cites = SERIES.map(([sig, vre]) => { const m = new RegExp(`\\b${sig}\\b`).exec(q); const v = vals.find(x => vre.test(normalizeText(x))); return m && v ? { v, i: m.index, sig } : null; }).filter(Boolean).sort((a, b) => a.i - b.i);
+      if (cites.length >= 2) { cites.slice(0, 2).forEach(o => addGroup(o.sig.toUpperCase(), [{ col: scol, op: 'eq', value: o.v }])); return groups; }
+    }
+  }
+
   // ── 1. Paires sémantiques hardcodées ──────────────────────────────────────
   if (/basque/.test(q) && /(non[- ]?basque|autres?|reste|hors|compare|versus)/.test(q)) {
     const col = findColumnByConceptStrict(table, 'basque');
@@ -4430,7 +4453,17 @@ function sanitizeCompareCommonFilters(plan, groups) {
   // v27.5.76 — une valeur comparée (« Pau », « Bayonne ») relue sur une autre colonne (commune d'accueil) n'est pas un
   // filtre commun (avant : « boursiers à Pau ou à Bayonne » = Pau 10 / Bayonne 45, au lieu de 332 / 229)
   const valsG = new Set((groups || []).flatMap(g => (g.filters || []).map(f => normalizeText(f.value))));
-  return merged.filter(f => f && f.col && !axisCols.has(f.col) && !(f.op === 'eq' && valsG.has(normalizeText(f.value))));
+  // v27.5.88 — un mot qui définit un groupe (« généraux et technologiques ») n'est pas un mot d'intitulé de formation
+  // commun (avant : « technologiques + BTS » cherché dans les formations d'accueil → 2 / 3 au lieu de milliers)
+  const motsG = new Set((groups || []).flatMap(g => [g.label, ...(g.filters || []).map(f => f.value)]).flatMap(v => normalizeText(v).split(' ')).filter(w => w.length >= 4).map(w => w.slice(0, 5)));
+  const nettoie = f => {
+    if (!(f && f.op === 'contains_all' && f.source === 'termes_formation') || !motsG.size) return f;
+    const garder = (f.terms || []).map((t, k) => ({ t, l: String(f.label || '').split(' + ')[k] })).filter(x => ![].concat(x.t).some(w => normalizeText(w).length >= 4 && motsG.has(normalizeText(w).slice(0, 5))));
+    if (garder.length === (f.terms || []).length) return f;
+    if (!garder.length) return null;
+    return { ...f, terms: garder.map(x => x.t), label: garder.map(x => x.l).join(' + '), value: garder.map(x => x.l).join(' + ') };
+  };
+  return merged.map(nettoie).filter(f => f && f.col && !axisCols.has(f.col) && !(f.op === 'eq' && valsG.has(normalizeText(f.value))));
 }
 
 function compareGroupSummary(table, groups, baseFilters) {
