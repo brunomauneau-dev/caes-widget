@@ -627,7 +627,13 @@ function _strictFiltersFromQuestionBase(table, question) {
       const v = _distinctValues(table, comOrig).filter(x => normalizeText(x).length >= 3).sort((a, b) => b.length - a.length).find(x => {
         const n = normalizeText(x);
         if (new RegExp(`\\b(lycees?|etablissements?|eleves|lyceens|scolarises?|scolarisees?|issus?|issues?|venant|originaires?|provenant)( (de la|de l|du|des|de|d|a|au|en))? ${n}( |$)`).test(q)) return true;
-        return !acaVals.has(n) && new RegExp(`\\b(candidats?|candidates?|bacheliers?|bachelieres?|boursiers?|boursieres?|apprenti(e)?s?|ceux|celles|jeunes) (de|d) ${n}( |$)`).test(q);
+        if (!acaVals.has(n) && new RegExp(`\\b(candidats?|candidates?|bacheliers?|bachelieres?|boursiers?|boursieres?|apprenti(e)?s?|ceux|celles|jeunes) (de|d) ${n}( |$)`).test(q)) return true;
+        // v27.5.87 — « bacheliers généraux de Pau admis… », « candidats de STMG de Pau admis à Bordeaux » : « de X » AVANT le
+        // verbe d'accueil = l'origine (avant : Pau perdu, ou lu comme commune d'accueil — 552 au lieu de 4 sur le vrai fichier)
+        if (acaVals.has(n)) return false;
+        const mo = q.match(new RegExp(`(^| )(de|d) ${n}( |$)`));
+        const mv = q.match(_VERBE_ACCUEIL_RE);
+        return !!(mo && mv && mo.index < mv.index && /\b(candidats?|candidates?|bacheliers?|bachelieres?|boursiers?|boursieres?|apprenti(e)?s?|eleves?|lyceens?|lyceennes?|bacs?|jeunes)\b/.test(q.slice(0, mo.index)));
       });
       if (v) out.push({ col: comOrig, value: v, op: 'eq', label: null, source: 'commune_a' });
     }
@@ -2969,6 +2975,8 @@ const REFORMULATIONS = [
   [/^\s*o[uù]\s+(?:se trouvent|sont|trouve[- ]t[- ]on|y a[- ]t[- ]il)\s+/i, 'liste des établissements proposant '],
   [/\b(?:donne|donnez|montre|montrez|affiche|affichez|cite|citez)(?:[- ]?moi|[- ]?nous)?\s+(?:la liste des |les )([ée]tablissements?)\s+(?:avec|ayant|qui ont|qui proposent|proposant|offrant|o[uù] (?:il y a|on trouve))\s+/i, 'liste des $1 proposant '],
   [/\bdans quels?\s+([ée]tablissements?)\s+(?:trouve[- ]t[- ]on|peut[- ]on (?:faire|trouver|suivre)|y a[- ]t[- ]il|propose[- ]t[- ]on|sont propos[ée]e?s|est propos[ée]e?)\s+/i, 'liste des $1 proposant '],
+  // v27.5.87 — « bacs pro », « bacs techno », « bacs généraux » : le type de bac (avant : « bacs » cherché dans les intitulés)
+  [/\bbacs\s+(pros?|professionnels?|technos?|technologiques?|g[ée]n[ée]raux|g[ée]n[ée]ral)\b/gi, 'bac $1'],
   // v27.5.77 — « la fac » = l'université (établissement)
   [/\b(?:la |les |en )?(?:facs?|facult[ée]s?)\b(?!\s+de\s+(?:m[ée]decine|pharmacie))/gi, " l'université"],
   [/\blicences?\s+pros?\b(?!fess)/gi, 'licence professionnelle'],
