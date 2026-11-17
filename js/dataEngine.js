@@ -358,7 +358,9 @@ const _SIGLES_LYCEE = [
 const _VIDES_SPE = new Set('de du des d la le les l et en a au aux un une option ou'.split(' '));
 const _VERBES_SPE = new Set('fait faisaient pris suivi suivie suivis suivies suivant suivent eu'.split(' '));
 const _COUPE_SPE = new Set('admis admise admises acceptes acceptees inscrits inscrites qui ayant dans pour par combien sont ont avec sans boursiers boursieres apprentis candidats candidates eleves terminale lycee premiere classe mais parmi chez'.split(' '));
-const _CUES_LYCEE = /\b(specialites?|enseignements? de specialites?|enseignements?|doublettes?)\b/g;
+// v27.5.89 — aussi « ayant suivi », « qui ont pris », « suivant » + spécialité (« ayant suivi mathématiques » : avant, la
+// formation d'accueil Mathématiques — 602 au lieu de 7 797 sur le vrai fichier)
+const _CUES_LYCEE = /\b(specialites?|enseignements? de specialites?|enseignements?|doublettes?|(?:ayant|qui ont|ont|avoir) (?:suivi|pris|choisi)e?s?|suivant)\b/g;
 // accueil juste avant « spécialité » (« admis en licence spécialité droit », « formation d'accueil spécialité ») : pas le lycée
 const _ACCUEIL_AVANT = /\b(admis|admise|admises|inscrits?|inscrites?|acceptes?|acceptees?|accueil|formations?|licences?|mentions?|bts|but|dut|cpge|master|ecoles?)\b(?: \S+){0,2}\s*$/;
 function _specialitesLycee(table, q) {
