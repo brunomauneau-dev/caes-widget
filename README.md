@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-73 fichiers, 2 939 tests. Depuis la racine du repo :
+74 fichiers, 2 953 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -166,6 +166,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 `js/test_las_etablissements.js` reproduit des erreurs vues en usage réel sur l'open data : « licences LAS », « licence accès santé » (la catégorie officielle Licence_Las, pas 0 ni les licences « santé » ; « licences hors LAS » = une exclusion), « liste des établissement » au singulier (la liste, pas un refus), et « vœux confirmés par les candidats … à Bordeaux Montaigne » (l'établissement, situé à Pessac, pas la commune de Bordeaux ; « confirmés » n'est pas un mot d'intitulé, « par les candidats » n'est pas une répartition).
 
 `js/test_formats_fichiers.js` est un **banc de formats** : le même fichier académique fictif présenté de 16 façons (colonnes dans un autre ordre, titre avant les en-têtes, onglet de notice, ligne « Total », CSV `;` ou `,` en UTF-8 ou Windows-1252, « O/N », colonnes renommées, MAJUSCULES, « 0 » au lieu de case vide, en-têtes en double…), plus un **tableau déjà calculé** (une ligne = un département, comme le classeur régional du SAIO). Chaque réponse doit être juste, ou le moteur s'arrête et le dit. Dans un tableau déjà calculé, « combien de candidats » additionne la colonne « Nombre de candidats » (pas les lignes), un taux se calcule somme ÷ somme, et la ligne « Total » est retirée.
+
+`js/test_formulations_banc.js` est un **banc de formulations** : 400 questions tirées au hasard (graine fixe), écrites comme on les tape (« cmb », « nb », « ont été confirmés », « où peut-on faire un… », « donne moi les établissements avec… », sans accents, sigles BTS MCO, BUT info, DNMADE, prépas éco…), en croisant filière, lieu, statut et objet (nombre, places, vœux, admis, liste d'établissements). La vérité est recalculée sur les lignes ; aucune réponse ne doit être un autre chiffre, et les arrêts restent sous 8 %.
 
 `js/test_part_groupes.js` vérifie les **taux par groupe** : « pourcentage de candidats sans proposition par département », « part des boursiers par académie », « taux de remplissage des BTS par académie » donnent un taux calculé **dans** chaque groupe (avant : la répartition du total entre groupes, lue à tort comme un taux), avec la ligne « Ensemble », l'export, le graphique et les relances (« taux de proposition des boursiers » puis « et par département ? »).
 
