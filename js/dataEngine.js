@@ -2188,11 +2188,22 @@ function applyPart(plan) {
       const _mAdm = _deQui.match(/^(?:(?:candidats?|candidates?|eleves?|lyceens?|bacheliers?)\s+)?(.+?)\s+((?:admis|admises|acceptes?|acceptees?)\s+.+)$/);
       if (_mAdm && /^(?:de|des|du|d|venant|issus?|originaires?|scolarises?|provenant)\b/.test(_mAdm[1]) && _filtresDePhrase(plan.table, _mAdm[1]).length && _filtresDePhrase(plan.table, `candidats ${_mAdm[2]}`).length) courte = `candidats ${_mAdm[2]}`;
     }
+    // v27.5.90 — « part des BTS privés », « pourcentage de CPGE publiques » : la formation est la population, le
+    // qualificatif la condition (avant : BTS ET privés parmi TOUTES les formations, 590 / 4 000 au lieu de 590 / 1 696)
+    let _sujetForm = [];
+    if (plan.table.rowUnit === 'formation') {
+      const _mF = courte.match(/^(.+?)\s+((?:non\s+)?(?:privee?s?|publi(?:c|cs|que|ques)|selecti(?:f|fs|ve|ves)|en apprentissage|sous contrat)\b.*)$/);
+      if (_mF && !/^formations?$/.test(_mF[1])) {
+        const fs = _filtresDePhrase(plan.table, _mF[1]);
+        const fq = _filtresDePhrase(plan.table, `formations ${_mF[2]}`);
+        if (fs.length && fq.length) { _sujetForm = fs; courte = `formations ${_mF[2]}`; }
+      }
+    }
     let fx = courte !== d.phrase ? _filtresDePhrase(plan.table, courte) : [];
     if (fx.length) d.phrase = courte; else fx = _filtresDePhrase(plan.table, d.phrase);
     const cle = f => f.op === 'contains_all' ? `T::${(f.terms || []).map(t => [].concat(t)[0]).join('+')}` : `${f.col}`;
     const clesX = new Set(fx.map(cle));
-    const tous = mergeFiltersUnique(plan.filters || [], fx.filter(f => !(plan.filters || []).some(g => cle(g) === cle(f))));
+    const tous = mergeFiltersUnique(mergeFiltersUnique(plan.filters || [], _sujetForm.filter(f => !(plan.filters || []).some(g => cle(g) === cle(f)))), fx.filter(f => !(plan.filters || []).some(g => cle(g) === cle(f))));
     d.condition = tous.filter(f => clesX.has(cle(f)));
     plan.filters = tous.filter(f => !clesX.has(cle(f)));
   } else {
