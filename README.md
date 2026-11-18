@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-76 fichiers, 2 970 tests. Depuis la racine du repo :
+77 fichiers, 2 978 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -172,6 +172,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 `js/test_formulations_candidats.js` est le même banc sur un **fichier académique** (une ligne = un élève) : sujet (candidats, boursiers, bacs pro, bacheliers généraux, STMG…) × origine (département, commune, public / privé, Pays Basque) × situation (admis en BTS / prépa / licence / BUT, hors académie, à Bordeaux, avec ou sans proposition) × objet (nombre, taux de proposition, taux d'admission, répartition). Il a d'abord tourné sur le vrai fichier (hors dépôt) : 1 000 questions justes sur 1 000 après corrections.
 
 `js/test_comparaisons_relances.js` vérifie, sur un fichier académique fictif, les comparaisons par type de bac et par série (« comparer bac général et bac technologique », « STMG et STI2D », « … admis en BTS »), les relances (« et les non boursiers ? », « dont combien admis en BTS ? », « et de Bayonne ? ») et un classement. Le même banc (600 questions) a d'abord tourné sur le vrai fichier (hors dépôt) : 0 chiffre faux.
+
+`js/test_specialites_formulations.js` vérifie que « ayant suivi », « qui ont pris », « suivant » + une spécialité (même en toutes lettres : « mathématiques ») désignent l'enseignement suivi au lycée, tandis que « candidats en mathématiques » reste la formation d'accueil ; plus des taux par série et des moyennes de vœux. Le même banc (600 questions) a tourné sur le vrai fichier (hors dépôt) : 0 chiffre faux.
 
 `js/test_part_groupes.js` vérifie les **taux par groupe** : « pourcentage de candidats sans proposition par département », « part des boursiers par académie », « taux de remplissage des BTS par académie » donnent un taux calculé **dans** chaque groupe (avant : la répartition du total entre groupes, lue à tort comme un taux), avec la ligne « Ensemble », l'export, le graphique et les relances (« taux de proposition des boursiers » puis « et par département ? »).
 
