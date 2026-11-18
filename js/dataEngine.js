@@ -2191,7 +2191,8 @@ function applyPart(plan) {
     // v27.5.90 — « part des BTS privés », « pourcentage de CPGE publiques » : la formation est la population, le
     // qualificatif la condition (avant : BTS ET privés parmi TOUTES les formations, 590 / 4 000 au lieu de 590 / 1 696)
     let _sujetForm = [];
-    if (plan.table.rowUnit === 'formation') {
+    // … sauf si la question dit sur quoi porte la part (« parmi les formations », « dans l'ensemble des formations »)
+    if (plan.table.rowUnit === 'formation' && !/\b(?:parmi|dans|sur|de) (?:les |l ensemble des |toutes les |l ensemble de l offre|l offre)?\s*(?:formations|offre)\b/.test(normalizeText(plan.question || ''))) {
       const _mF = courte.match(/^(.+?)\s+((?:non\s+)?(?:privee?s?|publi(?:c|cs|que|ques)|selecti(?:f|fs|ve|ves)|en apprentissage|sous contrat)\b.*)$/);
       if (_mF && !/^formations?$/.test(_mF[1])) {
         const fs = _filtresDePhrase(plan.table, _mF[1]);
