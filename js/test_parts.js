@@ -110,8 +110,12 @@ await describe('Parts de lignes : formations (open data) et candidats (fichier)'
   assert(e.kind === 'part' && e.result.mode === 'lignes' && e.result.num === n(o => o.selectivite === 'formation sélective') && e.result.den === OD.length, `« part des formations sélectives » → ${n(o => o.selectivite === 'formation sélective')} / ${OD.length} (avant correction : 100 %)`);
   e = ask(od, 'proportion de formations privées en Gironde');
   assert(e.result.num === n(o => o.dep === 'Gironde' && o.statut !== 'Public') && e.result.den === n(o => o.dep === 'Gironde'), '« privées en Gironde » : condition privées, périmètre Gironde');
+  // règle changée (v27.5.90) : « pourcentage de BTS publics » = la part des publics PARMI LES BTS (sens courant ; la
+  // réponse dit sur quoi porte le calcul). L'autre lecture reste possible en l'écrivant : « … parmi les formations ».
   e = ask(od, 'pourcentage de BTS publics');
-  assert(e.result.num === n(o => o.fili === 'BTS' && o.statut === 'Public') && e.result.den === OD.length, '« % de BTS publics » : BTS publics sur toutes les formations (périmètre écrit)');
+  assert(e.result.num === n(o => o.fili === 'BTS' && o.statut === 'Public') && e.result.den === n(o => o.fili === 'BTS'), '« % de BTS publics » : BTS publics parmi les BTS');
+  e = ask(od, 'part des BTS publics parmi les formations');
+  assert(e.result.num === n(o => o.fili === 'BTS' && o.statut === 'Public') && e.result.den === OD.length, '« … parmi les formations » : BTS publics sur toutes les formations (périmètre écrit)');
   const C = D.candidats(1200, 6);
   const c = pred => C.filter(pred).length;
   const ctx = await ctxCSV(D.versTableau(C, D.enTetes.complets));
