@@ -186,8 +186,11 @@ await describe('Conditions chiffrées (avant : ignorées, le widget comptait tou
   const c = ask(od, 'les formations de moins de 50 places les plus demandées');
   assert(c.kind === 'classement' && meme(valeurs(c), tri(OD.filter(o => o.capa < 50), o => o.voe)), 'classement + condition chiffrée');
   assert(/« Capacité de l'établissement par formation » supérieur à 100/.test(ask(od, 'combien de formations de plus de 100 places').html), 'périmètre : condition écrite en clair');
+  // changement de règle v27.5.93 : « dépasse » est désormais compris (avant : arrêt) ; le chiffre doit être exact
   const d = ask(od, 'combien de formations dont la capacité dépasse 100');
-  assert(d.kind === 'unresolved' && /condition chiffrée/.test(d.text), 'condition non comprise (« dépasse ») : arrêt, pas toutes les lignes');
+  assert(d.kind === 'count' && d.result.count === n(o => o.capa > 100), '« dont la capacité dépasse 100 » : seuil compris, chiffre exact');
+  const d2 = ask(od, 'combien de formations dont la capacité frôle les 100');
+  assert(d2.kind === 'unresolved' || d2.result?.count !== OD.length, 'condition non comprise (« frôle les 100 ») : arrêt, pas toutes les lignes');
   assert(ask(od, 'combien de formations en 2025').result.count === OD.length && ask(od, 'combien de BTS').result.count === n(o => o.fili === 'BTS'), 'faux positifs : une année ou une question sans condition ne filtre rien de plus');
   const g = ask(od, 'combien de formations à moins de 3 heures de Paris');
   assert(!g || g.kind !== 'count' || g.result.count !== OD.length, '« à moins de 3 heures » : jamais compté comme toutes les lignes');
