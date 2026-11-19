@@ -351,6 +351,9 @@
   function booleanValue(entry, yes) {
     const wanted = yes ? ['oui','yes','true','vrai','1'] : ['non','no','false','faux','0'];
     const found = (entry.values || []).find(v => wanted.includes(nrm(v.value)));
+    // v27.5.91 — « 1 » / « 0 » ne valent oui / non que dans une colonne d'état (2 ou 3 valeurs) : pas dans un effectif
+    // (« Dont effectif des candidates admises » = 1 retenait les formations à UNE admise, pour « évolution des admis »)
+    if (found && /^[01]$/.test(nrm(found.value)) && (entry.values || []).length > 3) return null;
     if (found) return found;
     // v27.5.84 — colonne écrite « O / N » (avant : « ont eu une proposition » perdait son filtre → tout le fichier)
     const vals = new Set((entry.values || []).map(v => nrm(v.value)));
@@ -392,7 +395,9 @@
     }
 
     // v27.8 — états oui / non reconnus sur la valeur entière : « 12.5 » ou « 10 » (colonne chiffrée) n'est pas « 1 » (oui)
-    const ETAT_OUI = /^(oui|o|yes|true|1|vrai)$/, ETAT_NON = /^(non|n|no|false|0|faux)$/;
+    // v27.5.91 — « 1 » / « 0 » = oui / non seulement dans une colonne d'état (2 ou 3 valeurs), pas dans un effectif
+    const _etatCol = (entry.values || []).length <= 3;
+    const ETAT_OUI = _etatCol ? /^(oui|o|yes|true|1|vrai)$/ : /^(oui|o|yes|true|vrai)$/, ETAT_NON = _etatCol ? /^(non|n|no|false|0|faux)$/ : /^(non|n|no|false|faux)$/;
     if (entry.kind === 'admission') {
       if (ETAT_OUI.test(v) || /^(admis|admise|accepte|acceptee)$/.test(v)) add('admis','admise','admission','accepté','accepte','acceptée','acceptee','réponse favorable','reponse favorable','proposition acceptée','proposition acceptee');
       if (ETAT_NON.test(v) || /^non admis/.test(v)) add('non admis','pas admis','sans proposition acceptée','sans reponse favorable');
@@ -745,7 +750,8 @@
     // Accepté / admis / réponse favorable.
     if (/(admis|admise|admission|accept[eé]|acceptee|réponse favorable|reponse favorable|proposition accept[eé]e|proposition acceptee)/.test(q)) {
       // Ne déclencher que si la question parle d'un statut candidat, pas seulement d'une colonne formation d'accueil acceptée.
-      const e = bestColumn(schema, x => x.kind === 'admission', q);
+      // v27.5.91 — pas une colonne d'effectifs (« Dont effectif des candidates admises » : un nombre, pas un statut)
+      const e = bestColumn(schema, x => x.kind === 'admission' && !/^(?:dont )?effectifs?\b|^nombre\b|^nb\b|^%|^pourcentage/.test(x.norm), q);
       if (e) {
         // Colonne Oui/Non, ou colonne de statut en clair (« Admis », « Proposition acceptée »)
         const v = booleanValue(e, true) || findValue(e, ['oui','true','1','admis','admise','accepte','acceptee','proposition acceptee']);

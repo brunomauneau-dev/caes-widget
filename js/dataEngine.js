@@ -2666,6 +2666,7 @@ const LIEUX_AMBIGUS = new Set('somme manche nord lot var ain cher orne oise eure
    utilisée ou à un mot connu (outils de la question, lieux, mesures). Sinon le moteur s'arrête et le nomme. */
 const MOTS_QUESTION = new Set(`
   eux elles ceux celles entre parmi exception excepte exceptes dehors compris meme vivier promotion
+  comment evolue evoluee evolues evoluees evolution evolutions augmente augmentee augmentes diminue diminuee baisse hausse
   croise croisee croises croisees croiser pivot
   seul seule seuls seules
   suivi suivie suivis suivies terminale terminales
