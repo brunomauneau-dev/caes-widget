@@ -504,7 +504,10 @@ function _strictFiltersFromQuestionBase(table, question) {
     const col = findColumnByConceptStrict(table, 'boursier');
     if (col) add(col, pickColumnValue(table, col, 'boursier_oui'), 'eq', 'Boursiers');
   }
-  if (/hors.*bordeaux|sauf.*bordeaux|exclu.*bordeaux|diff[eé]rent.*bordeaux/.test(q)) {
+  // v27.5.92 — l'exclusion porte sur Bordeaux (« hors Bordeaux », « hors de l'académie de Bordeaux »), pas sur un mot
+  // antérieur (« sauf la Gironde admis à Bordeaux » : avant, académie ≠ Bordeaux ajoutée)
+  const _mHB = q.match(/\b(?:hors|sauf|exclu\w*|diff[eé]rent\w*)\b(.{0,40}?)\bbordeaux\b/);
+  if (_mHB && !/\b(admis|admises?|acceptes?|acceptees?|inscrits?|accueillis|partent|vont|a|au|aux|en|gironde|landes|dordogne|pau|bac|bts|but|licence)\b/.test(_mHB[1])) {
     const col = findColumnByConceptStrict(table, 'academie_accueil');
     if (col) add(col, 'Bordeaux', 'neq', 'Hors Bordeaux');
   }
@@ -720,7 +723,7 @@ function _strictFiltersFromQuestionBase(table, question) {
     const rang = c => { const h = _hx(c); const mot = [['academi', /academi/], ['departement', /departement/], ['region', /region/], ['commune', /commune|ville/]].findIndex(([m, re]) => re.test(h) && new RegExp(m === 'commune' ? '\\b(communes?|villes?)\\b' : `\\b${m}`).test(qv)); return mot >= 0 ? mot - 10 : [/academi/, /departement/, /region/, /commune|ville/].findIndex(re => re.test(h)); };
     // fichier de candidats : commune d'accueil ou de scolarité (« admis à… » : accueil ; « de… », « lycées de… » : scolarité)
     const _roleE = c => (typeof plannerColumnRole === 'function') ? plannerColumnRole(c) : {};
-    const rangRole = e => { const r = _roleE(e.col); if (!r.accueil && !r.origine) return 0; const avant = qv.slice(0, e.best[0].d); const acc = (_VERBE_ACCUEIL_RE.test(qv) || / a $/.test(avant)) && !/venant|issus?|originaires?|provenant|scolaris|origine|lycees?/.test(qv); return (acc ? r.accueil : r.origine) ? 0 : 0.5; };
+    const rangRole = e => { const r = _roleE(e.col); if (!r.accueil && !r.origine) return 0; const avant = qv.slice(0, e.best[0].d); const acc = (_VERBE_ACCUEIL_RE.test(avant) || / a $/.test(avant)) && !/venant|issus?|originaires?|provenant|scolaris|origine|lycees?/.test(qv); /* v27.5.92 — le verbe d'accueil AVANT la liste : « de Pau, Dax et Bayonne admis… » = l'origine */ return (acc ? r.accueil : r.origine) ? 0 : 0.5; };
     const parValeurs = new Map();
     enums.forEach(e => { const k = e.best.map(o => o.n).join('|'); if (!parValeurs.has(k) || rang(e.col) + rangRole(e) < rang(parValeurs.get(k).col) + rangRole(parValeurs.get(k))) parValeurs.set(k, e); });
     parValeurs.forEach(({ col, best }) => {
@@ -3538,7 +3541,7 @@ function buildCurrentResultPlan(question, table) {
 // valeurs ; si les deux plans ne diffèrent que par des filtres sur la (les) même(s) colonne(s), on garde les filtres
 // communs et on ajoute « l'un ou l'autre » (ou les deux exclusions pour « hors X et hors Y »). On ne touche à rien quand
 // la question est déjà comprise avec ses deux critères (« maths et physique », « boursiers et apprentis » : les deux à la fois).
-let _enUnion = false;
+let _enUnion = 0;
 const _COUPE_UNION = new Set('par pour qui avec sans selon parmi combien admis admises acceptes inscrits ayant dont'.split(' '));
 const _LIENS_UNION = new Set('de du des d en a au aux dans les le la l sur chez'.split(' '));
 function _planCasse(p) {
@@ -3592,9 +3595,16 @@ function _essaiUnion(question, filterContextText, plan0) {
   const voc = t0._vocUnion.v;
   const porteur = x => x.some(w => !_LIENS_UNION.has(w) && (voc.has(w) || voc.has(w.replace(/s$/, ''))));
   // les découpages les plus courts d'abord ; le premier qui convient est retenu
+  // v27.5.92 — un « et / ou » à l'intérieur d'une liste déjà comprise (« de Pau, Dax et Bayonne ») n'est pas à découper
+  const _enum = (plan0.filters || []).filter(f => f && f.op === 'in' && f.source === 'enumeration').map(f => new Set((f.values || []).flatMap(v => normalizeText(v).split(' '))));
+  const _dansListe = k => _enum.some(vs => vs.has(toks[k - 1]) && vs.has(toks[k + 1]));
+  // les virgules des listes, perdues par la normalisation, remises dans les questions rejouées (« pau, dax et bayonne »)
+  const _listesN = (plan0.filters || []).filter(f => f && f.op === 'in' && f.source === 'enumeration').map(f => (f.values || []).map(v => normalizeText(v)));
+  const _virgules = x => _listesN.reduce((t, vs) => vs.length < 3 ? t : t.replace(new RegExp(`\\b${vs.slice(0, -1).map(v => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+')}\\s+(et|ou)\\s+${vs[vs.length - 1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`), m => m.replace(/\s+(?=\S+\s+(?:et|ou)\s)/g, ', ').replace(/ (et|ou) /, ' $1 ')), x);
   for (let taille = 2; taille <= 9 && !meilleur; taille++) {
     for (const k of idx) {
       if (meilleur) break;
+      if (_dansListe(k)) continue;
       for (let l = 1; l <= 4 && !meilleur; l++) {
         const r = taille - l;
         if (r < 1 || r > 5 || k - l < 0 || k + r >= toks.length) continue;
@@ -3607,8 +3617,8 @@ function _essaiUnion(question, filterContextText, plan0) {
         if (!porteur(contenu) || !porteur(gauche) || !voc.has(contenu[contenu.length - 1].replace(/s$/, '')) && !voc.has(contenu[contenu.length - 1])) continue;
         // la question entière est comprise et ses deux valeurs y figurent (« Droit et Economie ») : rien à faire
         if (!casse0 && !oublie(contenu) && !oublie(gauche)) continue;
-        const qa = [...toks.slice(0, k), ...toks.slice(k + 1 + r)].join(' ');
-        const qb = [...toks.slice(0, k - l), ...contenu, ...toks.slice(k + 1 + r)].join(' ');
+        const qa = _virgules([...toks.slice(0, k), ...toks.slice(k + 1 + r)].join(' '));
+        const qb = _virgules([...toks.slice(0, k - l), ...contenu, ...toks.slice(k + 1 + r)].join(' '));
         const pa = planDe(qa); if (!pa) continue;
         const pb = planDe(qb); if (!pb || pa.tool !== pb.tool) continue;
         const ka = _clesFiltres(pa), kb = _clesFiltres(pb);
@@ -3631,18 +3641,23 @@ function _essaiUnion(question, filterContextText, plan0) {
   const libelle = simple ? `« ${dA[0].col} » = ${dA[0].label || dA[0].value} ou ${dB[0].label || dB[0].value}` : `${enClair(dA)}, ou ${enClair(dB)}`;
   const filtres = exclusions ? [...communs, ...dA, ...dB]
     : [...communs, { col: _colUnion(dA[0]), op: 'or', groupes: [dA, dB], value: libelle, label: libelle, source: 'union' }];
-  return { ...pa, question: plan0.question || question, filters: filtres, union: true, unresolvedTerms: null };
+  // v27.5.92 — les listes comprises au départ (« de Pau, Dax et Bayonne ») sont gardées telles quelles : rejouée sans ses
+  // virgules, la question les perdait (Dax oublié)
+  const _listes = (plan0.filters || []).filter(f => f && f.op === 'in' && f.source === 'enumeration');
+  const _filtres = _listes.length ? [...filtres.filter(f => !_listes.some(l => l.col === f.col)), ..._listes] : filtres;
+  return { ...pa, question: plan0.question || question, filters: _filtres, union: true, unresolvedTerms: null };
 }
 function detectDataEnginePlan(question, filterContextText = question) {
   const plan = _gardeRelances(_detectDataEnginePlanBase(question, filterContextText), question);
-  if (_enUnion || !plan || !/\b(et|ou)\b/.test(normalizeText(question || ''))) return plan;
-  _enUnion = true;
+  // v27.5.92 — deux niveaux : deux paires « ou » dans la même question (« de Pau ou de Bayonne admis à Bordeaux ou à Toulouse »)
+  if (_enUnion >= 2 || !plan || !/\b(et|ou)\b/.test(normalizeText(question || ''))) return plan;
+  _enUnion++;
   // les questions rejouées partent de l'état de conversation actuel, qui est restauré ensuite
   const etat = getDataEngineState();
   const sauve = { lastPlan: etat.lastPlan, lastExecution: etat.lastExecution };
   try { return _essaiUnion(question, filterContextText, plan) || plan; }
   catch (e) { return plan; }
-  finally { _enUnion = false; etat.lastPlan = sauve.lastPlan; etat.lastExecution = sauve.lastExecution; }
+  finally { _enUnion--; etat.lastPlan = sauve.lastPlan; etat.lastExecution = sauve.lastExecution; }
 }
 // v27.5.61 — relances qui perdaient le résultat précédent :
 // - un export juste après un résultat filtré (« exporte », « donne-moi le fichier ») garde ses filtres, sauf « tout »
@@ -4054,26 +4069,34 @@ function finalSanitizeAnalysisPlan(plan) {
 function _exclusionsMultiples(plan) {
   if (!plan || !plan.table || !Array.isArray(plan.filters)) return plan;
   const q = normalizeText(String(plan.question || '').replace(/\s*,\s*/g, ' et '));
-  const m = q.match(/\b(?:hors|sauf|excepte|exceptes|en dehors (?:de|des|du|d)|a l exception (?:de|des|du|d))\s+((?:(?:les|des|la|le|l|de|du|d|hors|sauf|en|dans|au|aux|a)\s+)*[a-z0-9]+(?:\s*(?:,|et|ni|ou)\s+(?:(?:les|des|la|le|l|de|du|d|hors|sauf|en|dans|au|aux|a)\s+)*[a-z0-9]+)+)/);
-  if (!m) return plan;
+  // v27.5.92 — chaque exclusion de la question (« hors Gironde … admis hors BTS ») : avant, seule la première était lue
+  const _re = new RegExp((/\b(?:hors|sauf|excepte|exceptes|en dehors (?:de|des|du|d)|a l exception (?:de|des|du|d))\s+((?:(?:les|des|la|le|l|de|du|d|hors|sauf|en|dans|au|aux|a)\s+)*[a-z0-9]+(?:\s*(?:,|et|ni|ou)\s+(?:(?:les|des|la|le|l|de|du|d|hors|sauf|en|dans|au|aux|a)\s+)*[a-z0-9]+)*)/).source, 'g');
+  for (const m of q.matchAll(_re)) _uneExclusion(plan, q, m);
+  return plan;
+}
+function _uneExclusion(plan, q, m) {
   const mots = m[1].split(/\s*(?:,|\bet\b|\bni\b|\bou\b)\s*/).map(x => x.replace(/^(?:(?:les|des|la|le|l|de|du|d|hors|sauf|en|dans|au|aux|a)\s+)+/, '').trim()).filter(Boolean);
-  if (mots.length < 2) return plan;
+  // v27.5.92 — une seule formation exclue (« admis hors BTS », « sauf en licence ») aussi, mais seulement pour une colonne de
+  // formation (avant : « hors BTS » lu comme « en BTS » — 4 975 au lieu de 18 137 sur le vrai fichier) ; les lieux exclus
+  // (« hors Gironde ») sont traités ailleurs
+  if (!mots.length) return;
+  const seul = mots.length === 1;
   let col = (plan.table.headers || []).find(h => /^filiere de formation tres agregee$/.test(normalizeText(h)));
   let vals = col ? mots.map(w => _distinctValues(plan.table, col).find(x => normalizeText(x) === w || normalizeText(x) === w.replace(/s$/, ''))) : [];
   if (!col || vals.some(v => !v)) {
     // fichier de candidats (« Grands groupes de formation » : « BTS - BTSA - DTS - DMA », « L1 - CUPGE… ») : la valeur que
     // le moteur donne à chaque mot seul (« licence » → L1…), toutes dans la même colonne
     const lus = mots.map(w => _filtresDePhrase(plan.table, w).filter(f => f && f.op === 'eq' && f.source !== 'condition_chiffree'));
-    if (lus.some(l => l.length !== 1) || new Set(lus.map(l => l[0].col)).size !== 1) return plan; // pas une liste de formations : on ne touche à rien
+    if (lus.some(l => l.length !== 1) || new Set(lus.map(l => l[0].col)).size !== 1) return; // pas une liste de formations : on ne touche à rien
     col = lus[0][0].col; vals = lus.map(l => l[0].value);
   }
+  if (seul && !/formation|filiere|groupe/.test(_hx(col))) return;
   const ns = new Set(vals.map(normalizeText));
   const motsN = new Set(mots.flatMap(w => [w, w.replace(/s$/, '')]));
   const touche = f => f && ((f.col === col && ns.has(normalizeText(f.value))) || (f.op === 'in' && f.col === col && (f.values || []).every(v => ns.has(normalizeText(v)))) ||
     (f.op === 'or' && (f.groupes || []).flat().every(g => g.col === col && ns.has(normalizeText(g.value)))) ||
     (f.op === 'contains_all' && (f.terms || []).every(t => [].concat(t).some(w => motsN.has(normalizeText(w))))) || (f.op === 'contains_all' && (f.terms || []).every(t => [].concat(t).some(w => ns.has(normalizeText(w)) || ns.has(normalizeText(w).replace(/s$/, ''))))));
   plan.filters = [...plan.filters.filter(f => !touche(f)), ...vals.map(v => ({ col, op: 'neq', value: v, label: null, source: 'exclusion' }))];
-  return plan;
 }
 // v27.5.72 — un seul mot de formation qui est EXACTEMENT une filière (« licence » → Licence) : la filière, comme dans
 // « combien de licences » (avant : « bacheliers généraux admis en licence » cherchait « licence » dans les intitulés et

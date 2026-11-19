@@ -482,7 +482,10 @@
     const _negAcad = windowAround.match(/(?:^|\s)(hors|sauf|exclu|excluant|exclure|different|differente|pas|non)(?=\s|$)(?:\s+(\S+))?/);
     const _vise = _negAcad ? _negAcad[2] || '' : '';
     const _surAutreMot = _negAcad && /^(pas|non)$/.test(_negAcad[1]) && _vise && !/^(dans|de|du|des|en|a|au|aux|situe|situee|situes|situees|localise|localisee|localises|localisees|issu|issue|issus|issues|l|la|le|les|academie|implante|implantee|implantes|implantees)$/.test(_vise);
-    if (_negAcad && !_surAutreMot && entry.kind === 'academie') return 'neq';
+    // v27.5.92 — la négation s'arrête au verbe d'accueil : « hors Gironde admis à Toulouse » ne nie pas Toulouse
+    const _apresNeg = _negAcad ? windowAround.slice(windowAround.indexOf(_negAcad[0]) + _negAcad[0].length, windowAround.indexOf(a, windowAround.indexOf(_negAcad[0]))) : '';
+    const _coupeNeg = /\b(admis|admises?|acceptes?|acceptees?|inscrits?|inscrites?|accueillis|accueillies|partent|vont|affectes?)\b/.test(_apresNeg);
+    if (_negAcad && !_surAutreMot && !_coupeNeg && entry.kind === 'academie') return 'neq';
     return 'eq';
   }
 
