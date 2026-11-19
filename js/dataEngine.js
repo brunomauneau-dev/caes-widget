@@ -189,6 +189,10 @@ function isFilterOnlyFollowUp(question) {
   if (/^combien\s+(sont[- ]ils|y\s*(?:en\s+)?a[- ]?t[- ]?il|en tout|au total|maintenant|cela|ca|[cç]a)\s*\??$/.test(q)) return true;
   // v27.25 — « lesquelles sont à Bordeaux ? », « quels sont-ils ? », « où sont-elles ? » : les mêmes, détaillés
   if (RELANCE_LESQUELS.test(q)) return true;
+  // v27.5.95 — « et avec plus de 30 places ? », « et celles de moins de 20 places ? », « parmi elles, combien ont… »,
+  // « même question pour les BUT » (avant : pas de calcul, la relance partait chez Albert sans chiffre vérifié)
+  if (/^(?:et )?(?:la )?meme (?:question|chose|calcul|demande)\b/.test(q)) return true;
+  if (/^(?:et )?(?:parmi (?:elles|eux|celles ci|ceux ci|celles la|ceux la|ces formations)|(?:et )?(?:celles|ceux)(?: qui| de| avec| ayant| dont)|et (?:avec|ayant|qui|dont|plus de|moins de|au moins|au plus|entre|seulement|uniquement))\b/.test(q)) return true;
   // v27.14 — « et à Bordeaux ? », « et en Gironde ? », « et dans l'académie de Toulouse ? », « et sur Pau ? »
   return /^(seulement|uniquement|avec|sans|sauf|hors|excluant|en excluant|les boursiers|les non boursiers|non boursiers|boursiers|et pour|et les|et chez|parmi les|pour les|chez les|uniquement les|notamment les|en particulier|et parmi|et a |et au |et aux |et en |et dans |et sur |et hors |et sauf |et de |et du |et des |et d )/.test(q);
 }
@@ -837,7 +841,10 @@ function inheritConversationContext(plan, question) {
     const prevKept = (newTerms.length || _filtresPlanner.some(_estFormation)) ? previousFilters.filter(f => !_estFormation(f)) : previousFilters;
     // v27.10 — filtres posés par cette question (pour distinguer ceux repris de la question précédente)
     const _clesQuestion = new Set([...(plan.filters || []), ...newStrictFilters].map(_cleFiltre));
-    plan.filters = mergeFiltersUnique(prevKept, [...newFilters, ...newTerms]);
+    // v27.5.95 — un lieu cité remplace le lieu précédent, même à un autre niveau (« à Paris » puis « et dans l'académie de
+    // Bordeaux ? » : avant, commune = Bordeaux, 32 BTS au lieu de 138)
+    const _prevSansLieu = prevKept.filter(f => !_lieuRemplacePar(f, [...newFilters, ...newTerms, ..._filtresPlanner]));
+    plan.filters = mergeFiltersUnique(_prevSansLieu, [...newFilters, ...newTerms]);
 
     // v27.25 — après une moyenne (« taux d'accès moyen des BTS »), « et par académie ? » / « et pour les CPGE ? »
     // gardent la mesure (avant : nombre de formations par académie, ou arrêt)
@@ -860,7 +867,7 @@ function inheritConversationContext(plan, question) {
       // v27.5.56 — sous-population : les filtres précédents + ceux de cette question ; l'outil est celui de la question
       const _strict = strictFiltersFromQuestion(plan.table, question);
       const _colsNouvelles = new Set([..._strict, ..._filtresPlanner].filter(f => f && f.op !== 'contains_all').map(f => f.col));
-      const _prevGardes = prevKept.filter(f => !(f && f.op !== 'contains_all' && _colsNouvelles.has(f.col)) && !_lieuRemplacePar(f, [..._strict, ..._filtresPlanner]));
+      const _prevGardes = prevKept.filter(f => !(f && f.op !== 'contains_all' && f.source !== 'condition_chiffree' && _colsNouvelles.has(f.col)) && !_lieuRemplacePar(f, [..._strict, ..._filtresPlanner]));
       plan.filters = mergeFiltersUnique(mergeFiltersUnique(_prevGardes, _strict), _filtresPlanner);
       plan.sousEnsemble = true;
     } else if (filterFollowUp && RELANCE_LISTE.test(q)) {
@@ -882,7 +889,7 @@ function inheritConversationContext(plan, question) {
       // filtres : comme toute relance de filtre (« et pour les CPGE ? » remplace BTS)
       const _strict = strictFiltersFromQuestion(plan.table, question);
       const _colsNouvelles = new Set([..._strict, ..._filtresPlanner].filter(f => f && f.op !== 'contains_all').map(f => f.col));
-      const _prevGardes = prevKept.filter(f => !(f && f.op !== 'contains_all' && _colsNouvelles.has(f.col)) && !_lieuRemplacePar(f, [..._strict, ..._filtresPlanner]));
+      const _prevGardes = prevKept.filter(f => !(f && f.op !== 'contains_all' && f.source !== 'condition_chiffree' && _colsNouvelles.has(f.col)) && !_lieuRemplacePar(f, [..._strict, ..._filtresPlanner]));
       plan.filters = mergeFiltersUnique(mergeFiltersUnique(_prevGardes, _strict), _filtresPlanner);
     } else if (filterFollowUp) {
       plan.tool = prev.tool || plan.tool;
@@ -916,7 +923,7 @@ function inheritConversationContext(plan, question) {
         // au lieu de cumuler deux valeurs incompatibles ; une formation citée remplace la précédente (prevKept).
         const _strict = strictFiltersFromQuestion(plan.table, question);
         const _colsNouvelles = new Set([..._strict, ..._filtresPlanner].filter(f => f && f.op !== 'contains_all').map(f => f.col));
-        const _prevGardes = prevKept.filter(f => !(f && f.op !== 'contains_all' && _colsNouvelles.has(f.col)) && !_lieuRemplacePar(f, [..._strict, ..._filtresPlanner]));
+        const _prevGardes = prevKept.filter(f => !(f && f.op !== 'contains_all' && f.source !== 'condition_chiffree' && _colsNouvelles.has(f.col)) && !_lieuRemplacePar(f, [..._strict, ..._filtresPlanner]));
         plan.filters = mergeFiltersUnique(mergeFiltersUnique(_prevGardes, _strict), _filtresPlanner);
       }
     }
@@ -925,12 +932,15 @@ function inheritConversationContext(plan, question) {
     // même colonne (commune de scolarité). Avant : « et de Bayonne » n'était pas lu (chiffre de Pau redonné) et
     // « et à Bayonne » cumulait Pau (scolarité) et Bayonne (accueil), 55 au lieu de 1 494.
     if (filterFollowUp && !plan.sousEnsemble && !RELANCE_LISTE.test(q)) {
-      const _m = q.match(/^et (?:pour |a |au |aux |en |dans |de |du |des |d |sur |chez )?(?:la |le |l |les )?(?:(?:commune|ville|academie|departement|region|lycee|etablissement) (?:de |d |du |des )?(?:la |le |l )?)?([a-z0-9][a-z0-9 \-']*?)\s*\??$/);
+      const _m = q.match(/^et (?:pour |a |au |aux |en |dans |de |du |des |d |sur |chez )?(?:la |le |l |les )?(?:(commune|ville|academie|departement|region|lycee|etablissement) (?:de |d |du |des )?(?:la |le |l )?)?([a-z0-9][a-z0-9 \-']*?)\s*\??$/);
       const _lieu = c => /commune|ville|acad[eé]mi|d[eé]partement|r[eé]gion/.test(_hx(c)) && !/code|insee|postal/.test(_hx(c));
       if (_m) {
-        const x = _m[1].trim();
+        const x = _m[2].trim();
         const tbl = plan.table || prev.table;
-        const cible = previousFilters.find(f => f && f.op === 'eq' && _lieu(f.col) && _distinctValues(tbl, f.col).some(v => normalizeText(v) === x));
+        // v27.5.95 — le niveau cité compte : « et dans l'académie de Bordeaux ? » après « à Paris » n'est pas la COMMUNE de
+        // Bordeaux (avant : 32 BTS au lieu de 138)
+        const niveau = { commune: /commune|ville/, ville: /commune|ville/, academie: /academi/, departement: /departement/, region: /region/ }[_m[1]];
+        const cible = previousFilters.find(f => f && f.op === 'eq' && _lieu(f.col) && (!niveau || niveau.test(_hx(f.col))) && _distinctValues(tbl, f.col).some(v => normalizeText(v) === x));
         if (cible) {
           const v = _distinctValues(tbl, cible.col).find(v => normalizeText(v) === x);
           const autres = (plan.filters || []).filter(f => !(f && _lieu(f.col)) && !previousFilters.some(p => _cleFiltre(p) === _cleFiltre(f)));
@@ -2067,6 +2077,12 @@ function applyConditionsChiffrees(plan) {
   if (univ) { conds.push(univ); plan.universCandidats = univ; }
   if (!conds.length) return plan;
   // le nombre cité n'est pas une valeur de colonne à égaler ailleurs (« 0 », « 100 ») : on retire les filtres = nombre
+  // v27.5.95 — relance « et avec plus de 50 places ? » après « … de moins de 20 places » : le nouveau seuil remplace l'ancien
+  // sur la même colonne ; « parmi elles, … » restreint (les deux sont gardés)
+  if (!/\bparmi (?:elles|eux|celles|ceux|ces)\b/.test(normalizeText(plan.question || ''))) {
+    const colsNouvelles = new Set(conds.filter(c => !c.univers).map(c => c.col));
+    plan.filters = (plan.filters || []).filter(f => !(f && f.source === 'condition_chiffree' && !f.univers && colsNouvelles.has(f.col)));
+  }
   const nombres = new Set(conds.flatMap(c => c.op === 'or' ? (c.groupes || []).flat().map(g => String(g.value)) : [String(c.value)]));
   plan.filters = [...(plan.filters || []).filter(f => !(f && f.op !== 'contains_all' && nombres.has(String(f.value).replace(',', '.')))), ...conds];
   // « combien de BTS n'ayant pas de places » : on compte les formations à 0, on n'additionne pas la colonne
@@ -2738,7 +2754,7 @@ const LIEUX_AMBIGUS = new Set('somme manche nord lot var ain cher orne oise eure
    source où une ligne = une formation, chaque mot porteur de sens doit correspondre à un filtre, à une colonne
    utilisée ou à un mot connu (outils de la question, lieux, mesures). Sinon le moteur s'arrête et le nomme. */
 const MOTS_QUESTION = new Set(`
-  eux elles ceux celles entre parmi exception excepte exceptes dehors compris comprise comprises exactement pile egal egale egaux egales superieur superieure superieurs inferieur inferieure inferieurs meme vivier promotion
+  eux elles ceux celles entre parmi exception excepte exceptes dehors question questions compris comprise comprises exactement pile egal egale egaux egales superieur superieure superieurs inferieur inferieure inferieurs meme vivier promotion
   comment evolue evoluee evolues evoluees evolution evolutions augmente augmentee augmentes diminue diminuee baisse hausse
   croise croisee croises croisees croiser pivot
   seul seule seuls seules
@@ -4331,7 +4347,10 @@ function _finalSanitizeAnalysisPlanBase(plan) {
     const _nouveaux = _entrants.filter(f => !_clesPrev.has(_cleFiltre(f)) && !_chiffreInvente(f));
     const _colsNouv = new Set([...strict, ..._nouveaux].filter(f => f && f.op !== 'contains_all').map(f => f.col));
     const _clesEntrants = new Set(_entrants.map(_cleFiltre));
-    const _prevGardes = (prev.filters || []).filter(pf => pf && _clesEntrants.has(_cleFiltre(pf)) && !(pf.op !== 'contains_all' && _colsNouv.has(pf.col)));
+    // v27.5.95 — « parmi elles, combien ont plus de 30 places ? » après « moins de 100 places » : le seuil précédent reste
+    // (sous-ensemble) ; sans « parmi », « et avec plus de 50 places ? » le remplace (même colonne)
+    const _parmi = /\bparmi (?:elles|eux|celles|ceux|ces)\b/.test(normalizeText(plan.question || ''));
+    const _prevGardes = (prev.filters || []).filter(pf => pf && _clesEntrants.has(_cleFiltre(pf)) && !(pf.op !== 'contains_all' && !(_parmi && pf.source === 'condition_chiffree') && _colsNouv.has(pf.col)));
     plan.filters = mergeFiltersUnique(mergeFiltersUnique(_prevGardes, strict), _nouveaux);
     // v27.25 — relance déjà résolue (mesure d'une moyenne gardée, somme par groupe, « lesquelles … ») : outil conservé
     const _resolue = plan.statsCol || plan.lesquelles || plan.sousEnsemble || (dimensionFollowUp && plan.groupSumCol) || (plan.tool === 'part' && plan.part && plan.part.groupe);
