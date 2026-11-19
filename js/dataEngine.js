@@ -1934,13 +1934,13 @@ function _texteConditions(question) {
   const q = normalizeText(_symbolesEnMots(question || '').replace(/\s*%|\bpour ?cent\b/gi, ' pourcent '));
   return q
     .replace(/\bpourcent\s+(?:d admis |de |des |d )?(?:neo ?bacheliers? )?(boursiers?)\b/g, 'pourcent $1')
-    .replace(new RegExp(`\\b${_NB_COND}\\s+(pourcent\\s+)?(${_UNITE_COND})\\s+(ou plus|et plus|ou davantage|au moins|au minimum|minimum|ou moins|et moins|au plus|au maximum|maximum)\\b(?!\\s+(?:de|d|que|qu)\\b)`, 'g'),
+    .replace(new RegExp(`\\b${_NB_COND}\\s+(pourcent\\s+)?(${_UNITE_COND})\\s+(ou plus|et plus|ou davantage|au moins|au minimum|minimum|ou moins|et moins|au plus|au maximum|maximum)\\b(?!\\s+(?:de|d|que|qu)\\s+\\d)`, 'g'),
       (m, n, pc, u, w) => `${/ou plus|et plus|davantage|au moins|minimum/.test(w) ? 'au moins' : 'au plus'} ${n} ${pc ? 'pourcent ' : ''}${u}`);
 }
 const _COMP_PREFIXE = '(plus de|plus d|moins de|moins d|au moins|au plus|superieure? ou egale? a|inferieure? ou egale? a|superieure? a|inferieure? a|au dela de|en dessous de|depassant|depassent|depasse|excedant|excedent|excede)';
 const _COND_PREFIXE_RE = new RegExp(`\\b${_COMP_PREFIXE}\\s+(\\d+(?:[.,]\\d+)?|un|une)\\s+(pourcent\\s+)?(${_UNITE_COND})\\b`, 'g');
 const _COND_ENTRE_RE = new RegExp(`\\b(?:compris |comprise )?(?:entre|de)\\s+${_NB_COND}\\s+(pourcent\\s+)?(?:${_UNITE_COND}\\s+)?(?:et|a)\\s+${_NB_COND}\\s+(pourcent\\s+)?(${_UNITE_COND})\\b`, 'g');
-const _MESURE_TAUX = '(taux d ?acces|capacites?|nombre de places|nombre de candidats|nombre d admis|(?:taux|part|pourcentage|proportion) (?:de |d |des )?(?:admis )?boursiers?)';
+const _MESURE_TAUX = '(taux d ?acces|capacites?|nombre de places|nombre de candidats|nombre d admis|(?:nombre|nb) (?:total )?(?:de |d )?voeux(?: confirmes)?|(?:taux|part|pourcentage|proportion) (?:de |d |des )?(?:admis )?boursiers?)';
 const _COND_TAUX_ENTRE_RE = new RegExp(`\\b${_MESURE_TAUX}\\s+(?:est\\s+|de la formation\\s+)?(?:compris |comprise )?entre\\s+${_NB_COND}\\s+(?:pourcent\\s+)?(?:et|a)\\s+${_NB_COND}(?:\\s+pourcent)?`, 'g');
 // texte de la question sans ses conditions chiffrées : le mot d'une condition (« ont entre 10 et 20 places ») n'est pas
 // la mesure demandée (avant : « combien de CPGE ont entre 10 et 20 places » additionnait les places)
@@ -1972,11 +1972,15 @@ function conditionsChiffrees(table, question) {
   // v27.5.81 — aussi « au moins un vœu », « plus d'un vœu » (avant : « au moins un vœu » ignoré, tout le fichier compté
   // au lieu des 29 543 candidats ayant confirmé un vœu)
   // v27.5.93 — « plus de 30 places ou moins de 10 places » : l'une OU l'autre (avant : les deux exigées, 0)
+  // « dont le nombre de vœux dépasse 12 admis en BTS » : « 12 admis » appartient à la condition sur les vœux (mesure
+  // nommée avant le comparateur) ; ces passages sont masqués pour les formes « plus de 12 admis »
+  const blanc = m => ' '.repeat(m.length);
+  const qP = q.replace(_COND_TAUX_ENTRE_RE, blanc).replace(_COND_TAUX_CMP_RE, blanc);
   let precedent = null;
-  for (const m of q.matchAll(_COND_PREFIXE_RE)) {
+  for (const m of qP.matchAll(_COND_PREFIXE_RE)) {
     const col = colPour(m[4], !!m[3]); const op = opPour(m[1].replace(/ d$/, ' de'));
     const val = /^une?$/.test(m[2]) ? 1 : Number(m[2].replace(',', '.'));
-    const entreDeux = precedent ? q.slice(precedent.fin, m.index) : '';
+    const entreDeux = precedent ? qP.slice(precedent.fin, m.index) : '';
     if (col && op) {
       const f = { col, op, value: val };
       if (precedent && precedent.filtre && /^\s+ou(?: bien)?\s+(?:(?:avec|ayant|qui ont|ont|qui comptent)\s+)?$/.test(entreDeux)) {
@@ -1992,23 +1996,23 @@ function conditionsChiffrees(table, question) {
       precedent = { fin: m.index + m[0].length, filtre: out[out.length - 1] };
     } else precedent = null;
   }
-  for (const m of q.matchAll(_COND_EXACTE_RE)) {
+  for (const m of qP.matchAll(_COND_EXACTE_RE)) {
     const col = colPour(m[4], !!m[3]);
     if (col && !out.some(f => f.col === col)) out.push({ col, op: 'eqn', value: Number(m[2].replace(',', '.')), cond: ++idc });
   }
   // 2. « taux d'accès inférieur à 20 % », « capacité supérieure à 50 », « un taux d'accès de 0 », « taux d'accès de plus de 30 % »
   for (const m of q.matchAll(new RegExp(`\\b${_MESURE_TAUX}\\s+(?:est\\s+|de la formation\\s+)?(?:de\\s+)?${_CMP}\\s+(\\d+(?:[.,]\\d+)?)(?:\\s+pourcent)?`, 'g'))) {
-    const col = /bours/.test(m[1]) ? _colPctBoursiers(table, headers) : colPour(/taux/.test(m[1]) ? "taux d acces" : /candidat/.test(m[1]) ? 'candidats' : /admis/.test(m[1]) ? 'admis' : 'places'); const op = opPour(m[2]);
+    const col = /bours/.test(m[1]) ? _colPctBoursiers(table, headers) : colPour(/taux/.test(m[1]) ? "taux d acces" : /voeu/.test(m[1]) ? 'voeux' : /candidat/.test(m[1]) ? 'candidats' : /admis/.test(m[1]) ? 'admis' : 'places'); const op = opPour(m[2]);
     if (col && op && !out.some(f => f.col === col)) out.push({ col, op, value: Number(m[3].replace(',', '.')), cond: ++idc });
   }
   // 2a. v27.5.93 — « taux d'accès (compris) entre 30 et 50 % » (avant : condition perdue, toutes les formations comptées)
   for (const m of q.matchAll(_COND_TAUX_ENTRE_RE)) {
-    const col = /bours/.test(m[1]) ? _colPctBoursiers(table, headers) : colPour(/taux/.test(m[1]) ? "taux d acces" : /candidat/.test(m[1]) ? 'candidats' : /admis/.test(m[1]) ? 'admis' : 'places');
+    const col = /bours/.test(m[1]) ? _colPctBoursiers(table, headers) : colPour(/taux/.test(m[1]) ? "taux d acces" : /voeu/.test(m[1]) ? 'voeux' : /candidat/.test(m[1]) ? 'candidats' : /admis/.test(m[1]) ? 'admis' : 'places');
     if (col && !out.some(f => f.col === col)) { const c = ++idc; out.push({ col, op: 'gte', value: Number(m[2].replace(',', '.')), cond: c }); out.push({ col, op: 'lte', value: Number(m[3].replace(',', '.')), cond: c }); }
   }
   // 2b. v27.5.73 — « entre 5 et 10 vœux », « de 5 à 10 vœux » : bornes comprises (avant : condition perdue, tout le fichier)
   // v27.5.93 — aussi « entre 20 admis et 40 admis », « entre 10 et 20 % de boursiers »
-  for (const m of q.matchAll(_COND_ENTRE_RE)) {
+  for (const m of qP.matchAll(_COND_ENTRE_RE)) {
     const col = colPour(m[5], !!(m[2] || m[4]));
     if (col && !out.some(f => f.col === col)) { const c = ++idc; out.push({ col, op: 'gte', value: Number(m[1].replace(',', '.')), cond: c }); out.push({ col, op: 'lte', value: Number(m[3].replace(',', '.')), cond: c }); }
   }
@@ -2715,7 +2719,7 @@ const CONCEPTS_A_FILTRER = [
   { re: /\b(filles?|femmes?|feminins?|garcons?|hommes?|masculins?|candidates)\b/, mot: 'filles / garçons', ok: (t, f) => /sexe|genre|candidates/.test(t) || /^(f|m|h|feminin|masculin|femmes?|hommes?|filles?|garcons?)$/.test(normalizeText(f.value)) || (typeof plannerColumnKind === 'function' && plannerColumnKind(f.col) === 'sexe') },
   { re: /\bapprenti(e|s|es)?\b|\bapprentissage\b|\balternance\b/, mot: 'apprentis', ok: t => /appr|altern/.test(t) },
   // v27.14 — condition chiffrée non comprise (« dont la capacité dépasse 100 ») : arrêt, pas toutes les lignes
-  { re: /\b(plus de|moins de|au moins|au plus|superieure? a|inferieure? a|depasse\w*|au dela de|en dessous de)\s+\d/, mot: 'condition chiffrée', ok: (t, f) => f && f.source === 'condition_chiffree' },
+  { re: /\b(plus de|moins de|au moins|au plus|superieure? a|inferieure? a|depasse\w*|au dela de|en dessous de)\s+\d/, mot: 'condition chiffrée', ok: (t, f) => f && f.source === 'condition_chiffree' && !f.univers },
   // v27.13 — « combien de refusés » sans colonne de statut comptait tout le fichier
   { re: /\brefus(e|es|ee|ees)?\b|\bliste d ?attente\b|\ben attente\b|\bdesist(e|es|ee|ees|ement)?\b/, mot: 'statut de candidature (refusé, liste d\'attente…)', ok: t => /refus|attente|desist|statut|admi|candidature/.test(t) },
   // v27.5.84 — « ont eu une proposition », « sans proposition », « taux de proposition » sans colonne de proposition :
@@ -2870,11 +2874,19 @@ function conceptsNonFiltres(plan) {
 function _nbConditionsCitees(question) {
   const q = _texteConditions(question);
   const n = re => [...q.matchAll(re)].length;
+  const qP = q.replace(_COND_TAUX_ENTRE_RE, ' ').replace(_COND_TAUX_CMP_RE, ' ');
+  const nP = re => [...qP.matchAll(re)].length;
   // « au moins un vœu » (définition SAIO, déjà comptée à part) n'est pas une condition demandée en plus
-  const prefixes = [...q.matchAll(_COND_PREFIXE_RE)].filter(m => !/^une?$/.test(m[2])).length;
+  const prefixes = [...qP.matchAll(_COND_PREFIXE_RE)].filter(m => !/^une?$/.test(m[2])).length;
   // deux seuils reliés par « ou » forment une seule condition
   const ou = n(new RegExp(`\\b(?:${_UNITE_COND})\\s+ou(?: bien)?\\s+(?:(?:avec|ayant|qui ont|ont|qui comptent)\\s+)?${_COMP_PREFIXE}\\s+\\d`, 'g'));
-  return prefixes - ou + n(_COND_TAUX_CMP_RE) + n(_COND_TAUX_ENTRE_RE) + n(_COND_ENTRE_RE) + n(_COND_EXACTE_RE);
+  const lues = prefixes - ou + n(_COND_TAUX_CMP_RE) + n(_COND_TAUX_ENTRE_RE) + nP(_COND_ENTRE_RE) + nP(_COND_EXACTE_RE);
+  // filet : tout comparateur suivi d'un nombre, et tout « entre N et M », compte comme une condition citée, même sur une
+  // mesure que le moteur ne connaît pas (« dont le nombre de vœux dépasse 5 » : arrêt plutôt que tout le fichier)
+  const generiques = [...q.matchAll(new RegExp(`\\b${_COMP_PREFIXE}\\s+(\\d+(?:[.,]\\d+)?)\\b`, 'g'))].length - ou
+    + [...q.matchAll(/\bentre\s+(\d+(?:[.,]\d+)?)\s+(?:pourcent\s+)?(?:\w+\s+){0,2}(?:et|a)\s+(\d+(?:[.,]\d+)?)/g)]
+      .filter(m => !(/^(19|20)\d\d$/.test(m[1]) && /^(19|20)\d\d$/.test(m[2]))).length; // « entre 2024 et 2025 » : des sessions
+  return Math.max(lues, generiques);
 }
 function unresolvedConceptExecution(plan, manque, raison) {
   const cols = (plan.table.headers || []).filter(h => !/^(id|manualSort)$/i.test(String(h)));
