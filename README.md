@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-78 fichiers, 2 987 tests. Depuis la racine du repo :
+79 fichiers, 2 992 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -176,6 +176,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 `js/test_specialites_formulations.js` vérifie que « ayant suivi », « qui ont pris », « suivant » + une spécialité (même en toutes lettres : « mathématiques ») désignent l'enseignement suivi au lycée, tandis que « candidats en mathématiques » reste la formation d'accueil ; plus des taux par série et des moyennes de vœux. Le même banc (600 questions) a tourné sur le vrai fichier (hors dépôt) : 0 chiffre faux.
 
 `js/test_parts_formations.js` est un banc de taux et de parts sur l'open data : taux d'accès moyen, part des formations privées, part des boursiers parmi les admis (définition officielle), répartitions, formations sélectives, taux de remplissage, places par département, formation la plus sélective — croisés avec filière et lieu. « Part des BTS privés » se calcule parmi les BTS.
+
+`js/test_evolution_formulations.js` est un banc d'évolutions entre deux sessions de l'open data (« évolution du nombre de… depuis 2024 », « comment a évolué… », « … a-t-il augmenté », « … par rapport à l'an dernier », « … en 2024 ») croisant filière, lieu et mesure (nombre, places, vœux, admis), vérité recalculée sur chaque session.
 
 `js/test_part_groupes.js` vérifie les **taux par groupe** : « pourcentage de candidats sans proposition par département », « part des boursiers par académie », « taux de remplissage des BTS par académie » donnent un taux calculé **dans** chaque groupe (avant : la répartition du total entre groupes, lue à tort comme un taux), avec la ligne « Ensemble », l'export, le graphique et les relances (« taux de proposition des boursiers » puis « et par département ? »).
 
