@@ -1738,7 +1738,7 @@ function applyMeasureSum(plan) {
   const groupe = ['group_by', 'top', 'pivot'].includes(plan.tool) && !plan.listMode;
   if (plan.tool !== 'count_rows' && !groupe) return plan;
   // v27.14 — le mot d'une condition chiffrée (« avec au plus 30 admis ») n'est pas la mesure demandée
-  const q = normalizeText(plan.question || '').replace(/\b(plus de|moins de|au moins|au plus)\s+\d+(?:[.,]\d+)?\s*%?\s*(places?|candidats?|admis|voeux|boursiers?)\b/g, ' ')
+  const q = _sansConditionsChiffrees(plan.question || '')
     .replace(/\b(?:aucun|aucune|sans|pas de|pas d|zero|0)\s+(places?|candidats?|candidatures?|admis|voeux|voeu)\b/g, ' ');
   if (/\b(combien|nombre|repartition|ventilation) d(e|es)? ?(formations?|filieres?|offres?|etablissements?)\b/.test(q)) return plan;
   const headers = plan.table.headers || [];
@@ -1913,10 +1913,10 @@ function applyClassement(plan) {
    « avec un taux d'accès de 0 ». Avant : la condition était ignorée et le widget comptait toutes les lignes. */
 const COMPARATEURS = [
   [/superieure? ou egale? a|au moins|minimum|\bmin\b|>=/, 'gte'], [/inferieure? ou egale? a|au plus|maximum|\bmax\b|<=/, 'lte'],
-  [/plus de|superieure? a|au dela de|depassant|>/, 'gt'], [/moins de|inferieure? a|en dessous de|<|sous les?/, 'lt'],
+  [/plus de|superieure? a|au dela de|depass\w*|exced\w*|>/, 'gt'], [/moins de|inferieure? a|en dessous de|<|sous les?/, 'lt'],
   [/egale? a|de|=|a/, 'eqn'],
 ];
-const _CMP = '(superieure? ou egale? a|inferieure? ou egale? a|au moins|au plus|plus de|moins de|superieure? a|inferieure? a|au dela de|en dessous de|depassant|egale? a|>=|<=|>|<|=|de|a)';
+const _CMP = '(superieure? ou egale? a|inferieure? ou egale? a|au moins|au plus|plus de|moins de|superieure? a|inferieure? a|au dela de|en dessous de|depassant|depassent|depasse|excedant|excedent|excede|egale? a|>=|<=|>|<|=|de|a)';
 const SYMBOLES_OPS = { gt: 'supérieur à', gte: 'au moins', lt: 'inférieur à', lte: 'au plus', eqn: 'égal à' };
 // v27.5.67 — « taux d'accès > 80 % », « ≤ 30 » : les symboles disparaissaient au nettoyage du texte (condition perdue,
 // tous les BTS comptés). Ils sont écrits en toutes lettres avant.
@@ -1924,34 +1924,97 @@ function _symbolesEnMots(question) {
   return String(question ?? '').replace(/>=|≥/g, ' superieur ou egal a ').replace(/<=|≤/g, ' inferieur ou egal a ')
     .replace(/>/g, ' superieur a ').replace(/</g, ' inferieur a ');
 }
+// v27.5.93 — seuils écrits autrement : « 20 admis ou plus », « 30 places ou moins », « 10 % de boursiers ou plus »,
+// « entre 20 admis et 40 admis », « taux d'accès compris entre 30 et 50 % », « 500 candidatures ». Avant : seuil perdu
+// ou lu « égal à 20 », condition sur le taux disparue (toutes les formations comptées), « % de boursiers » lu comme une part.
+const _UNITE_COND = '(?:places?|candidats?|candidatures?|admis|voeux|voeu|boursiers?)';
+const _NB_COND = '(\\d+(?:[.,]\\d+)?)';
+// question brute → texte normalisé où « % » / « pour cent » devient le mot « pourcent » (normalizeText efface « % »)
+function _texteConditions(question) {
+  const q = normalizeText(_symbolesEnMots(question || '').replace(/\s*%|\bpour ?cent\b/gi, ' pourcent '));
+  return q
+    .replace(/\bpourcent\s+(?:d admis |de |des |d )?(?:neo ?bacheliers? )?(boursiers?)\b/g, 'pourcent $1')
+    .replace(new RegExp(`\\b${_NB_COND}\\s+(pourcent\\s+)?(${_UNITE_COND})\\s+(ou plus|et plus|ou davantage|au moins|au minimum|minimum|ou moins|et moins|au plus|au maximum|maximum)\\b(?!\\s+(?:de|d|que|qu)\\b)`, 'g'),
+      (m, n, pc, u, w) => `${/ou plus|et plus|davantage|au moins|minimum/.test(w) ? 'au moins' : 'au plus'} ${n} ${pc ? 'pourcent ' : ''}${u}`);
+}
+const _COMP_PREFIXE = '(plus de|plus d|moins de|moins d|au moins|au plus|superieure? ou egale? a|inferieure? ou egale? a|superieure? a|inferieure? a|au dela de|en dessous de|depassant|depassent|depasse|excedant|excedent|excede)';
+const _COND_PREFIXE_RE = new RegExp(`\\b${_COMP_PREFIXE}\\s+(\\d+(?:[.,]\\d+)?|un|une)\\s+(pourcent\\s+)?(${_UNITE_COND})\\b`, 'g');
+const _COND_ENTRE_RE = new RegExp(`\\b(?:compris |comprise )?(?:entre|de)\\s+${_NB_COND}\\s+(pourcent\\s+)?(?:${_UNITE_COND}\\s+)?(?:et|a)\\s+${_NB_COND}\\s+(pourcent\\s+)?(${_UNITE_COND})\\b`, 'g');
+const _MESURE_TAUX = '(taux d ?acces|capacites?|nombre de places|nombre de candidats|nombre d admis|(?:taux|part|pourcentage|proportion) (?:de |d |des )?(?:admis )?boursiers?)';
+const _COND_TAUX_ENTRE_RE = new RegExp(`\\b${_MESURE_TAUX}\\s+(?:est\\s+|de la formation\\s+)?(?:compris |comprise )?entre\\s+${_NB_COND}\\s+(?:pourcent\\s+)?(?:et|a)\\s+${_NB_COND}(?:\\s+pourcent)?`, 'g');
+// texte de la question sans ses conditions chiffrées : le mot d'une condition (« ont entre 10 et 20 places ») n'est pas
+// la mesure demandée (avant : « combien de CPGE ont entre 10 et 20 places » additionnait les places)
+const _COND_TAUX_CMP_RE = new RegExp(`\\b${_MESURE_TAUX}\\s+(?:est\\s+|de la formation\\s+)?(?:de\\s+)?(?:superieure? ou egale? a|inferieure? ou egale? a|au moins|au plus|plus de|moins de|superieure? a|inferieure? a|au dela de|en dessous de|depassant|depassent|depasse|excedant|excedent|excede)\\s+\\d+(?:[.,]\\d+)?(?:\\s+pourcent)?`, 'g');
+// « combien de BTS ont 30 places », « les élèves avec 3 vœux » : exactement N (avant : toutes les places additionnées)
+const _COND_EXACTE_RE = new RegExp(`\\b(ont|avec|ayant|comptent|comptant|proposent|proposant|offrent|offrant|accueillent|accueillant|totalisent|totalisant)\\s+(?:exactement\\s+|tout juste\\s+|pile\\s+)?(\\d+(?:[.,]\\d+)?)\\s+(pourcent\\s+)?(${_UNITE_COND})\\b`, 'g');
+function _sansConditionsChiffrees(question) {
+  return _texteConditions(question).replace(_COND_TAUX_ENTRE_RE, ' ').replace(_COND_TAUX_CMP_RE, ' ').replace(_COND_ENTRE_RE, ' ').replace(_COND_PREFIXE_RE, ' ').replace(_COND_EXACTE_RE, ' ');
+}
+function _colPctBoursiers(table, headers) {
+  return headers.find(h => /%|\bpourcentage\b|\bpart\b|\btaux\b|\bpct\b/i.test(String(h)) && /boursi/.test(_hx(h)) && _estNumerique(table, h)) || null;
+}
 function conditionsChiffrees(table, question) {
   if (!table || !Array.isArray(table.objects) || !table.objects.length) return [];
-  const q = normalizeText(_symbolesEnMots(question || ''));
+  const q = _texteConditions(question);
   const headers = (table.headers || Object.keys(table.objects[0] || {})).filter(Boolean);
-  const colPour = mot0 => { const mot = mot0 === 'voeu' ? 'voeux' : mot0; for (const m of CLASSEMENT_MESURES) { if (!m.re.test(mot)) continue; const c = headers.find(h => m.col.test(_hx(h)) && _estNumerique(table, h)); if (c) return c; } return null; };
+  const colPour0 = mot0 => { const mot = mot0 === 'voeu' ? 'voeux' : mot0; for (const m of CLASSEMENT_MESURES) { if (!m.re.test(mot)) continue; const c = headers.find(h => m.col.test(_hx(h)) && _estNumerique(table, h)); if (c) return c; } return null; };
+  // open data (une ligne = une formation) : les vœux d'une formation = ses candidats (même colonne que « combien de vœux »)
+  const colPour = (mot, pct) => {
+    if (pct) return /boursier/.test(mot) ? _colPctBoursiers(table, headers) : null; // « 30 % d'admis » : pas de colonne sûre → arrêt
+    const c = colPour0(mot);
+    if (!c && /^voeux?$/.test(mot) && table.rowUnit === 'formation') return colPour0('candidats');
+    return c;
+  };
   const opPour = txt => (COMPARATEURS.find(([re]) => re.test(txt)) || [])[1];
   const out = [];
-  // 1. « plus de 100 places », « au moins 30 admis », « moins de 50 candidats »
+  let idc = 0;
+  // 1. « plus de 100 places », « au moins 30 admis », « moins de 50 candidats », « plus de 20 % de boursiers »
   // v27.5.81 — aussi « au moins un vœu », « plus d'un vœu » (avant : « au moins un vœu » ignoré, tout le fichier compté
   // au lieu des 29 543 candidats ayant confirmé un vœu)
-  for (const m of q.matchAll(new RegExp(`\\b(plus de|plus d|moins de|moins d|au moins|au plus|superieure? ou egale? a|inferieure? ou egale? a|superieure? a|inferieure? a)\\s+(\\d+(?:[.,]\\d+)?|un|une)\\s*(?:%\\s*)?(places?|candidats?|admis|voeux|voeu|boursiers?)\\b`, 'g'))) {
-    const col = colPour(m[3]); const op = opPour(m[1].replace(/ d$/, ' de'));
+  // v27.5.93 — « plus de 30 places ou moins de 10 places » : l'une OU l'autre (avant : les deux exigées, 0)
+  let precedent = null;
+  for (const m of q.matchAll(_COND_PREFIXE_RE)) {
+    const col = colPour(m[4], !!m[3]); const op = opPour(m[1].replace(/ d$/, ' de'));
     const val = /^une?$/.test(m[2]) ? 1 : Number(m[2].replace(',', '.'));
-    if (col && op) out.push({ col, op, value: val });
+    const entreDeux = precedent ? q.slice(precedent.fin, m.index) : '';
+    if (col && op) {
+      const f = { col, op, value: val };
+      if (precedent && precedent.filtre && /^\s+ou(?: bien)?\s+(?:(?:avec|ayant|qui ont|ont|qui comptent)\s+)?$/.test(entreDeux)) {
+        const a = precedent.filtre; const i = out.indexOf(a);
+        const lib = x => `${SYMBOLES_OPS[x.op]} ${String(x.value).replace('.', ',')}`;
+        const gA = { col: a.col, op: a.op, value: a.value, source: 'condition_chiffree', label: lib(a) };
+        const gB = { ...f, source: 'condition_chiffree', label: lib(f) };
+        out[i] = { col: a.col, op: 'or', groupes: [[gA], [gB]], value: `${lib(a)} ${a.unite} ou ${lib(f)} ${m[4]}`, cond: a.cond };
+        precedent = { fin: m.index + m[0].length, filtre: null };
+        continue;
+      }
+      out.push({ ...f, cond: ++idc, unite: m[4] });
+      precedent = { fin: m.index + m[0].length, filtre: out[out.length - 1] };
+    } else precedent = null;
   }
-  // 2. « taux d'accès inférieur à 20 % », « capacité supérieure à 50 », « un taux d'accès de 0 »
-  for (const m of q.matchAll(new RegExp(`\\b(taux d ?acces|capacites?|nombre de places|nombre de candidats|nombre d admis)\\s+(?:est\\s+|de la formation\\s+)?${_CMP}\\s+(\\d+(?:[.,]\\d+)?)\\s*(?:%|pour ?cent)?`, 'g'))) {
-    const col = colPour(/taux/.test(m[1]) ? "taux d acces" : /candidat/.test(m[1]) ? 'candidats' : /admis/.test(m[1]) ? 'admis' : 'places'); const op = opPour(m[2]);
-    if (col && op && !out.some(f => f.col === col)) out.push({ col, op, value: Number(m[3].replace(',', '.')) });
+  for (const m of q.matchAll(_COND_EXACTE_RE)) {
+    const col = colPour(m[4], !!m[3]);
+    if (col && !out.some(f => f.col === col)) out.push({ col, op: 'eqn', value: Number(m[2].replace(',', '.')), cond: ++idc });
+  }
+  // 2. « taux d'accès inférieur à 20 % », « capacité supérieure à 50 », « un taux d'accès de 0 », « taux d'accès de plus de 30 % »
+  for (const m of q.matchAll(new RegExp(`\\b${_MESURE_TAUX}\\s+(?:est\\s+|de la formation\\s+)?(?:de\\s+)?${_CMP}\\s+(\\d+(?:[.,]\\d+)?)(?:\\s+pourcent)?`, 'g'))) {
+    const col = /bours/.test(m[1]) ? _colPctBoursiers(table, headers) : colPour(/taux/.test(m[1]) ? "taux d acces" : /candidat/.test(m[1]) ? 'candidats' : /admis/.test(m[1]) ? 'admis' : 'places'); const op = opPour(m[2]);
+    if (col && op && !out.some(f => f.col === col)) out.push({ col, op, value: Number(m[3].replace(',', '.')), cond: ++idc });
+  }
+  // 2a. v27.5.93 — « taux d'accès (compris) entre 30 et 50 % » (avant : condition perdue, toutes les formations comptées)
+  for (const m of q.matchAll(_COND_TAUX_ENTRE_RE)) {
+    const col = /bours/.test(m[1]) ? _colPctBoursiers(table, headers) : colPour(/taux/.test(m[1]) ? "taux d acces" : /candidat/.test(m[1]) ? 'candidats' : /admis/.test(m[1]) ? 'admis' : 'places');
+    if (col && !out.some(f => f.col === col)) { const c = ++idc; out.push({ col, op: 'gte', value: Number(m[2].replace(',', '.')), cond: c }); out.push({ col, op: 'lte', value: Number(m[3].replace(',', '.')), cond: c }); }
   }
   // 2b. v27.5.73 — « entre 5 et 10 vœux », « de 5 à 10 vœux » : bornes comprises (avant : condition perdue, tout le fichier)
-  for (const m of q.matchAll(/\b(?:entre|de)\s+(\d+(?:[.,]\d+)?)\s+(?:et|a)\s+(\d+(?:[.,]\d+)?)\s*(?:%\s*)?(places?|candidats?|admis|voeux|boursiers?)\b/g)) {
-    const col = colPour(m[3]);
-    if (col && !out.some(f => f.col === col)) { out.push({ col, op: 'gte', value: Number(m[1].replace(',', '.')) }); out.push({ col, op: 'lte', value: Number(m[2].replace(',', '.')) }); }
+  // v27.5.93 — aussi « entre 20 admis et 40 admis », « entre 10 et 20 % de boursiers »
+  for (const m of q.matchAll(_COND_ENTRE_RE)) {
+    const col = colPour(m[5], !!(m[2] || m[4]));
+    if (col && !out.some(f => f.col === col)) { const c = ++idc; out.push({ col, op: 'gte', value: Number(m[1].replace(',', '.')), cond: c }); out.push({ col, op: 'lte', value: Number(m[3].replace(',', '.')), cond: c }); }
   }
   for (const m of q.matchAll(/\b(?:un seul|une seule|qu un|qu une)\s+(voeu|place|candidat|admis)\b/g)) {
     const col = colPour(m[1]);
-    if (col && !out.some(f => f.col === col)) out.push({ col, op: 'eqn', value: 1 });
+    if (col && !out.some(f => f.col === col)) out.push({ col, op: 'eqn', value: 1, cond: ++idc });
   }
   // 3. v27.5.72 — « aucun admis », « pas de places », « sans candidat », « 0 vœu » : la valeur vaut 0
   // (avant : « combien de formations n'ont aucun admis » comptait tout ; « BTS n'ayant pas de places » additionnait les places)
@@ -1962,9 +2025,9 @@ function conditionsChiffrees(table, question) {
     const objs = table.objects || [];
     const zeroPresent = col && objs.some(r => _nombreCellule(r?.[col]) === 0), videPresent = col && objs.some(r => _nombreCellule(r?.[col]) === null);
     if (col && !zeroPresent && videPresent) continue;
-    if (col && !out.some(f => f.col === col)) out.push({ col, op: 'eqn', value: 0, zero: true });
+    if (col && !out.some(f => f.col === col)) out.push({ col, op: 'eqn', value: 0, zero: true, cond: ++idc });
   }
-  return out.map(f => ({ ...f, label: `${SYMBOLES_OPS[f.op]} ${String(f.value).replace('.', ',')}`, source: 'condition_chiffree' }));
+  return out.map(f => { const { unite, ...g } = f; return { ...g, label: f.op === 'or' ? f.value : `${SYMBOLES_OPS[f.op]} ${String(f.value).replace('.', ',')}`, source: 'condition_chiffree' }; });
 }
 /* v27.5.82 — Définition SAIO des « candidats » dans un fichier académique (une ligne = un élève de terminale, avec une
    colonne « Nb total de vœux confirmés ») : le fichier contient tout le vivier, y compris les élèves sans vœu confirmé.
@@ -2000,7 +2063,7 @@ function applyConditionsChiffrees(plan) {
   if (univ) { conds.push(univ); plan.universCandidats = univ; }
   if (!conds.length) return plan;
   // le nombre cité n'est pas une valeur de colonne à égaler ailleurs (« 0 », « 100 ») : on retire les filtres = nombre
-  const nombres = new Set(conds.map(c => String(c.value)));
+  const nombres = new Set(conds.flatMap(c => c.op === 'or' ? (c.groupes || []).flat().map(g => String(g.value)) : [String(c.value)]));
   plan.filters = [...(plan.filters || []).filter(f => !(f && f.op !== 'contains_all' && nombres.has(String(f.value).replace(',', '.')))), ...conds];
   // « combien de BTS n'ayant pas de places » : on compte les formations à 0, on n'additionne pas la colonne
   const zeros = new Set(conds.filter(c => c.zero).map(c => c.col));
@@ -2064,6 +2127,9 @@ function detecterPart(table, question) {
   const brut = String(question || '');
   let q = normalizeText(brut.replace(/%/g, ' pourcentage '));
   if (!PART_CUE.test(q) || /\btaux d ?acces\b/.test(q)) return null;
+  // v27.5.93 — « combien de BTS ont plus de 20 % de boursiers » : le « % » est un seuil, pas une part demandée
+  // (avant : la part des boursiers dans tous les BTS, affichée à la place du nombre de BTS)
+  if (!PART_CUE.test(_sansConditionsChiffrees(brut).replace(/\bpourcent\b/g, 'pourcentage'))) return null;
   if (table.rowUnit === 'agregat') return _partAgregat(table, q, brut);
   if (/\b(repartition|ventilation|moyen|moyenne|median|mediane)\b/.test(q)) return null; // répartition en %, moyenne d'une colonne de %
   // v27.5.54 — « pourcentage de candidats sans proposition par département » : un taux DANS chaque département
@@ -2668,10 +2734,11 @@ const LIEUX_AMBIGUS = new Set('somme manche nord lot var ain cher orne oise eure
    source où une ligne = une formation, chaque mot porteur de sens doit correspondre à un filtre, à une colonne
    utilisée ou à un mot connu (outils de la question, lieux, mesures). Sinon le moteur s'arrête et le nomme. */
 const MOTS_QUESTION = new Set(`
-  eux elles ceux celles entre parmi exception excepte exceptes dehors compris meme vivier promotion
+  eux elles ceux celles entre parmi exception excepte exceptes dehors compris comprise comprises exactement pile egal egale egaux egales superieur superieure superieurs inferieur inferieure inferieurs meme vivier promotion
   comment evolue evoluee evolues evoluees evolution evolutions augmente augmentee augmentes diminue diminuee baisse hausse
   croise croisee croises croisees croiser pivot
   seul seule seuls seules
+  comptent comptant depasse depassent depassant excede excedent excedant totalisent totalisant accueillent accueille accueillant offrent offre offrant recoivent recoit enregistrent affichent davantage pourcent
   suivi suivie suivis suivies terminale terminales
   meilleur meilleure meilleurs meilleures pire pires fort forte forts fortes eleve elevee eleves elevees faible faibles
   fais faites fait faire mets mettre trace tracer dessine dessiner camembert diagramme histogramme barres courbe forme visualise visualiser
@@ -2784,6 +2851,12 @@ function conceptsNonFiltres(plan) {
     if (!c.re.test(q)) return;
     if (![...filtres, ...cibles].some(f => c.ok(texte(f), f))) manque.push(c.mot);
   });
+  // v27.5.93 — autant de conditions chiffrées lues que de conditions citées (avant : « plus de 10 % de boursiers et un taux
+  // d'accès inférieur à 50 % » : seule la condition sur le taux était lue, et le garde-fou ne voyait rien)
+  const citees = _nbConditionsCitees(plan.question);
+  const _condOu = f => f.op === 'or' && (f.groupes || []).flat().some(g => g && (g.source === 'condition_chiffree' || ['gt', 'gte', 'lt', 'lte'].includes(g.op)));
+  const lues = new Set(filtres.filter(f => (f.source === 'condition_chiffree' && !f.univers) || _condOu(f)).map(f => f.cond ?? `${f.col}|${f.op}|${f.value}`)).size;
+  if (citees > lues && !manque.includes('condition chiffrée')) manque.push('condition chiffrée');
   const lycee = q.match(/\blycee ([a-z]{3,})/);
   if (lycee && !['general', 'generale', 'professionnel', 'technologique', 'agricole', 'origine', 'accueil'].includes(lycee[1])
     && !filtres.some(f => normalizeText(f.value).split(' ').includes(lycee[1]))) manque.push(`lycée ${lycee[1]}`);
@@ -2793,6 +2866,15 @@ function conceptsNonFiltres(plan) {
     if (!filtres.some(f => normalizeText(f.value).includes(l) || (f.terms || []).some(t => (Array.isArray(t) ? t : [t]).includes(l)))) manque.push(l);
   });
   return [...new Set(manque)];
+}
+function _nbConditionsCitees(question) {
+  const q = _texteConditions(question);
+  const n = re => [...q.matchAll(re)].length;
+  // « au moins un vœu » (définition SAIO, déjà comptée à part) n'est pas une condition demandée en plus
+  const prefixes = [...q.matchAll(_COND_PREFIXE_RE)].filter(m => !/^une?$/.test(m[2])).length;
+  // deux seuils reliés par « ou » forment une seule condition
+  const ou = n(new RegExp(`\\b(?:${_UNITE_COND})\\s+ou(?: bien)?\\s+(?:(?:avec|ayant|qui ont|ont|qui comptent)\\s+)?${_COMP_PREFIXE}\\s+\\d`, 'g'));
+  return prefixes - ou + n(_COND_TAUX_CMP_RE) + n(_COND_TAUX_ENTRE_RE) + n(_COND_ENTRE_RE) + n(_COND_EXACTE_RE);
 }
 function unresolvedConceptExecution(plan, manque, raison) {
   const cols = (plan.table.headers || []).filter(h => !/^(id|manualSort)$/i.test(String(h)));
@@ -3571,7 +3653,9 @@ function _familleUnion(f, table) {
 function _essaiUnion(question, filterContextText, plan0) {
   const q = normalizeText(reformulerQuestion(question || ''));
   const toks = q.split(' ');
-  const idx = toks.map((w, i) => (w === 'et' || w === 'ou') ? i : -1).filter(i => i > 0);
+  // v27.5.93 — « entre 100 et 200 admis » : une condition chiffrée, pas « 100 admis » ou « 200 admis »
+  const idx = toks.map((w, i) => (w === 'et' || w === 'ou') ? i : -1).filter(i => i > 0)
+    .filter(i => !(/^\d/.test(toks[i + 1] || '') && toks.slice(Math.max(0, i - 4), i).includes('entre')));
   if (!idx.length || !plan0 || ['compare', 'chart_current', 'export_current_excel', 'export_current_csv'].includes(plan0.tool)) return null;
   if (plan0.part && plan0.part.groupe) return null; // « des boursiers et des non boursiers » : déjà un taux par groupe
   // la question est déjà comprise (aucun signe de critère perdu) : rien à faire, sauf si un plan « une seule valeur » l'égale
@@ -3736,7 +3820,12 @@ function _detectDataEnginePlanBase(question, filterContextText = question) {
   const currentPlan = buildCurrentResultPlan(question, table);
   if (currentPlan) return currentPlan;
 
+  // v27.5.93 — l'intention se lit sans les conditions chiffrées : « nombre de BTS ayant un pourcentage de boursiers
+  // supérieur à 30 % » compte des BTS (avant : répartition selon le pourcentage, ou part des boursiers)
+  let _qIntention = question;
+  try { if (conditionsChiffrees(table, question).length) _qIntention = _sansConditionsChiffrees(question).replace(/\bpourcent\b/g, 'pourcentage'); } catch (e) { /* question sans condition */ }
   let tool = inferMeasureIntent(question);
+  if (_qIntention !== question && !/^export/.test(tool || '')) tool = inferMeasureIntent(_qIntention) || tool;
   let _listeCondition = false;
   // v27.5.60 — « quels établissements proposent le BTS MCO en Gironde ? » : une liste d'établissements calculée
   if ((!tool || /^export/.test(tool)) && (LISTE_ETAB_RE.test(normalizeText(question)) || LISTE_GEO_RE.test(normalizeText(question))) && !hasExportWords(normalizeText(question))) tool = 'group_by';
@@ -4846,7 +4935,7 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     // v27.5.74 — open data : « comparer le nombre de PLACES en BTS et en BUT » : une comparaison compte des formations ;
     // on s'arrête plutôt que d'afficher des formations sous le nom de places
     if (plan.table.rowUnit === 'formation') {
-      const qc = normalizeText(plan.question || '').replace(/\b(plus de|moins de|au moins|au plus)\s+\d+\S*\s*\w+/g, ' ');
+      const qc = _sansConditionsChiffrees(plan.question || '').replace(/\b(plus de|moins de|au moins|au plus)\s+\d+\S*\s*\w+/g, ' ');
       const mes = MESURES_SOMME.find(m => m.re.test(qc));
       if (mes && !/\b(nombre|combien) d(e|es)? ?(formations?|filieres?)\b/.test(qc)) {
         const g = groups.map(x => x.label).join(' » et « ');
