@@ -1,0 +1,5 @@
+
+# Chargement d'une base académique dans Grist (scripts/charger_bdd_grist.py) : clé, réglages, reprise
+cle_grist.txt
+reglages_bdd.json
+.reprise_*.json

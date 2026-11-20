@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-85 fichiers, 3 115 tests. Depuis la racine du repo :
+86 fichiers, 3 154 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -190,6 +190,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 `js/test_stats_conditions.js` vérifie, sur l'open data fictif, les moyennes, médianes, minimums et maximums avec conditions : « nombre de places moyen des licences ayant un taux d'accès inférieur à 30 % » (la moyenne des places, pas du taux de la condition), « pourcentage de boursiers maximum » (pas une part), « maximal », « minimal », « quel est le plus petit nombre de places des BTS… » (un minimum, pas un classement). « quelle formation a le plus grand nombre de candidats » reste un classement. Banc correspondant (1 200 questions) : 0 chiffre faux. `js/test_seuils_voeux.js` vérifie aussi « admis à Bordeaux de Pau » (l'origine est Pau).
 
 `js/test_exports_graphiques.js` vérifie que ce qu'on exporte ou dessine après un calcul correspond au chiffre affiché : l'export d'un comptage ou d'une somme contient les lignes retenues (même total), l'en-tête du fichier écrit les seuils avec leur comparateur (« > 20 », pas « = 20 »), le graphique d'une répartition ou d'un classement reprend les valeurs calculées, et un chiffre unique (comptage, somme, moyenne) donne une explication plutôt qu'un graphique inventé. Banc correspondant (714 questions) : 0 écart.
+
+`js/test_chargeur_grist.js` lance pour de vrai le programme de chargement `scripts/charger_bdd_grist.py` (Python) contre un faux Grist local, avec des fichiers fictifs (CSV « ; » et « , », Windows-1252, Excel .xlsx avec chaînes partagées et cases manquantes). Il vérifie : inspection sans aucune valeur affichée, en-têtes sous les lignes de titre, tables Élèves / Vœux sans doublon, envoi par paquets, reprise après une panne sans doublon ni trou, nouvel essai après une surcharge (429), refus d'écrire dans une table déjà remplie, lot perdu signalé « INCOMPLET », clé jamais affichée, noms de colonnes Grist valides.
 
 `js/test_part_groupes.js` vérifie les **taux par groupe** : « pourcentage de candidats sans proposition par département », « part des boursiers par académie », « taux de remplissage des BTS par académie » donnent un taux calculé **dans** chaque groupe (avant : la répartition du total entre groupes, lue à tort comme un taux), avec la ligne « Ensemble », l'export, le graphique et les relances (« taux de proposition des boursiers » puis « et par département ? »).
 
@@ -314,6 +316,19 @@ Si tout va bien, aucun ticket n'est créé. Pour essayer le circuit : *Run workf
 | `generateur_bo.html` | Générateur de requêtes SAP BusinessObjects (page autonome, indépendante du widget) |
 | `scripts/load_parcoursup_to_grist.py` | Chargement de la table `Parcoursup_National` (lancé par `.github/workflows/load-parcoursup.yml`) |
 | `scripts/construire_index_kb.py` | Reconstruit la base de connaissances et son index (`python3 scripts/construire_index_kb.py [fiches.json]`) ; relancé sur la base actuelle, il la redonne à l’identique |
+| `scripts/charger_bdd_grist.py` | Chargement d'un gros fichier académique (Excel .xlsx ou CSV, plusieurs centaines de Mo) dans Grist par l'API, quand l'import de Grist refuse le fichier. Voir ci-dessous. |
+
+### Charger une base académique dans Grist (`scripts/charger_bdd_grist.py`)
+
+Le programme tourne **sur votre ordinateur**, jamais sur GitHub : les données ne vont que dans votre Grist. Rien à installer à part Python 3.8 ou plus récent. Il est séparé du widget, qui reste en lecture seule.
+
+1. **Une fois** : dans Grist, *Paramètres du profil → API* → copier la clé dans un fichier `cle_grist.txt`, à côté des réglages (jamais dans le dépôt : il est ignoré par Git). Noter l'*ID du document* (*Paramètres du document*).
+2. **Inspecter** le fichier (rien n'est envoyé, aucune valeur n'est affichée) : `python charger_bdd_grist.py inspecter MON_FICHIER.xlsx`. Le programme donne le format, les feuilles, le nombre de lignes et de colonnes, le taux de remplissage, repère l'identifiant de l'élève (« une ligne par vœu ») et prépare `reglages_bdd.json`.
+3. **Compléter les réglages** : ID du document ; colonnes à garder et leur nom dans Grist ; répartition entre la table **Élèves** (une ligne par élève, liée par son identifiant) et la table **Vœux** (une ligne par vœu). Sans table Élèves, tout va dans une seule table.
+4. **Essai** sur les premières lignes, dans des tables `…_essai` : `python charger_bdd_grist.py charger MON_FICHIER.xlsx --essai 1000`.
+5. **Chargement complet** : `python charger_bdd_grist.py charger MON_FICHIER.xlsx`.
+
+Garanties : lecture ligne par ligne (environ 50 Mo de mémoire, quelle que soit la taille du fichier ; environ 17 000 lignes lues par seconde) ; envoi par paquets de 500 ; nouvel essai automatique si Grist est surchargé ; **reprise après une coupure sans doublon** (relancer la même commande : ce que Grist contient déjà fait foi) ; refus d'écrire dans une table déjà remplie ; rien n'est jamais supprimé ; vérification finale du nombre de lignes et d'élèves (« Chargement complet et vérifié » ou « INCOMPLET »).
 
 ---
 
