@@ -4028,10 +4028,22 @@ function currentExecutionToRows(exec) {
   return [];
 }
 
+// v27.5.97 — libellé d'un filtre dans l'en-tête d'un export, avec son comparateur (« > "30" », pas « = "30" »)
+function _libelleFiltreExport(f) {
+  if (!f) return '';
+  if (f.op === 'or') return f.label || f.value || "l'un ou l'autre";
+  if (f.op === 'in') return `${f.col} : ${f.label || f.value}`;
+  if (f.op === 'contains_all' || f.op === 'contains_words') return `${f.col || 'Intitulé'} contient « ${f.label || f.value} »`;
+  return `${f.col} ${({ neq: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤' })[f.op] || '='} "${f.value}"`;
+}
 function buildExportMeta(rows, meta = {}) {
   const dateStr = new Date().toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   // v27.5.97 — les seuils écrits avec leur comparateur (avant : « plus de 30 places » écrit « Capacité = "30" » dans le fichier)
-  const filtresStr = (meta.filters || []).length ? formatActionFilters(meta.filters).replace(/^Filtres appliqués : /, '') : 'Aucun filtre';
+  // (libellé défini ici : la fonction doit rester autonome, des tests l'extraient seule)
+  const lib = f => !f ? '' : f.op === 'or' ? (f.label || f.value || "l'un ou l'autre") : f.op === 'in' ? `${f.col} : ${f.label || f.value}`
+    : (f.op === 'contains_all' || f.op === 'contains_words') ? `${f.col || 'Intitulé'} contient « ${f.label || f.value} »`
+    : `${f.col} ${({ neq: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤' })[f.op] || '='} "${f.value}"`;
+  const filtresStr = (meta.filters || []).map(lib).join(' ; ') || 'Aucun filtre';
   const perimetreStr = meta.perimetre || 'Ensemble';
   return [`Exporté le : ${dateStr}`, `Filtres : ${filtresStr}`, `Périmètre : ${perimetreStr}`, `Lignes : ${(rows?.length || 0).toLocaleString('fr-FR')}`];
 }
@@ -5021,7 +5033,7 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     const filename = format === 'csv' ? 'resultat_analyse.csv' : 'resultat_analyse.xlsx';
     // PR 3.1 fix : construire les métadonnées depuis le plan source
     const prevFilters = (prev?.plan?.filters || []);
-    const perimetreStr = prevFilters.length ? formatActionFilters(prevFilters).replace(/^Filtres appliqués : /, '') : 'Ensemble';
+    const perimetreStr = prevFilters.length ? prevFilters.map(_libelleFiltreExport).join(' ; ') : 'Ensemble';
     const meta = { filters: prevFilters, perimetre: perimetreStr };
     const res = downloadRowsAsFile(rows, filename, format, meta);
     return { kind: 'export', plan, result: res, html: res.html };
