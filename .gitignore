@@ -3,3 +3,7 @@
 cle_grist.txt
 reglages_bdd.json
 .reprise_*.json
+
+# Cache Python
+__pycache__/
+*.pyc
