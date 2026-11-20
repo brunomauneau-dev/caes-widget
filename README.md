@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-83 fichiers, 3 079 tests. Depuis la racine du repo :
+84 fichiers, 3 102 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -186,6 +186,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 `js/test_seuils_voeux.js` vérifie, sur un fichier académique fictif, les seuils sur le nombre de vœux : « dont le nombre de vœux dépasse 5 », « nombre de vœux compris entre 5 et 10 », « 15 vœux ou plus de Gironde », « exactement 3 vœux », « moins de 3 vœux ou plus de 20 vœux ». Une condition sans colonne (« dont la moyenne dépasse 12 ») arrête le moteur : le filtre SAIO « au moins un vœu » ne compte pas comme une condition lue. Banc sur le vrai fichier (hors dépôt) : 0 chiffre faux sur 600.
 
 `js/test_relances_seuils.js` vérifie, sur l'open data fictif, les relances de conversation : « et avec plus de 30 places ? » (seuil ajouté), « et celles de moins de 20 places ? » (seuil remplacé), « parmi elles, combien ont plus de 30 places ? » (les deux gardés), « même question pour les BUT », « et dans l'académie de Bordeaux ? » après « à Paris » (l'académie, pas la commune), et des enchaînements à trois questions. Banc correspondant (1 136 enchaînements) : 0 chiffre faux, 0 relance sans calcul.
+
+`js/test_stats_conditions.js` vérifie, sur l'open data fictif, les moyennes, médianes, minimums et maximums avec conditions : « nombre de places moyen des licences ayant un taux d'accès inférieur à 30 % » (la moyenne des places, pas du taux de la condition), « pourcentage de boursiers maximum » (pas une part), « maximal », « minimal », « quel est le plus petit nombre de places des BTS… » (un minimum, pas un classement). « quelle formation a le plus grand nombre de candidats » reste un classement. Banc correspondant (1 200 questions) : 0 chiffre faux. `js/test_seuils_voeux.js` vérifie aussi « admis à Bordeaux de Pau » (l'origine est Pau).
 
 `js/test_part_groupes.js` vérifie les **taux par groupe** : « pourcentage de candidats sans proposition par département », « part des boursiers par académie », « taux de remplissage des BTS par académie » donnent un taux calculé **dans** chaque groupe (avant : la répartition du total entre groupes, lue à tort comme un taux), avec la ligne « Ensemble », l'export, le graphique et les relances (« taux de proposition des boursiers » puis « et par département ? »).
 

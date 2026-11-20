@@ -642,6 +642,10 @@ function _strictFiltersFromQuestionBase(table, question) {
         if (acaVals.has(n)) return false;
         const mo = q.match(new RegExp(`(^| )(de|d) ${n}( |$)`));
         const mv = q.match(_VERBE_ACCUEIL_RE);
+        // v27.5.96 — « admis à Bordeaux de Pau » : la commune d'accueil est déjà lue, « de X » qui la suit = l'origine
+        // (avant : Pau perdu, 3 203 admis à Bordeaux affichés comme exacts au lieu de 56)
+        if (mo && mv && mo.index > mv.index && out.some(f => f && f.source === 'commune_a' && (typeof plannerColumnRole === 'function') && plannerColumnRole(f.col).accueil)
+          && /\b(?:a|au|aux) [a-z' -]{2,40}$/.test(q.slice(mv.index + mv[0].length, mo.index + (mo[1] ? 1 : 0)).trim())) return true;
         return !!(mo && mv && mo.index < mv.index && /\b(candidats?|candidates?|bacheliers?|bachelieres?|boursiers?|boursieres?|apprenti(e)?s?|eleves?|lyceens?|lyceennes?|bacs?|jeunes)\b/.test(q.slice(0, mo.index)));
       });
       if (v) out.push({ col: comOrig, value: v, op: 'eq', label: null, source: 'commune_a' });
@@ -2152,6 +2156,8 @@ function detecterPart(table, question) {
   if (!PART_CUE.test(_sansConditionsChiffrees(brut).replace(/\bpourcent\b/g, 'pourcentage'))) return null;
   if (table.rowUnit === 'agregat') return _partAgregat(table, q, brut);
   if (/\b(repartition|ventilation|moyen|moyenne|median|mediane)\b/.test(q)) return null; // répartition en %, moyenne d'une colonne de %
+  // v27.5.96 — « pourcentage de boursiers maximum des CPGE » : le plus fort pourcentage d'une formation, pas la part globale
+  if (/\b(maximum|minimum|maxima\w*|minima\w*|max|min)\b/.test(q)) return null;
   // v27.5.54 — « pourcentage de candidats sans proposition par département » : un taux DANS chaque département
   // (avant : la répartition des candidats sans proposition entre départements, lue « Gironde : 50 % »)
   let groupe = null;
@@ -2754,7 +2760,7 @@ const LIEUX_AMBIGUS = new Set('somme manche nord lot var ain cher orne oise eure
    source où une ligne = une formation, chaque mot porteur de sens doit correspondre à un filtre, à une colonne
    utilisée ou à un mot connu (outils de la question, lieux, mesures). Sinon le moteur s'arrête et le nomme. */
 const MOTS_QUESTION = new Set(`
-  eux elles ceux celles entre parmi exception excepte exceptes dehors question questions compris comprise comprises exactement pile egal egale egaux egales superieur superieure superieurs inferieur inferieure inferieurs meme vivier promotion
+  eux elles ceux celles entre parmi exception excepte exceptes dehors question questions maximal maximale maximales maximaux minimal minimale minimales minimaux compris comprise comprises exactement pile egal egale egaux egales superieur superieure superieurs inferieur inferieure inferieurs meme vivier promotion
   comment evolue evoluee evolues evoluees evolution evolutions augmente augmentee augmentes diminue diminuee baisse hausse
   croise croisee croises croisees croiser pivot
   seul seule seuls seules
@@ -2864,7 +2870,9 @@ function conceptsNonFiltres(plan) {
   if (plan.tool === 'part' && plan.part && plan.part.mode === 'effectifs' && !plan.part.manque) q = q.replace(new RegExp(plan.part.mot.source, 'g'), ' ').replace(/\badmis(es)?\b|\bcandidats?\b|\bcandidates\b|\bneo ?bacheliers?\b/g, ' ');
   const filtres = [...(plan.filters || []), ...((plan.tool === 'part' && plan.part?.condition) || [])].filter(Boolean);
   // la colonne analysée ou additionnée compte aussi (« admis boursiers » → colonne « admis boursiers »)
-  const cibles = [plan.targetCol, plan.targetCol2, plan.sumCol, plan.classement?.col, plan.part?.num, plan.part?.den].filter(Boolean).map(c => ({ col: c, value: '' }));
+  let _colStats = null;
+  try { if (plan.tool === 'stats') _colStats = plan.statsCol || _colonneStatsQuestion(plan); } catch (e) { /* pas de colonne */ }
+  const cibles = [plan.targetCol, plan.targetCol2, plan.sumCol, _colStats, plan.classement?.col, plan.part?.num, plan.part?.den].filter(Boolean).map(c => ({ col: c, value: '' }));
   const texte = f => `${_hx(f.col)} ${normalizeText(f.value)} ${normalizeText(f.label || '')}`;
   const manque = [];
   CONCEPTS_A_FILTRER.forEach(c => {
@@ -2882,7 +2890,8 @@ function conceptsNonFiltres(plan) {
     && !filtres.some(f => normalizeText(f.value).split(' ').includes(lycee[1]))) manque.push(`lycée ${lycee[1]}`);
   const lieux = (typeof plannerGeoNames !== 'undefined' && Array.isArray(plannerGeoNames)) ? plannerGeoNames : [];
   lieux.forEach(l => {
-    if (l.length < 4 || LIEUX_AMBIGUS.has(l) || !new RegExp(`(^| )${l}( |$)`).test(q)) return;
+    // v27.5.96 — lieux de 3 lettres (Pau, Dax) : contrôlés aussi quand une préposition les introduit (« de Pau », « à Dax »)
+    if (LIEUX_AMBIGUS.has(l) || l.length < 3 || (l.length < 4 && !new RegExp(`(^| )(?:a|au|de|d|en|sur|vers) ${l}( |$)`).test(q)) || !new RegExp(`(^| )${l}( |$)`).test(q)) return;
     if (!filtres.some(f => normalizeText(f.value).includes(l) || (f.terms || []).some(t => (Array.isArray(t) ? t : [t]).includes(l)))) manque.push(l);
   });
   return [...new Set(manque)];
@@ -3065,6 +3074,10 @@ function unresolvedPrecisionExecution(plan, pp) {
 // v27.25 — numéros de département → noms (« combien de BTS dans le 33 » comptait tous les BTS)
 const DEPARTEMENTS_FR = { '01': 'Ain', '02': 'Aisne', '03': 'Allier', '04': 'Alpes-de-Haute-Provence', '05': 'Hautes-Alpes', '06': 'Alpes-Maritimes', '07': 'Ardèche', '08': 'Ardennes', '09': 'Ariège', '10': 'Aube', '11': 'Aude', '12': 'Aveyron', '13': 'Bouches-du-Rhône', '14': 'Calvados', '15': 'Cantal', '16': 'Charente', '17': 'Charente-Maritime', '18': 'Cher', '19': 'Corrèze', '2a': 'Corse-du-Sud', '2b': 'Haute-Corse', '21': "Côte-d'Or", '22': "Côtes-d'Armor", '23': 'Creuse', '24': 'Dordogne', '25': 'Doubs', '26': 'Drôme', '27': 'Eure', '28': 'Eure-et-Loir', '29': 'Finistère', '30': 'Gard', '31': 'Haute-Garonne', '32': 'Gers', '33': 'Gironde', '34': 'Hérault', '35': 'Ille-et-Vilaine', '36': 'Indre', '37': 'Indre-et-Loire', '38': 'Isère', '39': 'Jura', '40': 'Landes', '41': 'Loir-et-Cher', '42': 'Loire', '43': 'Haute-Loire', '44': 'Loire-Atlantique', '45': 'Loiret', '46': 'Lot', '47': 'Lot-et-Garonne', '48': 'Lozère', '49': 'Maine-et-Loire', '50': 'Manche', '51': 'Marne', '52': 'Haute-Marne', '53': 'Mayenne', '54': 'Meurthe-et-Moselle', '55': 'Meuse', '56': 'Morbihan', '57': 'Moselle', '58': 'Nièvre', '59': 'Nord', '60': 'Oise', '61': 'Orne', '62': 'Pas-de-Calais', '63': 'Puy-de-Dôme', '64': 'Pyrénées-Atlantiques', '65': 'Hautes-Pyrénées', '66': 'Pyrénées-Orientales', '67': 'Bas-Rhin', '68': 'Haut-Rhin', '69': 'Rhône', '70': 'Haute-Saône', '71': 'Saône-et-Loire', '72': 'Sarthe', '73': 'Savoie', '74': 'Haute-Savoie', '75': 'Paris', '76': 'Seine-Maritime', '77': 'Seine-et-Marne', '78': 'Yvelines', '79': 'Deux-Sèvres', '80': 'Somme', '81': 'Tarn', '82': 'Tarn-et-Garonne', '83': 'Var', '84': 'Vaucluse', '85': 'Vendée', '86': 'Vienne', '87': 'Haute-Vienne', '88': 'Vosges', '89': 'Yonne', '90': 'Territoire de Belfort', '91': 'Essonne', '92': 'Hauts-de-Seine', '93': 'Seine-Saint-Denis', '94': 'Val-de-Marne', '95': "Val-d'Oise", '971': 'Guadeloupe', '972': 'Martinique', '973': 'Guyane', '974': 'La Réunion', '976': 'Mayotte' };
 const REFORMULATIONS = [
+  // v27.5.96 — « quel est le plus petit nombre de places des BTS… », « le plus grand taux d'accès des CPGE » : un minimum /
+  // maximum de la mesure (avant : classement des formations, parfois sur la colonne de la condition ou dans le mauvais sens)
+  [/^\s*(?:quel(?:le)?\s+est\s+)?(?:le|la)\s+plus\s+(grand|grande|élevé|élevée|eleve|elevee|haut|haute|fort|forte|petit|petite|bas|basse|faible)\s+(nombre|taux|pourcentage|%|capacité|capacite|effectif|part)(?=[\s']|$)(?!\s+(?:de\s+)?(?:formations?|établissements?|etablissements?|lycées?|lycees?|académies?|academies?|départements?|departements?|régions?|regions?|villes?|communes?)\b)/gi,
+    (m, sens, mesure) => `${/^(grand|grande|élevé|élevée|eleve|elevee|haut|haute|fort|forte)$/i.test(sens) ? 'maximum' : 'minimum'} du ${mesure}`],
   [/\b(?:nb|nbre|nbr)\.?\s+(?=de\b|d['’]|des\b|total\b)/gi, 'nombre '],
   // v27.25 — fautes de frappe courantes (« conbien de BTS » partait vers Albert)
   [/\b(?:conbien|combein|cobien|combiens|conbiens|cmbien|comben|combie)\b/gi, 'combien'],
@@ -3568,7 +3581,7 @@ function inferMeasureIntent(question) {
     if (_uniteFormation && /^formations?$/.test(d1.trim())) return 'group_by';
     if ((_isF(d1) && _isA(d2)) || (_isA(d1) && _isF(d2)) || (_isF(d1) && _isS(d2)) || (_isS(d1) && _isF(d2))) return 'pivot';
   }
-  if (/moyen|moyenne|median|m[eé]diane|minimum|maximum|\bmin\b|\bmax\b/.test(q.replace(/\b(lycees?|colleges?|etablissements?|universites?) (max|min)\b/g, ' '))) return 'stats';
+  if (/moyen|moyenne|median|m[eé]diane|minimum|maximum|maximal|minimal|\bmin\b|\bmax\b/.test(q.replace(/\b(lycees?|colleges?|etablissements?|universites?) (max|min)\b/g, ' '))) return 'stats';
   // v27.24 — « taux d'accès des PASS », « taux d'accès au lycée Montaigne » : statistiques du taux (pas un comptage)
   if (/\btaux d ?acces\b/.test(q) && !/\b(combien|nombre|plus|moins|classement|top)\b|\b(inferieur|superieur|egal)\b/.test(q)) return 'stats';
   if (/top|classement|principales?|plus frequentes?|plus fréquentes?|les plus/.test(q)) return 'top';
@@ -5170,7 +5183,7 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     return exec;
   }
   if (plan.tool === 'stats') {
-    const inferredStatsCol = inferNumericStatsColumn(plan.table, plan.question);
+    const inferredStatsCol = _colonneStatsQuestion(plan);
     // v27.8 — plus de repli sur une colonne au hasard (numéro de candidat, session) : on le dit
     // repli seulement si la question ne précise pas la mesure (« quelle est la moyenne ? ») ; « moyenne des vœux »
     // sans colonne vœux reconnue → arrêt, pas la moyenne d'une autre colonne
@@ -5191,7 +5204,7 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
       const filieres = (() => { try { const c = (plan.table.headers || []).find(h => /^filiere de formation tres agregee$/.test(normalizeText(h))); return c ? _distinctValues(plan.table, c).map(normalizeText) : []; } catch (e) { return []; } })();
       qn = qn.replace(/\bpar\s+(?:une?\s+)?([a-z0-9]+)\b/g, (m, w) => (/^formations?$/.test(w) || filieres.includes(w) || filieres.includes(w.replace(/s$/, ''))) ? ' ' : m).replace(/\s+/g, ' ').trim();
     }
-    const demandee = plan.statsDemandee && !/\b(median|minimum|maximum|min|max|moyen|moyenne)\b/.test(qn) ? plan.statsDemandee : /\bmedian/.test(qn) ? 'median' : /\bminimum\b|\bmin\b|\ble plus bas\b|\bplus faible\b/.test(qn) ? 'min' : /\bmaximum\b|\bmax\b|\ble plus (haut|eleve)\b/.test(qn) ? 'max' : 'avg';
+    const demandee = plan.statsDemandee && !/\b(median|minimum|maximum|min|max|moyen|moyenne|maximal\w*|minimal\w*)\b/.test(qn) ? plan.statsDemandee : /\bmedian/.test(qn) ? 'median' : /\bminimum\b|\bmin\b|\bminima(?:l|le|les|ux)\b|\ble plus bas\b|\bplus faible\b/.test(qn) ? 'min' : /\bmaximum\b|\bmax\b|\bmaxima(?:l|le|les|ux)\b|\ble plus (haut|eleve)\b/.test(qn) ? 'max' : 'avg';
     // « … par académie / par filière » : une statistique par groupe
     const dim = _colonneDimension(plan.table, qn, col) || plan.statsDim || null;
     if (!dim) { const x = _dimensionIntrouvable(plan.table, qn, col); if (x) return unresolvedConceptExecution(plan, [], `aucune colonne ne correspond à « par ${x} » : la statistique serait donnée pour l'ensemble, sans le détail demandé`); }
@@ -5336,6 +5349,14 @@ function _isIdentifiantCol(h, table) {
   const vals = rows.map(r => r?.[h]).filter(v => v !== '' && v !== null && v !== undefined);
   return vals.length === rows.length && vals.every(v => Number.isInteger(Number(v))) && new Set(vals.map(String)).size === vals.length;
 }
+// v27.5.96 — la mesure se lit sans les conditions chiffrées : « nombre de places moyen des licences ayant un taux
+// d'accès inférieur à 30 % » = moyenne des PLACES (avant : moyenne du taux d'accès, colonne de la condition)
+function _colonneStatsQuestion(plan) {
+  if (!plan || !plan.table) return null;
+  let q = plan.question || '';
+  try { if (conditionsChiffrees(plan.table, q).length) q = _sansConditionsChiffrees(q).replace(/\bpourcent\b/g, 'pourcentage'); } catch (e) { /* question sans condition */ }
+  return inferNumericStatsColumn(plan.table, q) || inferNumericStatsColumn(plan.table, plan.question);
+}
 function inferNumericStatsColumn(table, question) {
   const q = normalizeText(question || '');
   const motsQ = q.split(' ').filter(w => w.length >= 4 && !STATS_MOTS_VIDES.has(w) && !/^formations?$/.test(w));
@@ -5347,6 +5368,8 @@ function inferNumericStatsColumn(table, question) {
     if (stats.numericCount < Math.max(5, (table.objects || []).length * 0.1)) return null;
     let score = 0;
     if (/voeu|voeux/.test(q) && /voeu|voeux/.test(hn)) score += 120;
+    // v27.5.96 — open data : les vœux d'une formation = ses candidats (comme « combien de vœux en BTS »)
+    if (/voeu|voeux/.test(q) && table.rowUnit === 'formation' && /effectif total des candidats pour une formation/.test(hn) && !headers.some(x => /voeu/.test(_hx(x)))) score += 120;
     if (/confirm/.test(q) && /confirm/.test(hn)) score += 80;
     if (/class/.test(q) && /class/.test(hn)) score += 50;
     // v27.5.73 — « nombre moyen d'admis / de candidats par formation » : la colonne de cet effectif (avant : la capacité,

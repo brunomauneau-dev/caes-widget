@@ -94,6 +94,24 @@ await describe('Faux positifs et garde-fou', () => {
   }
 });
 
+await describe('Origine après le lieu d\'accueil : « admis à Bordeaux de Pau » (avant : Pau perdu, tous les admis à Bordeaux)', () => {
+  const COMO = 2;
+  assert(cnt(ask('combien de candidats admis à Bordeaux de Pau')) === n(r => A(r) && r[COMA] === 'Bordeaux' && r[COMO] === 'Pau'), '« admis à Bordeaux de Pau » = venant de Pau');
+  assert(cnt(ask('combien de candidats de Pau admis à Bordeaux')) === n(r => A(r) && r[COMA] === 'Bordeaux' && r[COMO] === 'Pau'), '« de Pau admis à Bordeaux » : même chiffre (inchangé)');
+  const e = ask('nombre minimal de vœux des candidats admis à Bordeaux de Pau');
+  const v = R.filter(r => V(r) && A(r) && r[COMA] === 'Bordeaux' && r[COMO] === 'Pau').map(N);
+  assert(e && e.kind === 'stats' && e.result.min === Math.min(...v), 'statistique sur la même population');
+  assert(cnt(ask('combien de candidats admis en BTS de Pau')) === n(r => A(r) && g('BTS')(r) && r[COMA] === 'Pau'), '« admis en BTS de Pau » : BTS situé à Pau (règle inchangée)');
+});
+
+await describe('Moyenne de vœux avec conditions', () => {
+  const v = R.filter(r => V(r) && B(r) && r[DEP] === 'Gironde').map(N);
+  const e = ask('nombre moyen de vœux des candidats boursiers de Gironde');
+  assert(e && e.kind === 'stats' && Math.round(e.result.avg * 100) === Math.round(v.reduce((a, b) => a + b, 0) / v.length * 100), 'moyenne des vœux des boursiers de Gironde');
+  const e2 = ask('nombre maximal de vœux des candidats de bac général');
+  assert(e2 && e2.kind === 'stats' && e2.result.max === Math.max(...R.filter(r => V(r) && r[TYPE] === 'Générale').map(N)), '« maximal » sur le fichier académique');
+});
+
 console.log('\n──────────────────────────────────────────────────');
 console.log(`Résultat : ${passed} ✓  ${failed} ✗  (${passed + failed} tests)`);
 if (failed) process.exit(1);
