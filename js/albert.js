@@ -963,7 +963,7 @@ async function sendMessage() {
     // v27.7 — « Formation non trouvée » : rien à exporter ni à mettre en infographie
     const _introuvable = dataExecution.kind === 'unresolved';
     // v27.5.62 — message « impression en PDF » : pas de boutons (il n'y a rien à exporter de plus)
-    const _msgEl = addMessage('assistant', dataExecution.html, { dataExecution, question, noActions: _introuvable || dataExecution.kind === 'pdf' });
+    const _msgEl = addMessage('assistant', dataExecution.html, { dataExecution, question, noActions: _introuvable || dataExecution.kind === 'pdf' || dataExecution.kind === 'message' });
     // v27.6.25 — double lecture par Albert (en arrière-plan, ne fait pas attendre) : avertissement si désaccord important
     if (typeof verifierLecture === 'function' && _msgEl) {
       // questions précédentes seulement pour une relance (une question complète n'hérite de rien)

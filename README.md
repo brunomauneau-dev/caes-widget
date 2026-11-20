@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-84 fichiers, 3 102 tests. Depuis la racine du repo :
+85 fichiers, 3 115 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -188,6 +188,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 `js/test_relances_seuils.js` vérifie, sur l'open data fictif, les relances de conversation : « et avec plus de 30 places ? » (seuil ajouté), « et celles de moins de 20 places ? » (seuil remplacé), « parmi elles, combien ont plus de 30 places ? » (les deux gardés), « même question pour les BUT », « et dans l'académie de Bordeaux ? » après « à Paris » (l'académie, pas la commune), et des enchaînements à trois questions. Banc correspondant (1 136 enchaînements) : 0 chiffre faux, 0 relance sans calcul.
 
 `js/test_stats_conditions.js` vérifie, sur l'open data fictif, les moyennes, médianes, minimums et maximums avec conditions : « nombre de places moyen des licences ayant un taux d'accès inférieur à 30 % » (la moyenne des places, pas du taux de la condition), « pourcentage de boursiers maximum » (pas une part), « maximal », « minimal », « quel est le plus petit nombre de places des BTS… » (un minimum, pas un classement). « quelle formation a le plus grand nombre de candidats » reste un classement. Banc correspondant (1 200 questions) : 0 chiffre faux. `js/test_seuils_voeux.js` vérifie aussi « admis à Bordeaux de Pau » (l'origine est Pau).
+
+`js/test_exports_graphiques.js` vérifie que ce qu'on exporte ou dessine après un calcul correspond au chiffre affiché : l'export d'un comptage ou d'une somme contient les lignes retenues (même total), l'en-tête du fichier écrit les seuils avec leur comparateur (« > 20 », pas « = 20 »), le graphique d'une répartition ou d'un classement reprend les valeurs calculées, et un chiffre unique (comptage, somme, moyenne) donne une explication plutôt qu'un graphique inventé. Banc correspondant (714 questions) : 0 écart.
 
 `js/test_part_groupes.js` vérifie les **taux par groupe** : « pourcentage de candidats sans proposition par département », « part des boursiers par académie », « taux de remplissage des BTS par académie » donnent un taux calculé **dans** chaque groupe (avant : la répartition du total entre groupes, lue à tort comme un taux), avec la ligne « Ensemble », l'export, le graphique et les relances (« taux de proposition des boursiers » puis « et par département ? »).
 
