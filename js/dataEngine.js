@@ -4011,7 +4011,8 @@ function currentExecutionToRows(exec) {
       Max: exec.result?.max ?? ''
     }];
   }
-  if (exec.kind === 'count') {
+  // v27.5.97 — somme (« nombre de places en BTS ») : les formations additionnées (avant : « Aucune donnée à exporter »)
+  if (exec.kind === 'count' || exec.kind === 'sum') {
     const table = p.table;
     return applyLocalActionFilters(table?.objects || [], p.filters || []);
   }
@@ -4027,9 +4028,22 @@ function currentExecutionToRows(exec) {
   return [];
 }
 
+// v27.5.97 — libellé d'un filtre dans l'en-tête d'un export, avec son comparateur (« > "30" », pas « = "30" »)
+function _libelleFiltreExport(f) {
+  if (!f) return '';
+  if (f.op === 'or') return f.label || f.value || "l'un ou l'autre";
+  if (f.op === 'in') return `${f.col} : ${f.label || f.value}`;
+  if (f.op === 'contains_all' || f.op === 'contains_words') return `${f.col || 'Intitulé'} contient « ${f.label || f.value} »`;
+  return `${f.col} ${({ neq: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤' })[f.op] || '='} "${f.value}"`;
+}
 function buildExportMeta(rows, meta = {}) {
   const dateStr = new Date().toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-  const filtresStr = (meta.filters || []).map(f => `${f.col} ${f.op === 'neq' ? '≠' : '='} "${f.value}"`).join(' ; ') || 'Aucun filtre';
+  // v27.5.97 — les seuils écrits avec leur comparateur (avant : « plus de 30 places » écrit « Capacité = "30" » dans le fichier)
+  // (libellé défini ici : la fonction doit rester autonome, des tests l'extraient seule)
+  const lib = f => !f ? '' : f.op === 'or' ? (f.label || f.value || "l'un ou l'autre") : f.op === 'in' ? `${f.col} : ${f.label || f.value}`
+    : (f.op === 'contains_all' || f.op === 'contains_words') ? `${f.col || 'Intitulé'} contient « ${f.label || f.value} »`
+    : `${f.col} ${({ neq: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤' })[f.op] || '='} "${f.value}"`;
+  const filtresStr = (meta.filters || []).map(lib).join(' ; ') || 'Aucun filtre';
   const perimetreStr = meta.perimetre || 'Ensemble';
   return [`Exporté le : ${dateStr}`, `Filtres : ${filtresStr}`, `Périmètre : ${perimetreStr}`, `Lignes : ${(rows?.length || 0).toLocaleString('fr-FR')}`];
 }
@@ -4133,7 +4147,17 @@ function renderCurrentChartExecution(plan) {
     return { kind: 'pivot', plan: prev.plan, result: prev.result, text: prev.text, html };
   }
   // Si le dernier résultat n'est pas graphiquable, produire une répartition par la dernière dimension connue.
-  const fallbackCol = prev.plan?.targetCol || 'Série de la Classe';
+  // v27.5.97 — seulement par une colonne de catégories présente dans la source. Avant : « Série de la Classe » absente de
+  // l'open data (graphique vide) ou une colonne chiffrée (« 30 places : 12 formations », barres sans rapport avec le chiffre)
+  const _tbl = prev.plan?.table;
+  const _cand = prev.plan?.targetCol;
+  const _cats = _cand && _tbl && (_tbl.headers || []).includes(_cand) && !_estNumerique(_tbl, _cand) && _distinctValues(_tbl, _cand).length >= 2;
+  if (!_cats) {
+    const titre = 'Pas de graphique pour un chiffre unique';
+    const html = `<h4>${titre}</h4><p>Le dernier résultat est un seul chiffre : il n'y a rien à représenter. Demandez une répartition, par exemple « ${escapeHtml(String(prev.plan?.question || 'combien de formations').replace(/\s*\?\s*$/, ''))} par académie », puis « en graphique ».</p>`;
+    return { kind: 'message', plan: prev.plan, result: {}, text: titre, html };
+  }
+  const fallbackCol = _cand;
   const rows = applyLocalActionFilters(prev.plan?.table?.objects || [], prev.plan?.filters || []);
   const counts = topCountsForRows(rows, fallbackCol, 30);
   const result = { total: rows.length, filled: counts.filled, distinct: counts.distinct, rows: counts.top.slice(0, 12) };
@@ -5009,9 +5033,7 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     const filename = format === 'csv' ? 'resultat_analyse.csv' : 'resultat_analyse.xlsx';
     // PR 3.1 fix : construire les métadonnées depuis le plan source
     const prevFilters = (prev?.plan?.filters || []);
-    const perimetreStr = prevFilters.length
-      ? prevFilters.map(f => `${f.col} ${f.op === 'neq' ? '≠' : '='} "${f.value}"`).join(' ; ')
-      : 'Ensemble';
+    const perimetreStr = prevFilters.length ? prevFilters.map(_libelleFiltreExport).join(' ; ') : 'Ensemble';
     const meta = { filters: prevFilters, perimetre: perimetreStr };
     const res = downloadRowsAsFile(rows, filename, format, meta);
     return { kind: 'export', plan, result: res, html: res.html };
@@ -5882,7 +5904,7 @@ function shouldAnswerLocallyWithoutAlbert(exec) {
   // sinon Albert risque de répondre à partir d'un résumé incomplet.
   // v27.7 — « unresolved » : terme introuvable, on le dit plutôt que de laisser Albert inventer
   // v27.5.78 — « ratio » (candidats par place) : calculé, affiché sans Albert (avant : un appel à Albert inutile)
-  return ['count','group_by','top','pivot','stats','export','compare','unresolved','sum','classement','part','evolution','evolution_groupes','stats_groupes','part_groupes','pdf','ratio'].includes(exec.kind);
+  return ['count','group_by','top','pivot','stats','export','compare','unresolved','sum','classement','part','evolution','evolution_groupes','stats_groupes','part_groupes','pdf','ratio','message'].includes(exec.kind);
 }
 /* ═══════════════ v27.9 — Chiffres écrits par Albert : vérifiés contre les données fournies ═══════════════
    Albert rédige ; il ne doit pas produire de chiffres. Chaque nombre de sa réponse est comparé aux nombres
