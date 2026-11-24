@@ -195,7 +195,7 @@ function alerteEnClair(desaccord) {
   if ((m = d.match(/^exclusion oubliée par le moteur : (.+)$/))) return `une exclusion (« hors… », « sauf… ») ne semble pas appliquée`;
   return 'la question peut se lire autrement';
 }
-const VERIF_SANS_OBJET = ['unresolved', 'export', 'pdf', 'compare', 'evolution', 'evolution_groupes', 'chart_current', 'erreur', 'ratio'];
+const VERIF_SANS_OBJET = ['unresolved', 'export', 'pdf', 'message', 'compare', 'evolution', 'evolution_groupes', 'chart_current', 'erreur', 'ratio'];
 // Vérifie une réponse calculée ; renvoie le désaccord (texte) ou null. Aucune exception ne remonte.
 async function verifierLecture({ exec, questions, bubble = null, fetchImpl, endpoint } = {}) {
   try {
