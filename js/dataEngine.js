@@ -467,7 +467,16 @@ function strictFiltersFromQuestion(table, question) {
   const out = _strictFiltersFromQuestionBase(table, question);
   if (!out.length) return out;
   const q = normalizeText(question || '');
-  return out.filter(f => !(f && (f.op || 'eq') === 'eq' && /^(commune|ville|academie|departement)/.test(_hx(f.col)) && _lieuDansNomEtablissement(table, q, f.value)));
+  return out.filter(f => !(f && (f.op || 'eq') === 'eq' && /^(commune|ville|academie|departement)/.test(_hx(f.col)) && _lieuDansNomEtablissement(table, q, f.value)))
+    .map(f => _avecCedex(table, f));
+}
+// v27.5.98 — localités d'acheminement postal : « BORDEAUX » et « BORDEAUX CEDEX » sont la même commune
+function _avecCedex(table, f) {
+  if (!f || (f.op || 'eq') !== 'eq' || f.source !== 'commune_a' || !/commune|ville|localite/.test(_hx(f.col))) return f;
+  const base = normalizeText(f.value).replace(/ cedex(?: \d+)?$/, '');
+  const vals = _distinctValues(table, f.col).filter(x => new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?: cedex(?: \\d+)?)?$`).test(normalizeText(x)));
+  if (vals.length < 2) return f;
+  return { ...f, op: 'in', values: vals.map(normalizeText), value: f.value, label: `${f.value} (${vals.join(', ')})` };
 }
 const _nomsEtabCache = new WeakMap();
 function _lieuDansNomEtablissement(table, q, valeur) {
@@ -593,7 +602,7 @@ function _strictFiltersFromQuestionBase(table, question) {
       .find(x => new RegExp(`(^| )${normalizeText(x)}( |$)`).test(q));
     if (v) add(regCol, v, 'eq');
   }
-  const comCols = headersS.filter(h => /commune|ville/.test(_hx(h)) && !/code|insee|postal/.test(_hx(h)));
+  const comCols = headersS.filter(h => /commune|ville|localite/.test(_hx(h)) && !/code|insee|postal/.test(_hx(h)));
   if (comCols.length) {
     const veutOrigine = /venant|issus?|originaires?|provenant|scolaris|origine/.test(q);
     const ordre = comCols.slice().sort((a, b) => {
@@ -1317,7 +1326,7 @@ const FORMATION_TERM_STOP = new Set(`
 `.trim().split(/\s+/));
 const FORMATION_COL_RE = /fili[eè]re|formation|sp[eé]cialit[eé]|mention|parcours|dipl[oô]me|intitul[eé]/i;
 const NOT_FORMATION_COL_RE = /statut|[eé]tablissement|contrat|session|acad[eé]mi|d[eé]partement|r[eé]gion|commune|ville|s[eé]lectiv|capacit|effectif|nombre|\bnb\b|pourcentage|%|taux|rang|\bdont\b|uai|code|lyc[eé]e|candidat|v[oœ]eux?|boursier|sexe/i;
-const GEO_COL_RE = /acad[eé]mi|d[eé]partement|r[eé]gion|commune|ville/i;
+const GEO_COL_RE = /acad[eé]mi|d[eé]partement|r[eé]gion|commune|ville|localit[eé]/i;
 const _formationTermsCache = new WeakMap();
 
 // Colonnes de formation (texte) et mots qu'elles contiennent ; mots des colonnes géographiques à part
@@ -1740,6 +1749,7 @@ function applyMeasureSum(plan) {
   if (plan && plan.table && plan.table.rowUnit !== 'formation' && plan.tool === 'count_rows') {
     const qv = normalizeText(plan.question || '');
     if (/^(?:quel est le |quel est |le |la )?(?:nombre total|total|somme|nombre)\s+(?:des |de |d )?voeux\b|^combien (?:de |d )?voeux\b(?!.*\b(?:moyenne|moyen|maximum|minimum|max|min|median|mediane)\b)/.test(qv)) {
+      if (plan.table.rowUnit === 'voeu') return plan; // une ligne = un vœu : on compte les lignes
       const col = (plan.table.headers || []).find(h => /voeux/.test(normalizeText(h)) && _estNumerique(plan.table, h));
       if (col) { plan.tool = 'sum'; plan.sumCol = col; plan.sumUnit = 'vœux'; return plan; }
       plan.mesureIntrouvable = 'vœux'; return plan;
@@ -2742,6 +2752,10 @@ const CONCEPTS_A_FILTRER = [
   { re: /\bapprenti(e|s|es)?\b|\bapprentissage\b|\balternance\b/, mot: 'apprentis', ok: t => /appr|altern/.test(t) },
   // v27.14 — condition chiffrée non comprise (« dont la capacité dépasse 100 ») : arrêt, pas toutes les lignes
   { re: /\b(plus de|moins de|au moins|au plus|superieure? a|inferieure? a|depasse\w*|au dela de|en dessous de)\s+\d/, mot: 'condition chiffrée', ok: (t, f) => f && f.source === 'condition_chiffree' && !f.univers },
+  // v27.5.98 — résultat de l'affectation (« ont obtenu leur vœu 1 », « sont affectés ») : seule une base d'affectation le
+  // contient. Avant : sur le fichier académique, « combien de candidats ont obtenu leur vœu 1 » comptait TOUS les candidats.
+  { re: /\b(?:obtenu|eu|satisfait|affecte|admis|accepte)\w*\b(?:\s+\w+){0,4}?\s+(?:premier voeu|1er voeu|voeu (?:n )?1|voeu numero 1|voeu un)\b|\b(?:premier voeu|1er voeu|voeu (?:n )?1)\b(?:\s+\w+){0,3}?\s+(?:obtenu|satisfait|accepte)\w*/, mot: 'vœu 1 obtenu', ok: (t, f) => f && f.source === 'affectation' },
+  { re: /\baffecte(?:e)?s?\b(?!\s+(?:a|au|aux|en|dans|sur|par)\b)|\bsans affectation\b/, mot: 'affectation', ok: (t, f) => f && f.source === 'affectation' },
   // v27.13 — « combien de refusés » sans colonne de statut comptait tout le fichier
   { re: /\brefus(e|es|ee|ees)?\b|\bliste d ?attente\b|\ben attente\b|\bdesist(e|es|ee|ees|ement)?\b/, mot: 'statut de candidature (refusé, liste d\'attente…)', ok: t => /refus|attente|desist|statut|admi|candidature/.test(t) },
   // v27.5.84 — « ont eu une proposition », « sans proposition », « taux de proposition » sans colonne de proposition :
@@ -2841,6 +2855,7 @@ function motsNonReconnus(plan) {
   const ajouter = t => normalizeText(t).split(' ').forEach(w => { if (w) connus.add(w); });
   if (filtres.some(f => f.source === 'specialite_lycee')) ['ses svt hggsp hlp llcer nsi amc eppcs maths math pc eco terminale lycee specialite specialites enseignement enseignements doublette'].forEach(ajouter);
   filtres.filter(f => f.op === 'or').forEach(f => (f.groupes || []).flat().forEach(g => { ajouter(g.value); ajouter(g.label || ''); (g.terms || []).forEach(t => [].concat(t).forEach(ajouter)); (g.values || []).forEach(ajouter); _motsTraduits(g.value).forEach(ajouter); ajouter(_hx(g.col || '')); }));
+  if (plan.exclureEleves) ajouter(plan.exclureEleves.label || '');
   filtres.forEach(f => { ajouter(f.value); ajouter(f.label || ''); (f.terms || []).forEach(t => (Array.isArray(t) ? t : [t]).forEach(ajouter)); (f.values || []).forEach(ajouter); (f.noms || []).forEach(ajouter); _motsTraduits(f.value).forEach(ajouter); });
   cols.forEach(c => ajouter(_hx(c)));
   (plan.table.headers || []).forEach(h => ajouter(h)); // un mot d'en-tête désigne une colonne (« taux d'accès »)
@@ -2869,6 +2884,7 @@ function conceptsNonFiltres(plan) {
   // v27.15 — part : en mode effectifs, le sujet (« boursiers », « filles ») est une colonne du calcul, pas un filtre manquant
   if (plan.tool === 'part' && plan.part && plan.part.mode === 'effectifs' && !plan.part.manque) q = q.replace(new RegExp(plan.part.mot.source, 'g'), ' ').replace(/\badmis(es)?\b|\bcandidats?\b|\bcandidates\b|\bneo ?bacheliers?\b/g, ' ');
   const filtres = [...(plan.filters || []), ...((plan.tool === 'part' && plan.part?.condition) || [])].filter(Boolean);
+  if (plan.exclureEleves) filtres.push({ col: plan.exclureEleves.col, value: '', label: plan.exclureEleves.label, source: 'affectation' });
   // la colonne analysée ou additionnée compte aussi (« admis boursiers » → colonne « admis boursiers »)
   let _colStats = null;
   try { if (plan.tool === 'stats') _colStats = plan.statsCol || _colonneStatsQuestion(plan); } catch (e) { /* pas de colonne */ }
@@ -2914,6 +2930,9 @@ function _nbConditionsCitees(question) {
   return Math.max(lues, generiques);
 }
 function unresolvedConceptExecution(plan, manque, raison) {
+  // v27.5.98 — table de vœux sans ses tables liées (Élèves, Offre) : le widget n'a pas l'accès au document
+  if (plan?.table?.rowUnit === 'voeu' && typeof gristLiaisonEtat !== 'undefined' && gristLiaisonEtat === 'refusee' && plan.table.source === 'Grist')
+    raison = `${raison || `je n'ai trouvé dans les données aucune colonne ni valeur pour « ${(manque || []).join(' », « ')} »`} — les tables liées (élèves, offre) n'ont pas pu être lues : dans Grist, ouvrez le panneau du widget et choisissez « Accès complet au document »`;
   const cols = (plan.table.headers || []).filter(h => !/^(id|manualSort)$/i.test(String(h)));
   const quoi = raison || `je n'ai trouvé dans les données aucune colonne ni valeur pour « ${manque.join(' », « ')} »`;
   const html = `<h4>Critère non reconnu</h4><p>Pour cette question, ${escapeHtml(quoi)} (${escapeHtml(plan.table.name || 'table active')}). `
@@ -4920,10 +4939,93 @@ function executerPdf(plan) {
   const html = `<h4>${titre}</h4><p>${ok ? 'La fenêtre d\'impression s\'est ouverte' : 'La fenêtre d\'impression n\'a pas pu s\'ouvrir'} pour la réponse « <strong>${escapeHtml(bloc.titre || '')}</strong> ». Pour obtenir un fichier PDF, choisissez « Enregistrer au format PDF » comme imprimante.</p><p style="font-size:12px;color:var(--gris3)">Pour réunir plusieurs réponses dans un seul PDF : bouton « 📑 Rapport PDF » en haut du widget.</p>`;
   return { kind: 'pdf', plan, result: { imprime: ok, titre: bloc.titre }, text: `PDF : ${bloc.titre}`, html };
 }
+/* v27.5.98 — Base d'affectation : une ligne = un vœu, un élève a plusieurs vœux. Une question sur des personnes
+   (« combien d'élèves… », « nombre de candidats par département ») compte des élèves DIFFÉRENTS ; une question sur
+   les vœux (« combien de vœux… ») compte les lignes. Les autres calculs (part, moyenne, comparaison…) compteraient un
+   élève autant de fois qu'il a de vœux : arrêt expliqué tant qu'ils ne sont pas adaptés. */
+function _parlePersonnes(question) {
+  const q = normalizeText(question || '');
+  if (/\b(?:combien|nombre)(?: total)?(?: de| d| des)? ?(?:voeux|voeu|demandes?|candidatures?|choix)\b/.test(q)) return false;
+  const personnes = /\b(?:eleves?|candidat(?:e)?s?|jeunes|lyceen(?:ne)?s?|collegien(?:ne)?s?|personnes|enfants?|affecte(?:e)?s?|admis(?:es)?|refuse(?:e)?s?|inscrit(?:e)?s?|boursiers?|filles|garcons|ils|elles)\b/.test(q);
+  const voeux = /\b(?:voeux|voeu|demandes?|candidatures?|choix)\b/.test(q);
+  return personnes || !voeux;
+}
+// Vocabulaire de l'affectation, lu dans les colonnes de l'export (indicateurs Oui / Non, code de décision par tour).
+// Codes de décision (déclarés par l'utilisateur) : 1 affecté, 2 en attente, 3 refusé — au tour 1 ; les autres tours ne
+// sont pas établis : arrêt.
+const _AFF_NEG = /\b(?:non|pas|aucune?|sans|jamais|ni)\b(?:\s+\w+){0,3}?\s+(?:affecte|admis|obtenu|satisfait|affectation|place)\w*|\bnon (?:affecte|admis)\w*/;
+const _AFF_V1 = /\b(?:obtenu|eu|satisfait|affecte|admis|accepte)\w*\b(?:\s+\w+){0,4}?\s+(?:premier voeu|1er voeu|voeu (?:n )?1|voeu numero 1|voeu un)\b|\b(?:premier voeu|1er voeu|voeu (?:n )?1)\b(?:\s+\w+){0,3}?\s+(?:obtenu|satisfait|accepte)\w*/;
+const _AFF_TOUS = /\b(?:affecte(?:e)?s?|admis(?:es)?|affectation|obtenu une place|ont une place)\b/;
+const _AFF_ATT = /\ben attente\b|\bliste (?:d attente|supplementaire)\b/;
+const _AFF_REF = /\brefuse(?:e)?s?\b/;
+const _AFF_TOUR2 = /\b(?:2e|2eme|deuxieme|second|seconde|3e|3eme|troisieme)\s+tour\b|\btour (?:2|3|n 2)\b/;
+function _vocabulaireAffectation(plan) {
+  const q = normalizeText(plan.question || '');
+  const H = plan.table.headers || [];
+  const colH = re => H.find(h => re.test(normalizeText(String(h).replace(/_/g, ' '))));
+  const colV1 = colH(/admis voeu ?1\b/), colTous = colH(/admis tous (?:les )?voeux/), colDec = colH(/code decision/);
+  // classe d'origine écrite telle qu'elle figure dans la colonne (« venant de 2nde pro », « en 2nde GT ») : la classe exacte
+  // (avant : seul le mot « 2nde » était cherché dans les intitulés de formation, 2nde GT et 2nde pro mélangées)
+  const colClasse = colH(/^classe (?:d )?origine$/);
+  if (colClasse) {
+    const vals = _distinctValues(plan.table, colClasse).filter(v => normalizeText(v).length >= 3 && !/^autre$/i.test(String(v).trim()))
+      .sort((a, b) => normalizeText(b).length - normalizeText(a).length);
+    const qs = q.replace(/\bseconde\b/g, '2nde').replace(/\bpremiere\b/g, '1re').replace(/\bterminale\b/g, 'term').replace(/\b(?:generale et technologique|generale|gen)\b/g, 'gt').replace(/\bprofessionnelle\b/g, 'pro');
+    const v = vals.find(x => new RegExp(`(^| )${normalizeText(x).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}( |$)`).test(qs));
+    if (v) {
+      const mots = normalizeText(v).split(' ');
+      plan.filters = (plan.filters || []).filter(f => !(f && f.op === 'contains_all' && (f.terms || []).every(t => [].concat(t).some(w => mots.includes(normalizeText(w)) || /^(2nde|seconde|1re|premiere|term|terminale)$/.test(normalizeText(w))))));
+      plan.filters = plan.filters.filter(f => !(f && f.col === colClasse));
+      plan.filters.push({ col: colClasse, op: 'eq', value: v, label: `classe d'origine ${v} (venant de, seconde, premiere, terminale, generale, professionnelle)`, source: 'affectation' });
+    }
+  }
+  const v1 = _AFF_V1.test(q), tous = !v1 && _AFF_TOUS.test(q), att = _AFF_ATT.test(q), ref = _AFF_REF.test(q);
+  if (!(v1 || tous || att || ref)) return null;
+  if (_AFF_TOUR2.test(q)) return `les codes de décision des tours suivants (4, 5, 7…) ne sont pas encore établis : seul le tour 1 est pris en charge (1 affecté, 2 en attente, 3 refusé)`;
+  const neg = _AFF_NEG.test(q);
+  const ajouter = (col, valeur, label) => {
+    plan.filters = (plan.filters || []).filter(f => !(f && f.col === col));
+    plan.filters.push({ col, op: 'eq', value: valeur, label, source: 'affectation' });
+  };
+  if (v1 || tous) {
+    const col = v1 ? colV1 : colTous;
+    if (!col) return `aucune colonne n'indique ${v1 ? 'l\'admission sur le vœu 1' : 'l\'affectation'} dans cette table`;
+    if (neg) plan.exclureEleves = { col, valeur: 'Oui', label: v1 ? 'élèves non admis sur leur vœu 1 (obtenu, satisfait, premier voeu)' : 'élèves sans affectation (non affectés, non admis, aucune affectation)' };
+    else ajouter(col, 'Oui', v1 ? 'admis sur leur vœu 1 (obtenu, satisfait, premier voeu)' : 'affectés (admis sur un de leurs vœux, affectation, obtenu une place)');
+  }
+  if (att || ref) {
+    if (neg) return 'une négation sur « en attente » ou « refusé » n\'est pas encore prise en charge';
+    if (!colDec) return 'aucune colonne de décision dans cette table';
+    ajouter(colDec, att ? 2 : 3, att ? 'en attente au tour 1 (code 2, liste supplémentaire)' : 'refusés au tour 1 (code 3)');
+    plan.noteAffectation = 'codes de décision : 1 affecté, 2 en attente, 3 refusé, au tour 1 (signification indiquée par l\'utilisateur, pas par le fichier)';
+  }
+  return null;
+}
+function _uniteVoeu(plan) {
+  const cle = plan.table.cleEleve;
+  const arretVoc = _vocabulaireAffectation(plan);
+  if (arretVoc) return unresolvedConceptExecution(plan, [], arretVoc);
+  if (!_parlePersonnes(plan.question)) { plan.uniteVoeux = true; return null; }
+  if (plan.tool === 'count_rows' && !plan.compterValeurs && !plan.compterEtablissements) {
+    plan.compterValeurs = { col: cle, nom: 'élèves' };
+    return null;
+  }
+  if ((plan.tool === 'group_by' || plan.tool === 'top') && !plan.distinctCol && !plan.groupSumCol && !plan.listMode && !plan.lesquelles) {
+    plan.distinctCol = cle; plan.distinctNom = 'élèves';
+    return null;
+  }
+  if (['count_rows', 'group_by', 'top', 'export_excel', 'export_csv', 'export_current_excel', 'export_current_csv', 'chart_current'].includes(plan.tool)) return null;
+  return unresolvedConceptExecution(plan, [], `dans une table de vœux (un élève y a plusieurs lignes), ce calcul compterait chaque élève autant de fois qu'il a de vœux ; il n'est pas encore pris en charge. Demandez plutôt « combien d'élèves … » ou « nombre d'élèves par … »`);
+}
 function runDataEnginePlan(plan, persistentFiltersOverride) {
   if (plan && plan.tool === 'export_pdf') return executerPdf(plan);
   plan = finalSanitizeAnalysisPlan(plan);
   if (!plan || !plan.table) return null;
+  // v27.5.98 — table de vœux (base d'affectation) : « combien d'élèves » = élèves différents, pas des lignes
+  if (plan.table.rowUnit === 'voeu' && plan.table.cleEleve) {
+    const arret = _uniteVoeu(plan);
+    if (arret) return arret;
+  }
   // v27.5.82 — définition SAIO des candidats : filtre gardé jusqu'au calcul (certaines étapes reconstruisent les filtres) ;
   // retiré si la question demande tout le fichier (« combien d'élèves » après « combien de candidats »)
   if (plan.tool === 'compare' && !plan.universCandidats && !(plan.compareGroups || []).some(g => (g.filters || []).some(f => f && f.col === _colVoeuxCandidats(plan.table)))) { const u = conditionUniversCandidats(plan, []); if (u) plan.universCandidats = u; }
@@ -5049,6 +5151,12 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     return { kind: 'export', plan, action, result: res, html: res?.html || '' };
   }
   let rows = applyLocalActionFilters(plan.table.objects || [], plan.filters || []);
+  // v27.5.98 — table de vœux : « élèves NON affectés » = élèves dont AUCUN vœu n'est « admis » (pas les vœux refusés)
+  if (plan.exclureEleves && plan.table.cleEleve) {
+    const { col, valeur } = plan.exclureEleves, cle = plan.table.cleEleve;
+    const exclus = new Set((plan.table.objects || []).filter(r => normalizeText(r?.[col]) === normalizeText(valeur)).map(r => r?.[cle]));
+    rows = rows.filter(r => !exclus.has(r?.[cle]));
+  }
   // v27.23 — établissement cité mais introuvable : arrêt, avec les noms proches
   if (plan.etablissementIntrouvable) return unresolvedEtablissementExecution(plan, plan.etablissementIntrouvable);
   if (['count_rows', 'group_by', 'top', 'pivot'].includes(plan.tool) && plan.mesureIntrouvable) return unresolvedConceptExecution(plan, [], `aucune colonne de ${plan.mesureIntrouvable} dans les données`);
@@ -5060,8 +5168,9 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     const distinct = new Set(rows.map(cle).filter(Boolean)).size;
     const tous = new Set((plan.table.objects || []).map(cle).filter(Boolean)).size;
     const parCandidat = plan.table.rowUnit !== 'formation';
-    const result = { count: distinct, total: tous, formations: rows.length, totalFormations: (plan.table.objects || []).length, etablissements: true, valeurs: nom, col, parCandidat };
-    const exec = { kind: 'count', plan, result, text: `${nom.toUpperCase()} ${_differents(nom).toUpperCase()} = ${distinct} (${rows.length} ${parCandidat ? 'lignes' : 'formations'})`, html: renderDataEngineResultHtml('count_rows', plan, result) };
+    const uniteLignes = plan.table.rowUnit === 'voeu' ? 'vœux' : null;
+    const result = { count: distinct, total: tous, formations: rows.length, totalFormations: (plan.table.objects || []).length, etablissements: true, valeurs: nom, col, parCandidat, uniteLignes };
+    const exec = { kind: 'count', plan, result, text: `${nom.toUpperCase()} ${_differents(nom).toUpperCase()} = ${distinct} (${rows.length} ${uniteLignes || (parCandidat ? 'lignes' : 'formations')})`, html: renderDataEngineResultHtml('count_rows', plan, result) };
     rememberDataEngineExecution(exec);
     return exec;
   }
@@ -5131,7 +5240,7 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     const col = plan.targetCol || plan.mentionedCols?.[0];
     if (!col) return null;
     const limit = plan.listMode ? 300 : (plan.limit || detectLimit(plan.question) || (plan.tool === 'top' ? 10 : 30));
-    let counts = plan.eclater ? _comptesEclates(rows, col) : plan.distinctCol ? distinctParGroupe(rows, col, plan.distinctCol, plan.table)
+    let counts = plan.eclater ? _comptesEclates(rows, col) : plan.distinctCol ? distinctParGroupe(rows, col, plan.distinctCol, plan.distinctNom ? null : plan.table)
       : plan.groupSumCol ? sommesParGroupe(rows, col, plan.groupSumCol) : topCountsForRows(rows, col, Math.max(limit, 30));
     if (plan.croissant && !plan.distinctCol && !plan.groupSumCol) {
       // le moins : tous les groupes du fichier, y compris ceux à 0 (sinon un département sans licence serait oublié)
@@ -5144,7 +5253,7 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     const _res = { total: rows.length, filled: counts.filled, distinct: counts.distinct, rows: topRows };
     if (counts.eclate) _res.eclate = true;
     if (plan.groupSumCol) _res.somme = { col: plan.groupSumCol, unite: plan.sumUnit, total: counts.somme, sansValeur: counts.sansValeur };
-    if (plan.distinctCol) _res.etablissements = { col: plan.distinctCol, total: counts.totalDistinct };
+    if (plan.distinctCol) _res.etablissements = { col: plan.distinctCol, total: counts.totalDistinct, nom: plan.distinctNom || null };
     // v27.17 — liste d'intitulés remplie pour moins de 80 % des formations (options des PASS) :
     // la liste n'est pas celle de toutes les options ; formations sans précision montrées par établissement
     if (plan.listMode && rows.length && counts.filled < rows.length * SEUIL_COLONNE_REMPLIE) {
@@ -5653,9 +5762,9 @@ function perimetreResultat(kind, plan, result) {
     }
   }
   // v27.23 — établissements
-  if (result.valeurs) notes.push(`le chiffre compte des ${result.valeurs} ${_differents(result.valeurs)} (${_nf(result.count)}), pas des ${result.parCandidat ? 'lignes' : 'formations'} (${_nf(result.formations)})`);
+  if (result.valeurs) notes.push(`le chiffre compte des ${result.valeurs} ${_differents(result.valeurs)} (${_nf(result.count)}), pas des ${result.uniteLignes || (result.parCandidat ? 'lignes' : 'formations')} (${_nf(result.formations)})`);
   else if (result.etablissements === true) notes.push(result.parCandidat ? `le chiffre compte des établissements différents (${_nf(result.count)}), pas des candidats (${_nf(result.formations)})` : `le chiffre compte des établissements différents (${_nf(result.count)}), pas des formations (${_nf(result.formations)})`);
-  if (result.etablissements && result.etablissements !== true) notes.push(`chiffres = nombre d'établissements différents par groupe, pas un nombre de formations`);
+  if (result.etablissements && result.etablissements !== true) notes.push(result.etablissements.nom ? `chiffres = nombre d'${result.etablissements.nom} différents par groupe (chacun compté une fois, même avec plusieurs vœux), pas un nombre de vœux` : `chiffres = nombre d'établissements différents par groupe, pas un nombre de formations`);
   // v27.5.54 — fichier de candidats : un mot de formation d'accueil (« droit ») qui est aussi un enseignement de spécialité
   // du lycée (« Droit et Economie ») : on dit lequel est compté, et combien de candidats ont l'autre
   const _noteEns = _noteSpecialiteLycee(plan, filtres);
@@ -5763,7 +5872,7 @@ function questionComprise(kind, plan, result) {
       if (plan.lesquelles && /^(etablissement|lycee|universite)/.test(_hx(plan.targetCol || ''))) return `liste des établissements (colonne ${col(plan.targetCol)})`;
       if (plan.listMode) return `liste des intitulés de formation (colonne ${col(plan.targetCol)})`;
       if (result.somme) return `somme de ${col(result.somme.col)} pour chaque valeur de ${col(plan.targetCol)}`;
-      if (result.etablissements) return `nombre d'établissements différents pour chaque valeur de ${col(plan.targetCol)}`;
+      if (result.etablissements) return result.etablissements.nom ? `nombre d'${result.etablissements.nom} différents pour chaque valeur de ${col(plan.targetCol)}` : `nombre d'établissements différents pour chaque valeur de ${col(plan.targetCol)}`;
       return kind === 'top' ? `valeurs les ${plan.croissant ? 'moins' : 'plus'} fréquentes de ${col(plan.targetCol)} (nombre de ${unite})` : `répartition des ${unite} par ${col(plan.targetCol)}`;
     }
     if (kind === 'pivot') return `tableau croisé ${col(plan.targetCol)} × ${col(plan.targetCol2)} (nombre de ${unite})`;
@@ -5827,7 +5936,7 @@ function renderDataEngineResultHtml(tool, plan, result) {
     // v27.23 — établissements différents (« combien de lycées proposent des BTS »)
     const _nomV = result.valeurs || 'établissements';
     const phrase = result.valeurs
-      ? `Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ${escapeHtml(result.count > 1 ? _nomV : _nomV.replace(/s$/, ''))} ${result.count > 1 ? _differents(_nomV) : _differents(_nomV).replace(/s$/, '')} correspondant à la demande, pour <strong>${result.formations.toLocaleString('fr-FR')}</strong> ${result.parCandidat ? 'ligne' : 'formation'}${result.formations > 1 ? 's' : ''} (sur ${result.total.toLocaleString('fr-FR')} dans les données).`
+      ? `Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ${escapeHtml(result.count > 1 ? _nomV : _nomV.replace(/s$/, ''))} ${result.count > 1 ? _differents(_nomV) : _differents(_nomV).replace(/s$/, '')} correspondant à la demande, pour <strong>${result.formations.toLocaleString('fr-FR')}</strong> ${result.uniteLignes ? (result.formations > 1 ? 'vœux' : 'vœu') : `${result.parCandidat ? 'ligne' : 'formation'}${result.formations > 1 ? 's' : ''}`} (sur ${result.total.toLocaleString('fr-FR')} dans les données).`
       : result.etablissements
       ? (result.parCandidat
         ? `Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ${result.count > 1 ? 'établissements différents' : 'établissement'} correspondant à la demande, pour <strong>${result.formations.toLocaleString('fr-FR')}</strong> candidat${result.formations > 1 ? 's' : ''} (sur ${result.total.toLocaleString('fr-FR')} établissements dans le fichier).`

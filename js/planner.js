@@ -48,10 +48,14 @@
   /* ═══════════════════════ SCHEMA DISCOVERY ═══════════════════════ */
 
   function columnRole(col) {
-    const c = nrm(col);
+    const c = nrm(col).replace(/_/g, ' ');
+    // v27.5.98 — base d'affectation : « Ville étab. voeu » = lieu DEMANDÉ (accueil) ; « Localité achemin. étab. nat. élève »
+    // = établissement de l'ÉLÈVE (origine)
+    const lieuVoeu = /\b(?:ville|commune|localite|etab|etablissement|denomination)\b.*\bvoeux?\b|\bvoeux?\b.*\b(?:ville|commune|localite|etab|etablissement)\b/.test(c);
+    const lieuEleve = !lieuVoeu && /\b(?:ville|commune|localite|etab|etablissement)\b.*\beleve\b/.test(c);
     return {
-      accueil: /accueil|acceptee|accepte|acceptation|affectation|admission/.test(c),
-      origine: /origine|scolarite|scolarité|etablissement d origine|lycee d origine|commune de scolarite|academie de scolarite/.test(c),
+      accueil: lieuVoeu || /accueil|acceptee|accepte|acceptation|affectation|admission/.test(c),
+      origine: lieuEleve || /origine|scolarite|scolarité|etablissement d origine|lycee d origine|commune de scolarite|academie de scolarite/.test(c),
       acceptedLabelOnly: /etablissement.*acceptee|formation.*acceptee|accueil.*acceptee/.test(c),
       boursierLycee: /boursier.*lycee|boursier.*lyc[eé]e|lyc[eé]e.*boursier/.test(c)
     };

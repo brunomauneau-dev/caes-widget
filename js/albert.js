@@ -443,9 +443,44 @@ function updateSourceHub() {
   if (typeof updateKnowledgeStatusBadge === 'function') updateKnowledgeStatusBadge();
 }
 
+/* v27.5.98 — Tables liées : quand le widget est posé sur une table qui partage une colonne avec d'autres tables du
+   document (base d'affectation : Voeux ↔ Eleves, Offre), il les lit aussi (lecture seule) pour répondre aux questions
+   sur l'origine des élèves ou la formation demandée. Il faut l'« Accès complet au document » ; sinon, rien ne change. */
+let _liaisonEnCours = false, _liaisonTable = null;
+async function chargerTablesLieesGrist() {
+  if (_liaisonEnCours || !gristRecords || !gristRecords.length) return;
+  _liaisonEnCours = true;
+  try {
+    if (!grist.docApi || typeof grist.docApi.listTables !== 'function' || typeof grist.docApi.fetchTable !== 'function') return;
+    const courante = (grist.selectedTable && typeof grist.selectedTable.getTableId === 'function') ? await grist.selectedTable.getTableId() : null;
+    if (courante && courante === _liaisonTable) return;
+    const ids = await grist.docApi.listTables();
+    const champs = new Set(Object.keys(gristRecords[0] || {}).filter(c => c !== 'id' && c !== 'manualSort'));
+    const liees = [];
+    for (const id of ids || []) {
+      if (id === courante || /^_grist/i.test(id)) continue;
+      const data = await grist.docApi.fetchTable(id);
+      if (!Object.keys(data || {}).some(c => champs.has(c))) continue; // aucune colonne commune : sans rapport
+      liees.push({ nom: id, objets: lignesDepuisColonnes(data) });
+    }
+    gristTablesLiees = liees;
+    gristLiaisonEtat = 'ok';
+    _liaisonTable = courante;
+    const info = document.getElementById('grist-info');
+    if (info && liees.length) info.insertAdjacentHTML('beforeend', `<div style="font-size:10px;color:var(--gris3);margin-top:4px">+ tables liées : ${liees.map(t => escapeHtml(t.nom)).join(', ')}</div>`);
+    updateSourceHub();
+    updateChatSub();
+  } catch (e) {
+    gristLiaisonEtat = 'refusee'; // accès limité à la table sélectionnée
+  } finally {
+    _liaisonEnCours = false;
+  }
+}
+
 grist.onRecords(function(records) {
   if (!records || !records.length) return;
   gristRecords = records;
+  chargerTablesLieesGrist();
   const fields = Object.keys(records[0]);
   document.getElementById('grist-info').innerHTML = `
     <div style="font-size:11px;color:var(--texte)">
