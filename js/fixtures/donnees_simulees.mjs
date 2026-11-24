@@ -311,3 +311,54 @@ export function exportAcademique(n = 4000, graine = 21) {
   }
   return rows;
 }
+
+// ─── Base d'affectation en 1re (forme d'un export Affelnet chargé dans Grist par scripts/charger_bdd_grist.py) ───
+// Trois tables liées, avec les identifiants de colonnes que Grist donne aux en-têtes de l'export :
+// - Voeux  : une ligne par vœu (un même rang peut couvrir plusieurs formations), indicateurs Oui / Non ;
+// - Eleves : une ligne par élève (origine) ; - Offre : une ligne par code vœu (formation × établissement demandés).
+// Codes de décision (par élève et par tour) : 1 affecté, 2 en attente, 3 refusé (tour 1). Valeurs fictives.
+const AFF_DEPS = [['Gironde', '033', ['BORDEAUX', 'BORDEAUX CEDEX', 'MERIGNAC', 'LIBOURNE']], ['Pyrénées-Atlantiques', '064', ['PAU', 'BAYONNE']],
+  ['Landes', '040', ['DAX', 'MONT DE MARSAN']], ['Dordogne', '024', ['PERIGUEUX', 'BERGERAC']], ['Lot-et-Garonne', '047', ['AGEN']], ['Hors académie', '031', ['TOULOUSE']]];
+const AFF_FORMATIONS = [
+  ['1GEN', '1RE GENERALE', ''], ['1STMG', '1RE STMG', 'MERCATIQUE'], ['1STI2D', '1RE STI2D', ''], ['1ST2S', '1RE ST2S', ''],
+  ['1PRO', '1RE PRO ACCOMPAGNEMENT SOINS ET SERVICES A LA PERSONNE', 'ASSP'], ['1PRO', '1RE PRO METIERS DE L\'ELECTRICITE', 'MELEC'],
+  ['1PRO', '1RE PRO METIERS DU COMMERCE ET DE LA VENTE', 'MCV'],
+];
+const AFF_LYCEES = [['LYCEE MONTAIGNE', 'BORDEAUX', '033'], ['LYCEE GUSTAVE EIFFEL', 'BORDEAUX', '033'], ['LYCEE LOUIS BARTHOU', 'PAU', '064'],
+  ['LYCEE BORDA', 'DAX', '040'], ['LYCEE BERTRAN DE BORN', 'PERIGUEUX', '024'], ['LYCEE BERNARD PALISSY', 'AGEN', '047']];
+export function affectation(nEleves = 800, graine = 31) {
+  const h = hasard(graine);
+  const offre = [];
+  AFF_LYCEES.forEach((L, i) => AFF_FORMATIONS.forEach((F, j) => {
+    const code = `0${L[2]}${String(i * 10 + j).padStart(4, '0')}`;
+    offre.push({ Code_voeu_eleve: code, Code_departement_voeu_eleve: L[2], Identifiant_etab_voeu_eleve: `0${L[2]}00${i}${'ABCDEFG'[j]}`,
+      Code_ministere_etab_voeu: '06', Denomination_etab_voeu: L[0], Numero_telephone_etab_voeu: '0500000000', Ville_etab_voeu: L[1],
+      Libelle_formation_voeu: F[1], Mnemonique_formation_voeu: F[0], Specialite_formation_voeu: F[2], Etablissement_d_accueil: `${L[0]} (${L[1]})`,
+      Service_en_charge_du_traitement: `DSDEN ${L[2].slice(1)}` });
+  }));
+  const eleves = [], voeux = [];
+  for (let e = 1; e <= nEleves; e++) {
+    const D = h.choix(AFF_DEPS, [32, 17, 12, 10, 8, 3]);
+    const classe = h.choix(['Autre', '2nde GT', '2nde PRO', 'Term CAP', '1re GT', '1re PRO'], [70, 10, 12, 4, 2, 2]);
+    const id = `${e % 7 === 0 ? 'P' : ''}${String(1100000000 + e * 37)}`;
+    eleves.push({ Identifiant_eleve: id, Code_departement_etablissement_eleve: D[1], Code_mefstat4_formation_eleve: classe.startsWith('2nde PRO') ? '2471' : '2111',
+      Libelle_court_mefstat4_eleve: classe, Libelle_long_mefstat4_eleve: classe, Identifiant_etab_national_eleve: `${D[1]}${e % 40}X`,
+      Localite_achemin_etab_nat_eleve: h.choix(D[2]), Nom_complement_etab_national_eleve: `COLLEGE-LYCEE ${e % 40}`, Libelle_formation_eleve: classe,
+      Mnemonique_formation_eleve: classe, Specialite_formation_eleve: '', Classe_origine: classe, Departement_origine_eleve: D[0], Etablissement_d_origine: `ETAB ${e % 40}` });
+    const nv = h.entier(1, 6), aff = h.r() < 0.9 ? h.entier(1, nv) : 0, code = aff ? 1 : h.choix([2, 3]);
+    const pro = classe === '2nde PRO';
+    for (let v = 1; v <= nv; v++) {
+      const nf = h.r() < 0.12 ? 2 : 1; // un même rang peut couvrir deux formations
+      for (let k = 0; k < nf; k++) {
+        const o = h.choix(offre.filter(x => (x.Mnemonique_formation_voeu === '1PRO') === (pro ? h.r() < 0.85 : h.r() < 0.1)));
+        const admis = v === aff && k === 0;
+        voeux.push({ Identifiant_eleve: id, Code_voeu_eleve: o.Code_voeu_eleve, Bonus_filiere_OPA: h.choix([0, 0, 0, 1000, 15000]),
+          Bonus_rapprochement_etab_OPA: h.choix([0, 20000]), Code_avis_chef_etab_voeu: h.r() < 0.1 ? h.choix(['B', 'C', 'D']) : '',
+          Libelle_avis_chef_etab_sur_voeu: '', Code_avis_passerelle: '', Code_decision_finale_resultat_eleve_par_tour: code, Rang_voeu_eleve: v,
+          Nombre_d_admis_tous_voeux_oui_non: admis ? 'Oui' : 'Non', Nombre_d_admis_voeu1_oui_non: admis && v === 1 ? 'Oui' : 'Non',
+          Nombre_de_candidats_voeu1_oui_non: v === 1 ? 'Oui' : 'Non', Classe_d_origine_Techno: classe, Lib_avis_accueil: '' });
+      }
+    }
+  }
+  return { voeux, eleves, offre };
+}

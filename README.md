@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-86 fichiers, 3 215 tests. Depuis la racine du repo :
+87 fichiers, 3 247 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -192,6 +192,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 `js/test_exports_graphiques.js` vérifie que ce qu'on exporte ou dessine après un calcul correspond au chiffre affiché : l'export d'un comptage ou d'une somme contient les lignes retenues (même total), l'en-tête du fichier écrit les seuils avec leur comparateur (« > 20 », pas « = 20 »), le graphique d'une répartition ou d'un classement reprend les valeurs calculées, et un chiffre unique (comptage, somme, moyenne) donne une explication plutôt qu'un graphique inventé. Banc correspondant (714 questions) : 0 écart.
 
 `js/test_chargeur_grist.js` lance pour de vrai le programme de chargement `scripts/charger_bdd_grist.py` (Python) contre un faux Grist local, avec des fichiers fictifs (CSV « ; » et « , », Windows-1252, Excel .xlsx avec chaînes partagées et cases manquantes). Il vérifie : inspection sans aucune valeur affichée, en-têtes sous les lignes de titre, rangement automatique en trois tables (Élèves, Offre, Vœux) sur un faux export d'affectation, noms d'élèves écartés mais pas les noms d'établissements, tables sans doublon, envoi par paquets, reprise après une panne sans doublon ni trou, nouvel essai après une surcharge (429), refus d'écrire dans une table déjà remplie, lot perdu signalé « INCOMPLET », clé jamais affichée, noms de colonnes Grist valides.
+
+`js/test_affectation.js` vérifie, sur une base d'affectation fictive (tables liées Voeux, Eleves, Offre ; une ligne = un vœu), que le widget posé sur Voeux lit aussi Eleves et Offre (colonne commune ou colonne Référence), que « combien d'élèves » compte des élèves différents et « combien de vœux » des lignes, le vocabulaire (« obtenu leur vœu 1 », « affectés », « non affectés », « en attente », « refusés » du tour 1, « venant de 2nde pro », établissement d'origine CEDEX compris), l'arrêt des calculs non adaptés et, sur le fichier académique, l'arrêt de « ont obtenu leur vœu 1 » (avant : tous les candidats). Banc correspondant : 0 chiffre faux sur 600.
 
 `js/test_part_groupes.js` vérifie les **taux par groupe** : « pourcentage de candidats sans proposition par département », « part des boursiers par académie », « taux de remplissage des BTS par académie » donnent un taux calculé **dans** chaque groupe (avant : la répartition du total entre groupes, lue à tort comme un taux), avec la ligne « Ensemble », l'export, le graphique et les relances (« taux de proposition des boursiers » puis « et par département ? »).
 
@@ -332,6 +334,8 @@ Le programme tourne **sur votre ordinateur**, jamais sur GitHub : les données n
 6. **Comprendre un code de décision** (sans aucune donnée d'élève) : `python charger_bdd_grist.py resume MON_FICHIER.xlsx`. Pour chaque code : lignes, élèves, s'il revient plusieurs fois pour un même élève, et sa place par rapport au code unique. Règle Affelnet : affecté sur un seul vœu, liste supplémentaire sur les vœux mieux classés, refusé sur les moins bien classés. Le programme en déduit une proposition (« 1 » = affecté…), à faire confirmer par le service de l'affectation. Il décrit aussi la structure du fichier : code identique sur toutes les lignes d'un élève (résultat par élève), couples (élève, rang) présents sur plusieurs lignes et colonnes qui les distinguent, valeurs des petites colonnes de codes (jamais de nom ni d'identifiant).
 
 Garanties : lecture ligne par ligne (environ 50 Mo de mémoire, quelle que soit la taille du fichier ; environ 17 000 lignes lues par seconde) ; envoi par paquets de 500 ; nouvel essai automatique si Grist est surchargé ; **reprise après une coupure sans doublon** (relancer la même commande : ce que Grist contient déjà fait foi) ; refus d'écrire dans une table déjà remplie ; rien n'est jamais supprimé ; vérification finale du nombre de lignes et d'élèves (« Chargement complet et vérifié » ou « INCOMPLET »).
+
+**Interroger la base avec le widget.** Posez le widget sur la table **Voeux** et, dans son panneau, choisissez **« Accès complet au document »** : il lit alors aussi les tables **Eleves** et **Offre** (lecture seule) et répond aux questions comme « combien d'élèves issus des Landes ont obtenu leur vœu 1 ? ». Un élève est compté une fois, même avec plusieurs vœux. Sans cet accès, les questions sur l'origine des élèves s'arrêtent et le message dit quoi faire.
 
 ---
 

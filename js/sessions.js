@@ -208,6 +208,8 @@ function _shortColName(col) {
 function _shortFilterValue(f) {
   const col = normalizeText(f.col || '');
   const v = String(f.value || '');
+  // v27.5.98 — base d'affectation : l'état en clair (« admis sur leur vœu 1 », « en attente »), pas « Oui » ni « 2 »
+  if (f.source === 'affectation' && f.label) return String(f.label).replace(/\s*\(.*$/, '');
   if (/basque/.test(col) && /oui/i.test(v)) return 'basques';
   if (/boursier/.test(col) && /boursier des lyc/i.test(v)) return 'boursiers';
   if (/boursier/.test(col) && /non/i.test(v)) return 'non-boursiers';

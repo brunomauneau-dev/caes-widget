@@ -93,14 +93,82 @@ function colonnesEffectifs(headers, objects) {
     return vals.some(v => Number(String(v).replace(/[\s\u00a0\u202f]/g, '').replace(',', '.')) > 1);
   });
 }
+// v27.5.98 — base d'affectation (une ligne = un vœu) : la colonne qui identifie l'élève se répète. « Combien d'élèves »
+// compte alors des élèves DIFFÉRENTS, pas des lignes (un élève a plusieurs vœux).
+const ID_ELEVE_RE = /^(?:identifiant|id|numero|num|n|no|ine)(?: national)?(?: de l| du| d)? (?:eleve|candidat|candidate|jeune)s?$|^ine$/;
+function colonneIdentifiantEleve(headers) {
+  return (headers || []).find(x => ID_ELEVE_RE.test(normalizeText(String(x || '').replace(/_/g, ' ')))) || null;
+}
 function avecUnite(t) {
   if (t && !t.rowUnit) {
     const u = uniteDesLignes(t.headers);
     if (u) t.rowUnit = u;
     else if (colonnesEffectifs(t.headers, t.objects).length) t.rowUnit = 'agregat';
+    else {
+      const cle = colonneIdentifiantEleve(t.headers);
+      const objs = t.objects || [];
+      if (cle && objs.length > 1) {
+        const distinct = new Set(objs.map(o => String(o?.[cle] ?? '').trim()).filter(Boolean)).size;
+        if (distinct && distinct < objs.length * 0.95) { t.rowUnit = 'voeu'; t.cleEleve = cle; }
+      }
+    }
   }
   return t;
 }
+
+/* v27.5.98 — Tables liées d'un document Grist (base d'affectation : Voeux + Eleves + Offre). Le widget est posé sur
+   une table ; les autres tables du document (lues si le widget a l'accès au document) lui ajoutent leurs colonnes,
+   par une colonne commune dont les valeurs sont uniques dans la table liée (Identifiant élève, Code vœu…).
+   Une colonne « Référence » (numéro de ligne de la table liée) est reconnue aussi. Rien n'est écrit dans Grist. */
+let gristTablesLiees = [];        // [{ nom, objets }] — lues par albert.js (grist.docApi)
+let gristLiaisonEtat = '';        // '' | 'ok' | 'refusee'
+function lignesDepuisColonnes(data) {
+  const cols = Object.keys(data || {});
+  if (!cols.length) return [];
+  const n = (data.id || data[cols[0]] || []).length;
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) { const o = {}; cols.forEach(c => { o[c] = data[c][i]; }); out[i] = o; }
+  return out;
+}
+function joindreTablesLiees(objets, liees) {
+  const jointures = [];
+  if (!Array.isArray(objets) || !objets.length || !Array.isArray(liees) || !liees.length) return { objets, jointures };
+  const pris = new Set(Object.keys(objets[0]));
+  let res = objets;
+  for (const t of liees) {
+    const lignes = (t && t.objets) || [];
+    if (!lignes.length) continue;
+    const colsU = Object.keys(lignes[0]).filter(f => f !== 'id' && f !== 'manualSort');
+    // clé : colonne présente dans les deux tables, à valeurs uniques (et remplies) dans la table liée
+    const cle = colsU.find(c => {
+      if (!pris.has(c)) return false;
+      const vals = lignes.map(r => String(r?.[c] ?? '').trim());
+      return vals.every(Boolean) && new Set(vals).size === vals.length;
+    });
+    if (!cle) continue;
+    const parCle = new Map(lignes.map(r => [String(r[cle]).trim(), r]));
+    const parId = new Map(lignes.map(r => [r.id, r]));
+    const ajout = colsU.filter(c => c !== cle && !pris.has(c));
+    let trouves = 0;
+    const essai = res.map(o => {
+      let v = o?.[cle];
+      if (v && typeof v === 'object' && 'id' in v) v = v.id;      // référence développée par Grist
+      let r = parCle.get(String(v ?? '').trim()), base = o;
+      if (!r && typeof v === 'number' && parId.has(v)) { r = parId.get(v); base = { ...o, [cle]: r[cle] }; } // colonne Référence
+      if (!r) return base;
+      trouves++;
+      const n = { ...base };
+      ajout.forEach(c => { n[c] = r[c]; });
+      return n;
+    });
+    if (trouves < res.length * 0.5) continue; // pas vraiment liée : on n'ajoute rien
+    res = essai;
+    ajout.forEach(c => pris.add(c));
+    jointures.push({ table: t.nom, cle, colonnes: ajout, trouves });
+  }
+  return { objets: res, jointures };
+}
+let _gristJointMemo = null;
 
 function buildGristQueryTable() {
   if (!gristRecords || !gristRecords.length) return null;
@@ -129,6 +197,18 @@ function buildGristQueryTable() {
   }
 
   // Cas où la table Grist a déjà de vrais noms de colonnes.
+  // v27.5.98 — tables liées du document (élèves, offre…) ajoutées par leur colonne commune ; mémorisé tant que rien ne change
+  const liees = (typeof gristTablesLiees !== 'undefined' && Array.isArray(gristTablesLiees)) ? gristTablesLiees : [];
+  if (liees.length) {
+    if (_gristJointMemo && _gristJointMemo.recs === gristRecords && _gristJointMemo.liees === liees) return _gristJointMemo.table;
+    const { objets, jointures } = joindreTablesLiees(gristRecords, liees);
+    if (jointures.length) {
+      const headers = Object.keys(objets[0]).filter(f => f !== 'id' && f !== 'manualSort');
+      const table = avecUnite({ source: 'Grist', name: `Table Grist connectée (+ ${jointures.map(j => j.table).join(', ')})`, headers, objects: objets, jointures });
+      _gristJointMemo = { recs: gristRecords, liees, table };
+      return table;
+    }
+  }
   return avecUnite({ source: 'Grist', name: 'Table Grist connectée', headers: allFields, objects: gristRecords });
 }
 
