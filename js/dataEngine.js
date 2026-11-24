@@ -5856,7 +5856,7 @@ function questionComprise(kind, plan, result) {
   const table = plan.table || {};
   // v27.5.82 — fichier académique : « élèves » = toutes les lignes ; « candidats » = au moins un vœu (définition SAIO)
   const _eleves = /\beleves?\b/.test(normalizeText(plan.question || '')) && !(plan.filters || []).some(f => f && f.univers);
-  const unite = table.rowUnit === 'formation' ? 'formations' : (table.source === 'Fichier' ? ((plan.filters || []).some(f => f && f.univers) ? 'candidats ayant confirmé au moins un vœu' : _eleves ? 'élèves (lignes du fichier)' : 'candidats (lignes du fichier)') : 'lignes');
+  const unite = table.rowUnit === 'formation' ? 'formations' : table.rowUnit === 'voeu' ? 'vœux' : (table.source === 'Fichier' ? ((plan.filters || []).some(f => f && f.univers) ? 'candidats ayant confirmé au moins un vœu' : _eleves ? 'élèves (lignes du fichier)' : 'candidats (lignes du fichier)') : 'lignes');
   const col = c => `« ${_shortColName(c || '') || c} »`;
   try {
     if (kind === 'count' || kind === 'count_rows') {
@@ -5927,7 +5927,8 @@ function renderDataEngineResultHtml(tool, plan, result) {
         : `<li>${escapeHtml(f.col)} ${f.op === 'neq' ? '≠' : '='} <strong>${escapeHtml(f.op === 'neq' ? f.value : (f.label || f.value))}</strong></li>`).join('')}</ul>`
     : '<p>Aucun filtre appliqué.</p>';
   // Une ligne de l'open data = une formation
-  const unit = (n, mot = 'ligne') => `${plan.table?.rowUnit === 'formation' ? 'formation' : mot}${n > 1 ? 's' : ''}`;
+  // v27.5.99 — table de vœux : une ligne = un vœu (« 15 576 vœux », pas « lignes » ni « candidats »)
+  const unit = (n, mot = 'ligne') => plan.table?.rowUnit === 'voeu' ? (n > 1 ? 'vœux' : 'vœu') : `${plan.table?.rowUnit === 'formation' ? 'formation' : mot}${n > 1 ? 's' : ''}`;
   const plannerDebug = typeof plannerPlanToDebugHtml === 'function' ? plannerPlanToDebugHtml(plan) : '';
   const debug = `<details class="msg-sources"><summary title="Détail technique du calcul (pour vérification ou support) — sans impact sur le résultat affiché ci-dessus">Plan Data Engine</summary><div style="font-size:10px;line-height:1.5;margin-top:5px"><strong>Outil</strong> : ${escapeHtml(tool)}<br><strong>Source</strong> : ${escapeHtml(plan.table?.source || 'Données')} · ${escapeHtml(plan.table?.name || 'table')}<br><strong>Colonnes détectées</strong> : ${escapeHtml((plan.mentionedCols || []).join(' | ') || '—')}</div>${plannerDebug}</details>`;
   if (tool === 'count_rows') {
@@ -5936,7 +5937,7 @@ function renderDataEngineResultHtml(tool, plan, result) {
     // v27.23 — établissements différents (« combien de lycées proposent des BTS »)
     const _nomV = result.valeurs || 'établissements';
     const phrase = result.valeurs
-      ? `Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ${escapeHtml(result.count > 1 ? _nomV : _nomV.replace(/s$/, ''))} ${result.count > 1 ? _differents(_nomV) : _differents(_nomV).replace(/s$/, '')} correspondant à la demande, pour <strong>${result.formations.toLocaleString('fr-FR')}</strong> ${result.uniteLignes ? (result.formations > 1 ? 'vœux' : 'vœu') : `${result.parCandidat ? 'ligne' : 'formation'}${result.formations > 1 ? 's' : ''}`} (sur ${result.total.toLocaleString('fr-FR')} dans les données).`
+      ? `Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ${escapeHtml(result.count > 1 ? _nomV : _nomV.replace(/s$/, ''))} ${result.count > 1 ? _differents(_nomV) : _differents(_nomV).replace(/s$/, '')} correspondant à la demande, pour <strong>${result.formations.toLocaleString('fr-FR')}</strong> ${result.uniteLignes ? (result.formations > 1 ? 'vœux' : 'vœu') : `${result.parCandidat ? 'ligne' : 'formation'}${result.formations > 1 ? 's' : ''}`} (sur ${result.total.toLocaleString('fr-FR')} ${result.uniteLignes ? `${escapeHtml(_nomV)} ` : ''}dans les données).`
       : result.etablissements
       ? (result.parCandidat
         ? `Il y a <strong>${result.count.toLocaleString('fr-FR')}</strong> ${result.count > 1 ? 'établissements différents' : 'établissement'} correspondant à la demande, pour <strong>${result.formations.toLocaleString('fr-FR')}</strong> candidat${result.formations > 1 ? 's' : ''} (sur ${result.total.toLocaleString('fr-FR')} établissements dans le fichier).`
