@@ -132,6 +132,34 @@ await describe('Calculs pas encore adaptés : arrêt, jamais un élève compté 
   }
 });
 
+await describe('Formation et établissement DEMANDÉS (table Offre) : pas la classe d’origine', () => {
+  const O = new Map(A.offre.map(o => [o.Code_voeu_eleve, o]));
+  const el = pred => new Set(A.voeux.filter(v => pred(v, O.get(v.Code_voeu_eleve), E.get(v.Identifiant_eleve))).map(v => v.Identifiant_eleve)).size;
+  const mn = m => (v, o) => o.Mnemonique_formation_voeu === m;
+  // avant : « 1re pro » lu comme la classe d'origine (« 1re PRO », quelques élèves) au lieu de la formation demandée
+  assert(compte(c, "combien d'élèves ont demandé une 1re pro") === el(mn('1PRO')), 'ont demandé une 1re pro : toutes les 1re pro demandées');
+  assert(compte(c, "combien d'élèves ont demandé une première professionnelle") === el(mn('1PRO')), '« première professionnelle » = 1re pro');
+  assert(compte(c, "combien d'élèves ont demandé une 1re générale") === el(mn('1GEN')), 'ont demandé une 1re générale (avant : venant de 1re GT)');
+  assert(compte(c, "combien d'élèves ont demandé une 1re technologique") === el((v, o) => /^1ST/.test(o.Mnemonique_formation_voeu)), '1re technologique : toutes les séries');
+  assert(compte(c, 'combien de vœux en 1re STMG') === A.voeux.filter(v => O.get(v.Code_voeu_eleve).Mnemonique_formation_voeu === '1STMG').length, 'vœux en 1re STMG : des lignes');
+  assert(compte(c, "combien d'élèves ont demandé métiers de l'électricité") === el((v, o) => /ELECTRICITE/.test(o.Libelle_formation_voeu)), 'intitulé précis (avant : arrêt)');
+  assert(compte(c, "combien d'élèves ont demandé MELEC") === el((v, o) => o.Specialite_formation_voeu === 'MELEC'), 'spécialité « MELEC »');
+  assert(compte(c, "combien d'élèves sont affectés en 1re pro") === el((v, o) => o.Mnemonique_formation_voeu === '1PRO' && v.Nombre_d_admis_tous_voeux_oui_non === 'Oui'), 'affectés en 1re pro : admis sur un vœu de 1re pro');
+  assert(compte(c, "combien d'élèves ont demandé une 1re pro en vœu 1") === el((v, o) => o.Mnemonique_formation_voeu === '1PRO' && v.Rang_voeu_eleve === 1), '« en vœu 1 » : rang du vœu (une demande, pas une admission)');
+  assert(compte(c, "combien d'élèves venant de 2nde pro ont demandé une 1re générale") === el((v, o, e) => o.Mnemonique_formation_voeu === '1GEN' && e.Classe_origine === '2nde PRO'), 'origine 2nde pro + formation demandée 1re générale');
+  assert(compte(c, "combien d'élèves des Landes ont demandé une 1re pro") === el((v, o, e) => o.Mnemonique_formation_voeu === '1PRO' && e.Departement_origine_eleve === 'Landes'), 'origine Landes + 1re pro demandée');
+  assert(compte(c, "combien d'élèves ont demandé le lycée Montaigne") === el((v, o) => o.Denomination_etab_voeu === 'LYCEE MONTAIGNE'), 'établissement demandé (avant : arrêt « établissement non trouvé »)');
+  // faux positifs et arrêts
+  assert(compte(c, "combien d'élèves venant de 1re pro") === nb(e => e.Classe_origine === '1re PRO'), 'faux positif : « venant de 1re pro » reste la classe d’origine');
+  assert(ask(c, "combien d'élèves en 1re pro")?.kind === 'unresolved', '« élèves en 1re pro » : demandée ou obtenue ? arrêt (avant : classe d’origine)');
+  assert(ask(c, "combien d'élèves ont demandé une 1re bidule")?.kind === 'unresolved', 'formation introuvable : arrêt, pas tout le fichier');
+  assert(ask(c, "combien d'élèves ont demandé une 1re STHR")?.kind === 'unresolved', 'série absente des données : arrêt');
+  const sans = ctxAff({ liees: false });
+  assert(ask(sans, "combien d'élèves ont demandé une 1re pro")?.kind === 'unresolved', 'sans la table Offre : arrêt (pas la classe d’origine à la place)');
+  const f = ask(c, "combien d'élèves ont demandé une 1re pro")?.plan?.filters?.find(x => x.source === 'affectation');
+  assert(f && /formation demandée 1re professionnelle : .*METIERS/.test(f.label), 'le filtre nomme les formations retenues');
+});
+
 await describe('Libellés : une ligne = un vœu (titre, phrase, « J’ai compris », relecture)', () => {
   const c2 = ctxAff();
   const titre = e => run(c2, 'extractBlockTitle')(e, '');
