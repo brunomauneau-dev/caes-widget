@@ -47,13 +47,15 @@ function lectureMoteurVerif(exec) {
   if (!exec) return { op: 'albert', filtres: {}, exclus: {} };
   const p = exec.plan || {};
   const k = exec.kind;
-  const op = k === 'count' ? (p.compterEtablissements || p.compterValeurs ? 'compter_distinct' : 'compter')
+  // v27.6.6 — table de vœux : « combien d'élèves » = élèves différents ; pour le lecteur, c'est un comptage de personnes
+  const _personnes = !!p.compterValeurs && /^[ée]l[èe]ves$/.test(String(p.compterValeurs.nom || ''));
+  const op = k === 'count' ? (p.compterEtablissements || (p.compterValeurs && !_personnes) ? 'compter_distinct' : 'compter')
     : k === 'sum' ? 'somme' : (k === 'stats' || k === 'stats_groupes') ? 'statistique'
     : k === 'group_by' ? ((p.lesquelles || p.listMode) ? 'liste' : (exec.result?.somme ? 'somme' : 'repartition'))
     : (k === 'top' || k === 'classement') ? 'classement' : (k === 'part' || k === 'part_groupes') ? 'part'
     : k === 'compare' ? 'comparaison' : k === 'export' ? 'export' : k === 'pdf' ? 'pdf' : k === 'unresolved' ? 'arret'
     : (k === 'evolution' || k === 'evolution_groupes') ? 'evolution' : k === 'pivot' ? 'tableau_croise' : String(k);
-  const objet = p.compterEtablissements ? 'etablissements' : p.compterValeurs ? _nrmVerif(p.compterValeurs.nom).replace(/s$/, '') + 's'
+  const objet = p.compterEtablissements ? 'etablissements' : (p.compterValeurs && !_personnes) ? _nrmVerif(p.compterValeurs.nom).replace(/s$/, '') + 's'
     : (op === 'liste' && /^(etablissement|lycee|universite)/.test(_nrmVerif(p.targetCol))) ? 'etablissements' : null;
   const groupeCol = p.part?.groupe || p.classement?.entite?.col || (['repartition', 'classement', 'statistique', 'somme'].includes(op) ? (p.targetCol && op !== 'statistique' ? p.targetCol : (exec.result?.dim || null)) : null);
   const filtres = {}, exclus = {};

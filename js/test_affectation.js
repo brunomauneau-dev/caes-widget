@@ -132,6 +132,37 @@ await describe('Calculs pas encore adaptés : arrêt, jamais un élève compté 
   }
 });
 
+await describe('Libellés : une ligne = un vœu (titre, phrase, « J’ai compris », relecture)', () => {
+  const c2 = ctxAff();
+  const titre = e => run(c2, 'extractBlockTitle')(e, '');
+  const texte = e => String(run(c2, 'renderDataEngineResultHtml')(e.plan.tool, e.plan, e.result)).replace(/<details[\s\S]*/, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  const suite = q => { c2.__q = q; const p = run(c2, 'detectDataEnginePlan(__q)'); return run(c2, 'runDataEnginePlan')(p, []); };
+  const bx = A.eleves.filter(e => /^BORDEAUX/.test(e.Localite_achemin_etab_nat_eleve)).map(e => e.Identifiant_eleve);
+  const vBx = A.voeux.filter(v => bx.includes(v.Identifiant_eleve)).length;
+  const e1 = ask(c2, "Combien d'élèves de Bordeaux ?");
+  // avant : « (sur 800 dans les données) » sans unité, à côté d'un nombre de vœux
+  assert(texte(e1).includes(`(sur ${A.eleves.length.toLocaleString('fr-FR')} élèves dans les données)`), 'phrase : le total est un nombre d’élèves');
+  assert(/pas un nombre de vœux/.test(texte(e1)), '« J’ai compris » : pas un nombre de vœux (avant : « de lignes »)');
+  // relance « combien de vœux au total ? » : mêmes élèves (filtre repris et affiché), en vœux
+  const e2 = suite('Combien de vœux au total ?');
+  assert(e2?.result?.count === vBx, 'relance : les vœux des élèves de Bordeaux');
+  // avant : « 15 576 candidats — BORDEAUX » sur la base réelle
+  assert(/^[\d\s ]+ vœux — BORDEAUX$/.test(titre(e2)), `titre en vœux, pas en candidats (${titre(e2)})`);
+  assert(/repris de la question précédente/.test(texte(e2)), 'le filtre repris est signalé');
+  assert(/J'ai compris : nombre de vœux/.test(texte(e2)), '« J’ai compris : nombre de vœux » (avant : « de lignes »)');
+  const e3 = suite('Combien de vœux dans toute la base ?');
+  assert(e3?.result?.count === A.voeux.length && /^[\d\s ]+ vœux$/.test(titre(e3)), '« dans toute la base » : tous les vœux');
+  // relecture par Albert : « combien d'élèves » = un comptage de personnes, pas « un nombre d'éléments différents »
+  for (const f of ['retours.js', 'verification.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, f), 'utf8'), c2, { filename: f });
+  assert(run(c2, 'lectureMoteurVerif')(e1).op === 'compter', 'relecture : élèves différents = compter (avant : fausse alerte « nombre d’éléments différents »)');
+  // faux positif : ailleurs, des valeurs différentes restent « compter_distinct » (open data : académies différentes)
+  const co = ctxOpenData(D.openData(1500, 7));
+  for (const f of ['retours.js', 'verification.js']) vm.runInContext(fs.readFileSync(path.join(__dirname, f), 'utf8'), co, { filename: f });
+  const eo = ask(co, 'combien d’académies différentes proposent des BTS');
+  assert(eo?.plan?.compterValeurs && run(co, 'lectureMoteurVerif')(eo).op === 'compter_distinct', 'open data : académies différentes = compter_distinct (inchangé)');
+  assert(run(co, 'extractBlockTitle')(ask(co, 'combien de BTS en Gironde'), '').includes('formation'), 'open data : titre en formations (inchangé)');
+});
+
 await describe('Faux positifs : les autres sources ne changent pas', () => {
   const ca = makeCtx();
   const ROWS = D.exportAcademique(1500, 21);

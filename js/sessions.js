@@ -518,6 +518,8 @@ function extractBlockTitle(exec, question) {
     // v27.7 — open data : une ligne = une formation (pas un candidat)
     // v27.5.82 — « combien d'élèves » (fichier académique, tout le vivier) : des élèves, pas des candidats
     const _eleves = /(?<![a-zà-ÿ])[ée]l[èe]ves?\b/i.test(String(exec.plan?.question || '')) && !filters.some(f => f?.univers);
+    // v27.5.28 — table de vœux (base d'affectation) : les lignes sont des vœux
+    if (exec.plan?.table?.rowUnit === 'voeu') return `${n} ${count > 1 ? 'vœux' : 'vœu'}${fPart}`;
     const unite = exec.plan?.table?.rowUnit === 'formation' ? 'formation' : _eleves ? 'élève' : 'candidat';
     return `${n} ${unite}${count > 1 ? 's' : ''}${fPart}`;
   }
