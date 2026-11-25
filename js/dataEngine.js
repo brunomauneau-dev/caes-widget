@@ -4964,20 +4964,114 @@ function _vocabulaireAffectation(plan) {
   const H = plan.table.headers || [];
   const colH = re => H.find(h => re.test(normalizeText(String(h).replace(/_/g, ' '))));
   const colV1 = colH(/admis voeu ?1\b/), colTous = colH(/admis tous (?:les )?voeux/), colDec = colH(/code decision/);
-  // classe d'origine écrite telle qu'elle figure dans la colonne (« venant de 2nde pro », « en 2nde GT ») : la classe exacte
-  // (avant : seul le mot « 2nde » était cherché dans les intitulés de formation, 2nde GT et 2nde pro mélangées)
+  // v27.5.100 — formation DEMANDÉE (table Offre liée : intitulé, mnémonique, spécialité du vœu) et classe d'ORIGINE :
+  // « ont demandé une 1re pro », « affectés en 1re STMG », « vœux en métiers de l'électricité » = la formation du vœu ;
+  // « venant de 2nde pro », « élèves de 2nde GT » = la classe d'origine (avant : « 1re pro » était toujours lu comme la
+  // classe d'origine, « demandé une 1re générale » comptait les élèves venant de 1re GT)
+  const qs = q.replace(/\bseconde\b/g, '2nde').replace(/\b(?:premiere|1ere)\b/g, '1re').replace(/\bterminale\b/g, 'term').replace(/\b(?:generale et technologique|generale|gen)\b/g, 'gt').replace(/\bprofessionnelle\b/g, 'pro');
+  const esc = x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const colClasse = colH(/^classe (?:d )?origine$/);
+  const colLibF = colH(/^libelle formation voeu$/), colMnem = colH(/^mnemonique formation voeu$/), colSpeF = colH(/^specialite formation voeu$/);
+  // marque explicite de l'origine (« élèves de 1re pro », « élèves en 1re pro » restent ambigus : demandée ou d'origine ?)
+  const ORIGINE_AVANT = /(?:venant|venus?|venues?|issus?|issues?|originaires?|provenant|provenance|scolarises?|scolarisees?|actuellement|etaient|sont actuellement)\s+(?:de |d |du |des |en |la |l )?(?:la |l )?$/;
+  const DEMANDE = /\b(?:demand\w*|voeux?|candidat\w*|postul\w*|souhait\w*|choisi\w*|choix|affecte\w*|admis\w*|obtenu|accepte\w*|refuse\w*|attente|place|places)\b/;
+  let classeTrouvee = null;
   if (colClasse) {
     const vals = _distinctValues(plan.table, colClasse).filter(v => normalizeText(v).length >= 3 && !/^autre$/i.test(String(v).trim()))
       .sort((a, b) => normalizeText(b).length - normalizeText(a).length);
-    const qs = q.replace(/\bseconde\b/g, '2nde').replace(/\bpremiere\b/g, '1re').replace(/\bterminale\b/g, 'term').replace(/\b(?:generale et technologique|generale|gen)\b/g, 'gt').replace(/\bprofessionnelle\b/g, 'pro');
-    const v = vals.find(x => new RegExp(`(^| )${normalizeText(x).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}( |$)`).test(qs));
-    if (v) {
-      const mots = normalizeText(v).split(' ');
+    for (const x of vals) {
+      const m = new RegExp(`(^| )${esc(normalizeText(x))}( |$)`).exec(qs);
+      if (!m) continue;
+      const avant = qs.slice(0, m.index + m[1].length);
+      // classe de 1re sans « venant de… » : c'est la formation demandée (affectation en 1re), pas l'origine
+      if (/^1re\b/.test(normalizeText(x)) && !ORIGINE_AVANT.test(avant) && (colLibF || colMnem)) continue;
+      if (/^1re\b/.test(normalizeText(x)) && !ORIGINE_AVANT.test(avant)) return `« ${x} » : je ne sais pas s'il s'agit de la classe d'origine ou de la formation demandée, et les colonnes de la formation demandée (table Offre) ne sont pas lues ; dans Grist, ouvrez le panneau du widget et choisissez « Accès complet au document », ou écrivez « venant de ${x} »`;
+      classeTrouvee = { x, debut: m.index + m[1].length, fin: m.index + m[1].length + normalizeText(x).length };
+      break;
+    }
+    if (classeTrouvee) {
+      const v = classeTrouvee.x, mots = normalizeText(v).split(' ');
       plan.filters = (plan.filters || []).filter(f => !(f && f.op === 'contains_all' && (f.terms || []).every(t => [].concat(t).some(w => mots.includes(normalizeText(w)) || /^(2nde|seconde|1re|premiere|term|terminale)$/.test(normalizeText(w))))));
       plan.filters = plan.filters.filter(f => !(f && f.col === colClasse));
       plan.filters.push({ col: colClasse, op: 'eq', value: v, label: `classe d'origine ${v} (venant de, seconde, premiere, terminale, generale, professionnelle)`, source: 'affectation' });
     }
+  }
+  // texte sans la classe d'origine reconnue (« venant de 2nde pro ont demandé une 1re gt » : seule « 1re gt » reste)
+  const qf = classeTrouvee ? `${qs.slice(0, classeTrouvee.debut)} ${qs.slice(classeTrouvee.fin)}` : qs;
+  if (colLibF || colMnem) {
+    const FORM_COLS = [colLibF, colMnem, colSpeF].filter(Boolean);
+    const lignesF = [...new Map((plan.table.objects || []).map(r => [`${r[colLibF] ?? ''}\u0001${r[colMnem] ?? ''}\u0001${r[colSpeF] ?? ''}`, r])).values()];
+    const formes = lignesF.map(r => ({ lib: String(r[colLibF] ?? '').trim(), n: FORM_COLS.map(c => normalizeText(String(r[c] ?? ''))).join(' ') })).filter(x => x.lib);
+    const SERIES = /\b(stmg|sti2d|st2s|stl|std2a|sthr|s2tmd|stav)\b/;
+    const VIDES = new Set(['1re', 'pro', 'bac', 'gt', 'generale', 'general', 'professionnel', 'professionnelle', 'de', 'des', 'du', 'la', 'le', 'l', 'et', 'a', 'aux', 'au', 'en', 'd', 'option', 'opt', 'metiers', 'metier', 'specialite', 'mention']);
+    const mq = new Set(qf.split(' '));
+    // 1. intitulé précis : tous les mots distinctifs de l'intitulé (ou la spécialité, « MELEC ») sont dans la question
+    let choisis = formes.filter(f => {
+      const mots = [...new Set(normalizeText(f.lib).split(' ').filter(w => w.length >= 3 && !VIDES.has(w)))];
+      return mots.length && mots.every(w => mq.has(w)) && !(mots.length === 1 && SERIES.test(mots[0]) === false && mots[0].length < 5);
+    });
+    if (colSpeF) choisis = choisis.concat(formes.filter(f => { const sp = normalizeText(String(lignesF.find(r => String(r[colLibF] ?? '').trim() === f.lib)?.[colSpeF] ?? '')); return sp.length >= 4 && mq.has(sp); }));
+    let quoi = '';
+    if (!choisis.length) {
+      const serie = (qf.match(SERIES) || [])[1];
+      if (serie) { choisis = formes.filter(f => new RegExp(`\\b${serie}\\b`).test(f.n)); quoi = `1re ${serie.toUpperCase()}`; }
+      else if (/\b(?:1re pro|bac pro|voie pro)\b/.test(qf)) { choisis = formes.filter(f => /^1re pro\b|\b1pro\b|\bpro\b/.test(f.n)); quoi = '1re professionnelle'; }
+      else if (/\b(?:1re techno\w*|voie techno\w*|serie techno\w*|bac techno\w*)\b/.test(qf)) { choisis = formes.filter(f => SERIES.test(f.n)); quoi = '1re technologique'; }
+      else if (/\b(?:1re gt|voie gt|bac gt)\b/.test(qf)) { choisis = formes.filter(f => /\bgenerale?\b|\b1gen\w*\b|\b1gt\b/.test(f.n) && !SERIES.test(f.n) && !/\bpro\b/.test(f.n)); quoi = '1re générale'; }
+      else if (/\b1re\b/.test(qf) && /\b1re (?:[a-z0-9]+)\b/.test(qf) && !/\b1re (?:annee|fois|session|tour|vague|liste|phase|decision|place|proposition)\b/.test(qf)) {
+        const m = qf.match(/\b1re ([a-z0-9]+)\b/);
+        return `formation demandée « 1re ${m[1]} » introuvable dans les intitulés de formation du vœu (${colLibF || colMnem})`;
+      }
+    }
+    choisis = [...new Set(choisis.map(f => f.lib))];
+    if (quoi && !choisis.length) return `aucune formation demandée ne correspond à « ${quoi} » dans les intitulés de formation du vœu (${colLibF || colMnem})`;
+    if (choisis.length) {
+      // « combien d'élèves en 1re pro » : demandée ou obtenue ? on ne devine pas
+      if (_parlePersonnes(plan.question) && !DEMANDE.test(qf)) return `« ${quoi || choisis[0]} » : précisez s'il s'agit des élèves qui l'ont demandée (« ont demandé une ${quoi || choisis[0]} ») ou de ceux qui y sont affectés (« affectés en ${quoi || choisis[0]} »)`;
+      const cf = colLibF || colMnem;
+      const motsF = new Set(choisis.flatMap(l => normalizeText(l).split(' ')).concat(colSpeF ? lignesF.filter(r => choisis.includes(String(r[colLibF] ?? '').trim())).map(r => normalizeText(String(r[colSpeF] ?? ''))).filter(Boolean) : []).concat(['1re', 'premiere', 'pro', 'professionnelle', 'generale', 'gt', 'techno', 'technologique', 'bac', 'voie', 'serie']));
+      if (plan.unresolvedTerms) plan.unresolvedTerms = plan.unresolvedTerms.filter(t => !normalizeText([].concat(t)[0] || '').split(' ').every(w => motsF.has(w) || VIDES.has(w)));
+      plan.filters = (plan.filters || []).filter(f => !(f && FORM_COLS.includes(f.col)) && !(f && f.op === 'contains_all' && (f.terms || []).every(t => [].concat(t).some(w => motsF.has(normalizeText(w))))) && !(f && f.col === colClasse && f.source !== 'affectation'));
+      // mots de la question couverts par la spécialité ou le mnémonique (« MELEC ») : repris dans le libellé du filtre
+      const codes = [...new Set(lignesF.filter(r => choisis.includes(String(r[colLibF] ?? '').trim())).flatMap(r => [colSpeF, colMnem].filter(Boolean).map(c => String(r[c] ?? '').trim())).filter(c => c && mq.has(normalizeText(c))))];
+      const ex = choisis.slice(0, 4).join(', ') + (choisis.length > 4 ? `, et ${choisis.length - 4} autre${choisis.length > 5 ? 's' : ''}` : '');
+      plan.filters.push(choisis.length === 1
+        ? { col: cf, op: 'eq', value: choisis[0], label: `formation demandée ${choisis[0]}${codes.length ? ` (${codes.join(', ')})` : ''} (demande, voeu, formation)`, source: 'affectation' }
+        : { col: cf, op: 'in', values: choisis.map(normalizeText), value: quoi || choisis[0], label: `formation demandée${quoi ? ` ${quoi}` : ''} : ${ex}${codes.length ? ` (${codes.join(', ')})` : ''} (demande, voeu, formation)`, source: 'affectation' });
+    }
+  }
+  // formation citée mais aucune colonne de formation demandée (table Offre non lue) : arrêt (avant : tous les élèves)
+  if (!(colLibF || colMnem) && !classeTrouvee && (/\b(?:bac pro|voie (?:pro|gt|techno\w*)|serie techno\w*)\b|\b(?:stmg|sti2d|st2s|stl|std2a|sthr|s2tmd|stav)\b/.test(qf) || (/\b1re [a-z0-9]+\b/.test(qf) && !/\b1re (?:annee|fois|session|tour|vague|liste|phase|decision|place|proposition)\b/.test(qf))))
+    return `la formation demandée n'est dans aucune colonne de cette table (elle est dans la table Offre)`;
+  // établissement DEMANDÉ : « ont demandé le lycée Montaigne », « affectés au lycée Borda » (pas « élèves du lycée X »,
+  // l'établissement d'origine)
+  const colEtabV = colH(/^denomination etab voeu$/);
+  const me = qs.match(/\b(?:lycee|lp|lpo|lgt|college|etablissement|ecole|cfa|erea|maison familiale)\b/);
+  if (colEtabV && me && DEMANDE.test(qs) && !/(?:eleves?|venant|venus?|issus?|originaires?|provenant|scolarises?|candidats?)\s+(?:du|de|d|des|au|en)\s+(?:l )?$/.test(qs.slice(0, me.index))) {
+    const VIDES_E = new Set(['lycee', 'lp', 'lpo', 'lgt', 'college', 'etablissement', 'ecole', 'general', 'generale', 'technologique', 'professionnel', 'professionnelle', 'polyvalent', 'prive', 'privee', 'public', 'publique', 'des', 'metiers', 'de', 'du', 'la', 'le', 'l', 'et', 'd', 'saint', 'sainte', 'st', 'ste']);
+    const mqE = new Set(qs.slice(me.index).split(' '));
+    const etabs = _distinctValues(plan.table, colEtabV).filter(v => {
+      const mots = [...new Set(normalizeText(v).split(' ').filter(w => w.length >= 2 && !VIDES_E.has(w)))];
+      return mots.length && mots.some(w => w.length >= 4) && mots.every(w => mqE.has(w));
+    });
+    if (etabs.length) {
+      const motsE = new Set(etabs.flatMap(v => normalizeText(v).split(' ')));
+      if (plan.unresolvedTerms) plan.unresolvedTerms = plan.unresolvedTerms.filter(t => !normalizeText([].concat(t)[0] || '').split(' ').every(w => motsE.has(w)));
+      plan.etablissementIntrouvable = null; // nom cherché ailleurs (établissement d'origine) : trouvé ici, parmi les établissements demandés
+      plan.filters = (plan.filters || []).filter(f => !(f && f.col === colEtabV) && !(f && f.op === 'contains_all' && (f.terms || []).every(t => [].concat(t).some(w => motsE.has(normalizeText(w))))) && !(f && f.source === 'etablissement'));
+      plan.filters.push(etabs.length === 1
+        ? { col: colEtabV, op: 'eq', value: etabs[0], label: `établissement demandé ${etabs[0]} (demande, voeu, lycee)`, source: 'affectation' }
+        : { col: colEtabV, op: 'in', values: etabs.map(normalizeText), value: etabs[0], label: `établissement demandé : ${etabs.join(', ')} (demande, voeu, lycee)`, source: 'affectation' });
+    }
+  }
+  // rang du vœu : « en vœu 1 », « en premier vœu », « en 2e vœu » (une demande, pas une admission)
+  const colRang = colH(/^rang voeu(?: eleve)?$/);
+  const mr = qs.match(/\ben (?:(premier|1er|deuxieme|2e|2eme|second|troisieme|3e|3eme) (?:voeu|choix)|voeu (?:n )?(\d))\b/);
+  if (mr && !_AFF_V1.test(q)) {
+    const rang = mr[2] ? Number(mr[2]) : ({ premier: 1, '1er': 1, deuxieme: 2, '2e': 2, '2eme': 2, second: 2, troisieme: 3, '3e': 3, '3eme': 3 })[mr[1]];
+    if (!colRang) return `aucune colonne n'indique le rang du vœu dans cette table`;
+    plan.filters = (plan.filters || []).filter(f => !(f && f.col === colRang));
+    plan.filters.push({ col: colRang, op: 'eq', value: rang, label: `vœu de rang ${rang} (premier voeu, rang, choix)`, source: 'affectation' });
   }
   const v1 = _AFF_V1.test(q), tous = !v1 && _AFF_TOUS.test(q), att = _AFF_ATT.test(q), ref = _AFF_REF.test(q);
   if (!(v1 || tous || att || ref)) return null;
