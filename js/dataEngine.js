@@ -2371,7 +2371,7 @@ function executerPart(plan) {
 const _pctFr = v => (Math.round(v * 10) / 10).toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 function _libellePart(plan) {
   const d = plan.part;
-  if (d.mode === 'effectifs') return { quoi: d.quoi, sur: d.sur };
+  if (d.mode === 'effectifs' || d.mode === 'eleves') return { quoi: d.quoi, sur: d.sur };
   if (d.mode === 'mesure') return { quoi: `${d.unite} « ${d.condition.map(f => f.op === 'neq' ? `hors ${f.value}` : f.op === 'eq' ? String(f.label || f.value) : _filtreEnClair(f).replace(/^« [^»]+» = /, '')).join(' et ')} »`, sur: `${d.unite} du périmètre` };
   const unite = plan.table?.rowUnit === 'formation' ? 'formations' : 'lignes';
   // v27.5.54 — valeur d'état seule (« oui », « non ») : on dit de quelle colonne (« A eu une proposition… = non »)
@@ -2434,6 +2434,8 @@ function renderPartHtml(plan, result) {
   const titre = `Part — ${_pctFr(result.pct)} % (${quoi})`;
   const methode = d.mode === 'effectifs'
     ? `<p style="font-size:12px;color:var(--gris3)">Calcul : somme de « ${escapeHtml(d.num)} » ÷ somme de « ${escapeHtml(d.den)} », sur les ${_nf(result.total - result.ignorees)} formations du périmètre — et non la moyenne des pourcentages de chaque formation${d.note ? ` ; ${escapeHtml(d.note)}` : ''}.</p>`
+    : d.mode === 'eleves'
+      ? `<p style="font-size:12px;color:var(--gris3)">Calcul : ${escapeHtml(d.unite)} différents qui remplissent la condition (${escapeHtml(d.condition.map(_filtreEnClair).join(' ; '))}) ÷ ${escapeHtml(d.unite)} différents du périmètre${d.unite === 'élèves' ? ' — un élève compte une fois, quel que soit son nombre de vœux' : ''}.</p>`
     : d.mode === 'mesure'
       ? `<p style="font-size:12px;color:var(--gris3)">Calcul : somme de « ${escapeHtml(d.col)} » des formations qui remplissent la condition (${escapeHtml(d.condition.map(_filtreEnClair).join(' ; '))}) ÷ somme de « ${escapeHtml(d.col)} » de toutes les formations du périmètre${result.ignorees ? ` (${result.ignorees} formation(s) sans valeur écartée(s))` : ''}.</p>`
       : `<p style="font-size:12px;color:var(--gris3)">Calcul : lignes qui remplissent la condition (${escapeHtml(d.condition.map(_filtreEnClair).join(' ; '))}) ÷ lignes du périmètre.</p>`;
@@ -2856,6 +2858,7 @@ function motsNonReconnus(plan) {
   if (filtres.some(f => f.source === 'specialite_lycee')) ['ses svt hggsp hlp llcer nsi amc eppcs maths math pc eco terminale lycee specialite specialites enseignement enseignements doublette'].forEach(ajouter);
   filtres.filter(f => f.op === 'or').forEach(f => (f.groupes || []).flat().forEach(g => { ajouter(g.value); ajouter(g.label || ''); (g.terms || []).forEach(t => [].concat(t).forEach(ajouter)); (g.values || []).forEach(ajouter); _motsTraduits(g.value).forEach(ajouter); ajouter(_hx(g.col || '')); }));
   if (plan.exclureEleves) ajouter(plan.exclureEleves.label || '');
+  if (plan.exigerEleves) ajouter(plan.exigerEleves.label || '');
   filtres.forEach(f => { ajouter(f.value); ajouter(f.label || ''); (f.terms || []).forEach(t => (Array.isArray(t) ? t : [t]).forEach(ajouter)); (f.values || []).forEach(ajouter); (f.noms || []).forEach(ajouter); _motsTraduits(f.value).forEach(ajouter); });
   cols.forEach(c => ajouter(_hx(c)));
   (plan.table.headers || []).forEach(h => ajouter(h)); // un mot d'en-tête désigne une colonne (« taux d'accès »)
@@ -2885,6 +2888,7 @@ function conceptsNonFiltres(plan) {
   if (plan.tool === 'part' && plan.part && plan.part.mode === 'effectifs' && !plan.part.manque) q = q.replace(new RegExp(plan.part.mot.source, 'g'), ' ').replace(/\badmis(es)?\b|\bcandidats?\b|\bcandidates\b|\bneo ?bacheliers?\b/g, ' ');
   const filtres = [...(plan.filters || []), ...((plan.tool === 'part' && plan.part?.condition) || [])].filter(Boolean);
   if (plan.exclureEleves) filtres.push({ col: plan.exclureEleves.col, value: '', label: plan.exclureEleves.label, source: 'affectation' });
+  if (plan.exigerEleves) filtres.push({ col: plan.exigerEleves.col, value: '', label: plan.exigerEleves.label, source: 'affectation' });
   // la colonne analysée ou additionnée compte aussi (« admis boursiers » → colonne « admis boursiers »)
   let _colStats = null;
   try { if (plan.tool === 'stats') _colStats = plan.statsCol || _colonneStatsQuestion(plan); } catch (e) { /* pas de colonne */ }
@@ -3566,6 +3570,8 @@ function isDataEngineQuestion(question) {
   try { if (CLASSEMENT_CUE.test(q) && detecterClassement((getActiveQueryTables() || [])[0], question)) return true; } catch (e) { /* source absente */ }
   // v27.15 — taux et parts (« part des boursiers parmi les admis »)
   try { if (detecterPart((getActiveQueryTables() || [])[0], question)) return true; } catch (e) { /* source absente */ }
+  // v27.5.101 — table de vœux : « taux d'affectation des élèves », « part des élèves affectés » se calculent en élèves
+  try { const t0 = (getActiveQueryTables() || [])[0]; if (t0 && t0.rowUnit === 'voeu' && PART_CUE.test(q) && !_PART_EXCLUE.test(q) && /\b(?:eleves?|candidats?|jeunes|voeux)\b/.test(q)) return true; } catch (e) { /* source absente */ }
   // v27.16 — « les places en BTS ont-elles augmenté depuis 2024 ? »
   try { const _t = (getActiveQueryTables() || [])[0]; if (sessionsDeLaQuestion(_t, question) && (formationTermsFromQuestion(_t, question).terms.length || /\b(places?|candidats?|admis|formations?|boursiers?|capacite|taux|part|bts|pass|cpge|licences?|but)\b/.test(q))) return true; } catch (e) { /* source absente */ }
   return /taux d ?acces|compare|comparaison|comparer|versus| vs |combien|nombre|\btotale?\b|effectif|compte|compter|repartition|r[eé]partition|ventilation|par |groupe|group[eé]|top|classement|principa|plus frequen|plus fréquent|croise|crois[eé]|tableau crois[eé]|pivot|moyen|moyenne|median|m[eé]diane|minimum|maximum|min|max|export|excel|csv|liste|filtre|graphique|graphe|diagramme|histogramme|camembert|barres?|boursier|basque|hors|sauf|seulement|uniquement|visualis|repr[eé]sent|montre-?moi|dessine|trace|issus?\s+d[ue]|originaires?|venant\s+d[ue]|provenant|scolaris|scolarit/.test(q) || isListValuesRequest(question) || isFollowUpQuestion(question);
@@ -3792,7 +3798,15 @@ function _essaiUnion(question, filterContextText, plan0) {
   return { ...pa, question: plan0.question || question, filters: _filtres, union: true, unresolvedTerms: null };
 }
 function detectDataEnginePlan(question, filterContextText = question) {
-  const plan = _gardeRelances(_detectDataEnginePlanBase(question, filterContextText), question);
+  let plan = _gardeRelances(_detectDataEnginePlanBase(question, filterContextText), question);
+  // v27.5.101 — table de vœux : « taux d'affectation des élèves » (sans autre critère) n'a pas de plan ; la part en élèves
+  // est calculée à l'exécution (_partEleves)
+  if (!plan) {
+    try {
+      const t0 = (getActiveQueryTables() || [])[0], q0 = normalizeText(reformulerQuestion(question || '').replace(/%/g, ' pourcentage '));
+      if (t0 && t0.rowUnit === 'voeu' && t0.cleEleve && PART_CUE.test(q0) && !_PART_EXCLUE.test(q0)) plan = { tool: 'count_rows', question: reformulerQuestion(question), table: t0, filters: [], mentionedCols: [], createdAt: new Date().toISOString() };
+    } catch (e) { /* source absente */ }
+  }
   // v27.5.92 — deux niveaux : deux paires « ou » dans la même question (« de Pau ou de Bayonne admis à Bordeaux ou à Toulouse »)
   if (_enUnion >= 2 || !plan || !/\b(et|ou)\b/.test(normalizeText(question || ''))) return plan;
   _enUnion++;
@@ -5084,7 +5098,12 @@ function _vocabulaireAffectation(plan) {
   if (v1 || tous) {
     const col = v1 ? colV1 : colTous;
     if (!col) return `aucune colonne n'indique ${v1 ? 'l\'admission sur le vœu 1' : 'l\'affectation'} dans cette table`;
+    // v27.5.101 — « ayant demandé une 1re pro qui sont affectés » : affectés sur N'IMPORTE QUEL vœu (critère de l'élève) ;
+    // « affectés en 1re pro » : sur ce vœu-là (critère de la ligne). Avant : toujours sur la même ligne.
+    const demandeLigne = (plan.filters || []).some(f => f && f.source === 'affectation' && /^(?:formation demandée|établissement demandé|vœu de rang)/.test(String(f.label || '')));
+    const direct = /\b(?:affecte|admis|accepte|place)\w*\s+(?:en|au|aux|dans|a la|a l|sur (?:une?|la|le|l))\b/.test(q) && !v1;
     if (neg) plan.exclureEleves = { col, valeur: 'Oui', label: v1 ? 'élèves non admis sur leur vœu 1 (obtenu, satisfait, premier voeu)' : 'élèves sans affectation (non affectés, non admis, aucune affectation)' };
+    else if (demandeLigne && !direct) plan.exigerEleves = { col, valeur: 'Oui', label: v1 ? 'élèves admis sur leur vœu 1, quel qu\'il soit (obtenu, satisfait, premier voeu)' : 'élèves affectés, sur n\'importe lequel de leurs vœux (affectes, admis, affectation, obtenu une place)' };
     else ajouter(col, 'Oui', v1 ? 'admis sur leur vœu 1 (obtenu, satisfait, premier voeu)' : 'affectés (admis sur un de leurs vœux, affectation, obtenu une place)');
   }
   if (att || ref) {
@@ -5111,12 +5130,165 @@ function _uniteVoeu(plan) {
   if (['count_rows', 'group_by', 'top', 'export_excel', 'export_csv', 'export_current_excel', 'export_current_csv', 'chart_current'].includes(plan.tool)) return null;
   return unresolvedConceptExecution(plan, [], `dans une table de vœux (un élève y a plusieurs lignes), ce calcul compterait chaque élève autant de fois qu'il a de vœux ; il n'est pas encore pris en charge. Demandez plutôt « combien d'élèves … » ou « nombre d'élèves par … »`);
 }
+// v27.5.101 — part en ÉLÈVES dans une table de vœux : « part des élèves des Landes qui ont obtenu leur vœu 1 »,
+// « pourcentage d'élèves affectés parmi ceux venant de 2nde pro », « taux d'affectation des élèves de Gironde par
+// département d'origine ». Deux comptages d'élèves différents (déjà vérifiés) : le périmètre, puis le périmètre ET la
+// condition ; la part n'est donnée que si le second ajoute bien un critère au premier (sinon : arrêt).
+const _PART_EXCLUE = /\b(?:a|de (?:la|ma|ta|sa|notre|votre|leur)) part\b|\bpart (?:entiere|belle)\b/;
+const _TAUX_AFF = [[/\btaux (?:de satisfaction|d admission|d affectation|de reussite)(?: (?:du|sur le|sur leur|au|en|de|pour le) (?:premier voeu|1er voeu|voeu (?:n )?1))\b/, 'qui ont obtenu leur voeu 1'],
+  [/\btaux d (?:affectation|admission)\b/, 'qui sont affectes'], [/\btaux de (?:refus|rejet)\b/, 'qui sont refuses'], [/\btaux de satisfaction\b/, 'qui ont obtenu leur voeu 1']];
+let _profondeurPart = 0;
+function _sousExecution(question, override, extra) {
+  if (_profondeurPart > 0) return null; // jamais de part dans une part
+  _profondeurPart++;
+  const garde = window.__DATA_ENGINE_STATE;
+  window.__DATA_ENGINE_STATE = { lastPlan: null, lastExecution: null, history: [] };
+  try {
+    const p = isDataEngineQuestion(question) ? detectDataEnginePlan(question) : null;
+    if (p && extra && extra.length) p.filters = [...(p.filters || []).filter(f => !(f && extra.some(x => x.col === f.col))), ...extra];
+    return p ? runDataEnginePlan(p, override) : null;
+  } finally { window.__DATA_ENGINE_STATE = garde; _profondeurPart--; }
+}
+function _cleFiltreEleve(f) {
+  if (!f) return '';
+  return `${f.col}::${f.op}::${f.op === 'in' ? [...(f.values || [])].sort().join('|') : f.op === 'contains_all' ? JSON.stringify(f.terms) : String(f.value)}`;
+}
+function _partEleves(plan, override) {
+  const brut = String(plan.question || '');
+  let q = normalizeText(brut.replace(/%/g, ' pourcentage ')).replace(/\s+/g, ' ').trim();
+  if (!PART_CUE.test(q) || _PART_EXCLUE.test(q) || /\btaux d ?acces\b/.test(q)) return null;
+  const arret = m => unresolvedConceptExecution(plan, [], m);
+  // « par département d'origine » : une part dans chaque groupe
+  let par = '';
+  const mp = q.match(/\s+par (?!rapport\b)(.+?)\s*\??$/);
+  if (mp) { par = mp[1]; q = q.slice(0, mp.index); }
+  // « taux d'affectation des élèves des Landes » : la condition est dans le nom du taux
+  let cond = null, reste = null;
+  for (const [re, c] of _TAUX_AFF) { const m = q.match(re); if (m) { cond = c; reste = q.slice(m.index + m[0].length).replace(/^\s*(?:des|chez les|pour les|parmi les|de|d)\s+/, ''); break; } }
+  if (reste === null) {
+    const m = q.match(/\b(?:part|parts|pourcentage|proportion|ratio|pour ?cent|taux)\b(?:\s+(?:d|de|des|du))?\s+(.*)$/);
+    if (!m) return arret(`je n'ai pas reconnu de quelle part il s'agit ; écrivez par exemple « part des élèves des Landes qui ont obtenu leur vœu 1 »`);
+    reste = m[1];
+  }
+  reste = reste.replace(/\s*\?$/, '').replace(/\b(?:est|sont) (?:elle|il)s?\b/g, '').trim();
+  const ms = reste.match(/^(?:les |des |d )?(eleves?|candidats?|candidates|jeunes|voeux|demandes)\b\s*(.*)$/);
+  if (!ms) return arret(`dans une table de vœux, une part se calcule sur des élèves ou sur des vœux : écrivez par exemple « part des élèves des Landes qui ont obtenu leur vœu 1 » ou « part des vœux en 1re pro »`);
+  const voeux = /^(?:voeux|demandes)$/.test(ms[1]);
+  let pop = ms[2];
+  if (cond === null) {
+    const mparmi = pop.match(/^(.*?)\s*\bparmi\s+(?:les |ceux |celles |l ensemble des |tous les |toutes les )?(?:eleves?|candidats?|jeunes|voeux)?\s*(.*)$/);
+    if (mparmi) { cond = mparmi[1]; pop = mparmi[2]; }
+    else {
+      // « des Landes qui ont obtenu… » : coupure au dernier « qui » / « ayant » (pas en tête)
+      const i = Math.max(pop.lastIndexOf(' qui '), pop.lastIndexOf(' ayant '), pop.lastIndexOf(' n ayant '));
+      // « venant de 2nde GT non affectés », « ayant demandé une 1re pro non affectés » (la question a pu être reformulée :
+      // « qui ne sont pas » → « non ») : la condition d'affectation en fin de phrase
+      const mc = i <= 0 ? ` ${pop}`.match(/\s((?:qui (?:ne )?(?:sont|ont|ont ete|etaient)(?: pas)? |ayant (?:ete )?|n ayant (?:pas )?(?:ete )?)?(?:non |pas |sans )?(?:affecte\w*|admis\w*|refuse\w*|accepte\w*|obtenu|satisfait\w*|en attente|affectation)\b.*)$/) : null;
+      if (i > 0) { cond = pop.slice(i).trim(); pop = pop.slice(0, i).trim(); }
+      else if (mc) { cond = mc[1].trim(); pop = ` ${pop}`.slice(0, mc.index).trim(); }
+      else { cond = pop; pop = ''; } // « part des élèves affectés », « part des élèves des Landes » : sur tous les élèves
+    }
+  }
+  pop = pop.replace(/^(?:qui |ayant )/, m => m).trim();
+  if (!cond.trim()) return arret(`je n'ai pas reconnu la condition de la part ; écrivez par exemple « part des élèves des Landes qui ont obtenu leur vœu 1 »`);
+  const sujet = voeux ? 'combien de voeux' : 'combien d eleves';
+  const suffixe = par ? ` par ${par}` : '';
+  const qDen = `${sujet}${pop ? ` ${pop}` : ''}${suffixe}`.replace(/\s+/g, ' ');
+  const qNum = `${sujet}${pop ? ` ${pop}` : ''} ${cond}${suffixe}`.replace(/\s+/g, ' ');
+  const eDen = _sousExecution(qDen, override, plan._extra), eNum = _sousExecution(qNum, override, plan._extra);
+  const attendu = par ? ['group_by', 'top'] : ['count'];
+  for (const [e, qq] of [[eDen, qDen], [eNum, qNum]]) {
+    if (!e || e.kind === 'unresolved') return e && e.kind === 'unresolved' ? { ...e, plan: { ...e.plan, question: brut } } : arret(`le calcul « ${qq} » n'a pas pu être fait`);
+    if (!attendu.includes(e.kind)) return arret(`le calcul « ${qq} » ne donne pas un nombre ${par ? 'par groupe' : ''} (outil ${e.kind})`);
+    if (!voeux && !(e.plan.compterValeurs?.nom === 'élèves' || e.plan.distinctNom === 'élèves')) return arret(`le calcul « ${qq} » ne compte pas des élèves différents`);
+  }
+  if (par && eDen.plan.targetCol !== eNum.plan.targetCol) return arret(`les deux calculs ne regroupent pas par la même colonne (« ${eDen.plan.targetCol} », « ${eNum.plan.targetCol} »)`);
+  // le numérateur = le périmètre + au moins un critère (jamais un critère perdu ou remplacé)
+  const cles = p => new Set([...(p.filters || []).map(_cleFiltreEleve), ...(p.exclureEleves ? [`SANS::${p.exclureEleves.col}`] : []), ...(p.exigerEleves ? [`AVEC::${p.exigerEleves.col}`] : [])]);
+  const kD = cles(eDen.plan), kN = cles(eNum.plan);
+  // un périmètre écrit doit donner au moins un critère (sinon la part porterait sur tous les élèves)
+  if (pop && !kD.size && !(plan._extra || []).length) return arret(`le périmètre « ${pop} » n'a été reconnu dans aucune colonne : je ne donne pas de part`);
+  if ([...kD].some(k => !kN.has(k))) return arret(`un critère du périmètre (« ${pop} ») n'a pas été repris avec la condition : je ne donne pas de part`);
+  const ajout = (eNum.plan.filters || []).filter(f => !kD.has(_cleFiltreEleve(f)));
+  const elevesAjout = [['exclureEleves', 'neq'], ['exigerEleves', 'eq']].filter(([k]) => eNum.plan[k] && !eDen.plan[k]).map(([k, op]) => ({ col: eNum.plan[k].col, op, value: 'Oui', label: eNum.plan[k].label }));
+  if (!ajout.length && !elevesAjout.length) return arret(`la condition « ${cond} » n'a été reconnue dans aucune colonne : je ne donne pas de part`);
+  const libF = f => String(f.label || f.value || '').replace(/\s*\([^()]*\)\s*$/, '').replace(/\s*\([^()]*\)\s*$/, '').trim() || _filtreEnClair(f);
+  const condLib = [...ajout, ...elevesAjout].map(libF).join(' et ');
+  const popLib = (eDen.plan.filters || []).filter(f => !f.univers).map(libF).join(' et ');
+  const unite = voeux ? 'vœux' : 'élèves';
+  const condition = [...ajout, ...elevesAjout];
+  const P = { ...plan, tool: 'part', filters: eDen.plan.filters || [], exclureEleves: eDen.plan.exclureEleves, exigerEleves: eDen.plan.exigerEleves,
+    part: { mode: 'eleves', condition, quoi: `${unite} « ${condLib} »`, sur: `${unite}${popLib ? ` « ${popLib} »` : ' du périmètre'}`, unite, groupe: par ? eDen.plan.targetCol : null } };
+  const n = e => e.result?.count;
+  if (!par) {
+    const num = n(eNum), den = n(eDen);
+    if (!(num >= 0 && den >= 0) || num > den) return arret(`les deux comptages ne s'emboîtent pas (${num} sur ${den}) : je ne donne pas de part`);
+    if (!den) return arret('aucun élève dans le périmètre : la part ne peut pas être calculée');
+    const result = { mode: 'eleves', num, den, pct: num / den * 100, total: den, ignorees: 0 };
+    const exec = { kind: 'part', plan: P, result, text: `PART = ${num} / ${den} = ${result.pct}` };
+    exec.html = renderPartHtml(P, result);
+    rememberDataEngineExecution(exec);
+    return exec;
+  }
+  const rows = e => new Map((e.result?.rows || []).map(r => [String(r.value), r.count]));
+  const rD = rows(eDen), rN = rows(eNum);
+  if ([...rN].some(([v, c]) => !(c <= (rD.get(v) ?? -1)))) return arret('les deux répartitions ne s\'emboîtent pas : je ne donne pas de part par groupe');
+  const groupes = [...rD].map(([valeur, den]) => ({ valeur, num: rN.get(valeur) || 0, den, pct: den ? (rN.get(valeur) || 0) / den * 100 : null })).filter(g => g.den > 0)
+    .sort((a, b) => (b.pct ?? -1) - (a.pct ?? -1) || a.valeur.localeCompare(b.valeur, 'fr'));
+  const eDenT = _sousExecution(qDen.replace(suffixe, ''), override, plan._extra), eNumT = _sousExecution(qNum.replace(suffixe, ''), override, plan._extra);
+  const ensemble = eDenT?.kind === 'count' && eNumT?.kind === 'count' && eDenT.result.count ? { num: eNumT.result.count, den: eDenT.result.count, pct: eNumT.result.count / eDenT.result.count * 100 } : { num: null, den: null, pct: null };
+  const result = { mode: 'eleves', groupe: P.part.groupe, groupes, ensemble, total: ensemble.den || 0, sansGroupe: 0 };
+  const p2 = { ...P, targetCol: P.part.groupe };
+  const exec = { kind: 'part_groupes', plan: p2, result,
+    text: `PART PAR « ${P.part.groupe} » (${P.part.quoi} / ${P.part.sur}) :\n` + groupes.slice(0, 40).map(g => `${g.valeur} : ${g.num} / ${g.den} = ${g.pct}`).join('\n') + `\nEnsemble : ${ensemble.num} / ${ensemble.den} = ${ensemble.pct}` };
+  exec.html = renderPartGroupesHtml(p2, result);
+  rememberDataEngineExecution(exec);
+  return exec;
+}
+// v27.5.101 — comparaison en ÉLÈVES dans une table de vœux : « comparer les élèves de Gironde et des Landes »
+// (nombre d'élèves différents de chaque groupe), « comparer le taux d'affectation des élèves de Gironde et des Landes »
+// (une part dans chaque groupe). Les groupes doivent être des valeurs d'une même colonne ; sinon : arrêt.
+function _comparerEleves(plan, override) {
+  const gs = plan.compareGroups || [];
+  const arret = m => unresolvedConceptExecution(plan, [], m);
+  const f0 = gs.map(g => (g.filters || []).filter(Boolean));
+  if (gs.length < 2 || f0.some(fs => fs.length !== 1 || fs[0].op !== 'eq') || new Set(f0.map(fs => fs[0].col)).size !== 1)
+    return arret(`cette comparaison n'est pas prise en charge dans une table de vœux (les groupes doivent être des valeurs d'une même colonne, par exemple deux départements d'origine) ; demandez plutôt « nombre d'élèves par … »`);
+  const col = f0[0][0].col, vals = f0.map(fs => String(fs[0].value)), labels = gs.map((g, i) => g.label || vals[i]);
+  const q = normalizeText(String(plan.question || '').replace(/%/g, ' pourcentage '));
+  if (PART_CUE.test(q) && !_PART_EXCLUE.test(q)) {
+    // retire « Gironde et des Landes » et le verbe de comparaison : il reste la part, calculée dans chaque groupe
+    const motsG = vals.concat(labels).flatMap(v => normalizeText(v).split(' ')).filter(w => w.length >= 3);
+    const esc = x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const reG = new RegExp(`\\s*\\b(?:de |des |du |d |en |a |au |aux |pour |chez )?(?:la |l |les )?(?:${motsG.map(esc).join('|')})\\b(?:\\s+(?:et|ou|vs|versus|avec|contre|a|aux|au|de|des|du|d|en|la|l|les)\\b)*`, 'g');
+    const qp = q.replace(/\b(?:compar\w*|versus|vs)\b(?:\s+(?:le|la|les|l))?/g, ' ').replace(reG, ' ').replace(/\s+/g, ' ').trim();
+    const parts = vals.map((v, i) => [labels[i], _partEleves({ ...plan, question: qp, tool: 'part', compareGroups: null, _extra: [{ col, op: 'eq', value: v, label: labels[i], source: 'comparaison' }] }, override)]);
+    const ko = parts.find(([, e]) => !e || e.kind !== 'part');
+    if (ko) return ko[1] && ko[1].kind === 'unresolved' ? { ...ko[1], plan: { ...ko[1].plan, question: plan.question } } : arret(`la part « ${qp} » n'a pas pu être calculée pour « ${ko[0]} »`);
+    const P0 = parts[0][1].plan;
+    const tous = _partEleves({ ...plan, question: qp, tool: 'part', compareGroups: null, _extra: [{ col, op: 'in', values: vals.map(normalizeText), value: labels.join(' ou '), label: labels.join(' ou '), source: 'comparaison' }] }, override);
+    const groupes = parts.map(([valeur, e]) => ({ valeur, num: e.result.num, den: e.result.den, pct: e.result.pct }));
+    const ensemble = tous && tous.kind === 'part' ? { num: tous.result.num, den: tous.result.den, pct: tous.result.pct } : { num: null, den: null, pct: null };
+    const p2 = { ...P0, question: plan.question, targetCol: col, filters: (P0.filters || []).filter(f => f.col !== col), part: { ...P0.part, groupe: col } };
+    const result = { mode: 'eleves', groupe: col, groupes, ensemble, total: ensemble.den || 0, sansGroupe: 0 };
+    const exec = { kind: 'part_groupes', plan: p2, result, text: `PART PAR « ${col} » (${p2.part.quoi} / ${p2.part.sur}) :\n` + groupes.map(g => `${g.valeur} : ${g.num} / ${g.den} = ${g.pct}`).join('\n') + `\nEnsemble : ${ensemble.num} / ${ensemble.den} = ${ensemble.pct}` };
+    exec.html = renderPartGroupesHtml(p2, result);
+    rememberDataEngineExecution(exec);
+    return exec;
+  }
+  // nombre d'élèves différents de chaque groupe : une répartition limitée aux groupes comparés
+  const clone = { ...plan, tool: 'group_by', targetCol: col, compareGroups: null, _sousPart: true,
+    filters: [...(plan.filters || []).filter(f => f && f.col !== col), { col, op: 'in', values: vals.map(normalizeText), value: labels.join(' ou '), label: `${labels.join(' ou ')} (groupes comparés)`, source: 'comparaison' }] };
+  return runDataEnginePlan(clone, override);
+}
 function runDataEnginePlan(plan, persistentFiltersOverride) {
   if (plan && plan.tool === 'export_pdf') return executerPdf(plan);
   plan = finalSanitizeAnalysisPlan(plan);
   if (!plan || !plan.table) return null;
   // v27.5.98 — table de vœux (base d'affectation) : « combien d'élèves » = élèves différents, pas des lignes
   if (plan.table.rowUnit === 'voeu' && plan.table.cleEleve) {
+    if (!plan._sousPart && plan.tool === 'compare') return _comparerEleves({ ...plan, _sousPart: true }, persistentFiltersOverride);
+    if (!plan._sousPart) { const pe = _partEleves({ ...plan, _sousPart: true }, persistentFiltersOverride); if (pe) return pe; }
     const arret = _uniteVoeu(plan);
     if (arret) return arret;
   }
@@ -5250,6 +5422,12 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     const { col, valeur } = plan.exclureEleves, cle = plan.table.cleEleve;
     const exclus = new Set((plan.table.objects || []).filter(r => normalizeText(r?.[col]) === normalizeText(valeur)).map(r => r?.[cle]));
     rows = rows.filter(r => !exclus.has(r?.[cle]));
+  }
+  // v27.5.101 — « ayant demandé une 1re pro qui sont affectés » : élèves affectés sur l'un quelconque de leurs vœux
+  if (plan.exigerEleves && plan.table.cleEleve) {
+    const { col, valeur } = plan.exigerEleves, cle = plan.table.cleEleve;
+    const retenus = new Set((plan.table.objects || []).filter(r => normalizeText(r?.[col]) === normalizeText(valeur)).map(r => r?.[cle]));
+    rows = rows.filter(r => retenus.has(r?.[cle]));
   }
   // v27.23 — établissement cité mais introuvable : arrêt, avec les noms proches
   if (plan.etablissementIntrouvable) return unresolvedEtablissementExecution(plan, plan.etablissementIntrouvable);
@@ -5791,18 +5969,25 @@ function _noteSpecialiteLycee(plan, filtres) {
   const affiches = sujets.sort((a, b) => b.n - a.n).slice(0, 3).map(x => `« ${x.nom} »`).join(', ') + (sujets.length > 3 ? ` et ${sujets.length - 3} autre${sujets.length > 4 ? 's' : ''}` : '');
   return `le chiffre porte sur la formation d'accueil ; ${_nf(n)} candidat${n > 1 ? 's' : ''} du fichier ${n > 1 ? 'ont' : 'a'} suivi au lycée une spécialité dont le nom contient ce mot (${affiches}), ce qui est autre chose (pour eux : « candidats ayant suivi la spécialité ${proche.nom} »)`;
 }
+// critères qui portent sur l'élève entier (tous ses vœux), dits en clair : « sans … », « avec … »
+function _criteresEleves(plan) {
+  const lib = c => String(c.label || '').replace(/\s*\([^()]*\)\s*$/, '');
+  return [...(plan?.exclureEleves ? [`${lib(plan.exclureEleves)} (aucun vœu « ${plan.exclureEleves.valeur} » dans « ${plan.exclureEleves.col} »)`] : []),
+    ...(plan?.exigerEleves ? [`${lib(plan.exigerEleves)} (au moins un vœu « ${plan.exigerEleves.valeur} » dans « ${plan.exigerEleves.col} »)`] : [])];
+}
 function perimetreResultat(kind, plan, result) {
   if (!plan || !result) return { texte: '', html: '' };
   const table = plan.table || {};
   const totalTable = (table.objects || []).length;
-  const mot = n => `${table.rowUnit === 'formation' ? 'formation' : 'ligne'}${n > 1 ? 's' : ''}`;
+  const mot = n => table.rowUnit === 'voeu' ? (n > 1 ? 'vœux' : 'vœu') : `${table.rowUnit === 'formation' ? 'formation' : 'ligne'}${n > 1 ? 's' : ''}`;
   const retenues = result.etablissements === true ? result.formations
     : ['count', 'count_rows', 'sum', 'ratio'].includes(kind) ? result.count
     : kind === 'classement' || kind === 'part' || kind === 'part_groupes' ? result.total
     : kind === 'compare' ? result.baseTotal : result.total;
   const parties = [];
-  parties.push(retenues !== undefined && totalTable
-    ? `${_nf(retenues)} ${mot(retenues)} retenue${retenues > 1 ? 's' : ''} sur ${_nf(totalTable)}`
+  if ((kind === 'part' || kind === 'part_groupes') && plan.part?.mode === 'eleves') parties.push(`${_nf(retenues)} ${plan.part.unite} différents dans le périmètre (table de ${_nf(totalTable)} vœux)`);
+  else parties.push(retenues !== undefined && totalTable
+    ? `${_nf(retenues)} ${mot(retenues)} retenu${table.rowUnit === 'voeu' ? '' : 'e'}${retenues > 1 ? 's' : ''} sur ${_nf(totalTable)}`
     : `${_nf(totalTable)} ${mot(totalTable)}`);
   parties.push(_sourceEnClair(table));
   const repris = new Set(plan.filtresRepris || []);
@@ -5810,8 +5995,9 @@ function perimetreResultat(kind, plan, result) {
   const nouveaux = filtres.filter(f => !repris.has(_cleFiltre(f))).map(_filtreEnClair);
   const anciens = filtres.filter(f => repris.has(_cleFiltre(f))).map(_filtreEnClair);
   const _s = filtres.length > 1 ? 's' : '';
-  let filtresTxt = !filtres.length ? `aucun filtre (toutes les ${mot(2)})`
-    : `filtre${_s} : ${[...nouveaux, ...(anciens.length ? [`${anciens.join(' ; ')} (repris de la question précédente)`] : [])].join(' ; ')}`;
+  const _ce = _criteresEleves(plan);
+  let filtresTxt = !filtres.length && !_ce.length ? `aucun filtre (toutes les ${mot(2)})`
+    : `filtre${_s || (_ce.length > 1 || (_ce.length && filtres.length) ? 's' : '')} : ${[...nouveaux, ...(anciens.length ? [`${anciens.join(' ; ')} (repris de la question précédente)`] : []), ..._ce].join(' ; ')}`;
   parties.push(filtresTxt);
   // Ce qui n'entre pas dans le chiffre
   const notes = [];
@@ -6014,11 +6200,14 @@ function renderListeEtablissementsHtml(plan, result, perim, filtersHtml, debug) 
 function renderDataEngineResultHtml(tool, plan, result) {
   // v27.10 — périmètre en clair sous le titre
   const perim = perimetreResultat(tool === 'count_rows' ? 'count' : tool, plan, result).html;
-  const filtersHtml = (plan.filters || []).length
-    ? `<ul>${plan.filters.map(f => f.op === 'contains_all'
+  // v27.5.101 — critères portant sur l'élève (table de vœux) : affichés avec les filtres (avant : « Aucun filtre appliqué »
+  // pour « élèves non affectés »)
+  const _critEleves = _criteresEleves(plan).map(t => `<li><strong>${escapeHtml(t)}</strong></li>`).join('');
+  const filtersHtml = (plan.filters || []).length || _critEleves
+    ? `<ul>${(plan.filters || []).map(f => f.op === 'contains_all'
         ? `<li>${escapeHtml(f.col)} : <strong>${escapeHtml((f.label || f.value).split(' + ').map(t => `« ${t} »`).join(' et '))}</strong></li>`
         : SYMBOLES_OPS[f.op] ? `<li>${escapeHtml(f.col)} : <strong>${escapeHtml(f.label)}</strong></li>`
-        : `<li>${escapeHtml(f.col)} ${f.op === 'neq' ? '≠' : '='} <strong>${escapeHtml(f.op === 'neq' ? f.value : (f.label || f.value))}</strong></li>`).join('')}</ul>`
+        : `<li>${escapeHtml(f.col)} ${f.op === 'neq' ? '≠' : '='} <strong>${escapeHtml(f.op === 'neq' ? f.value : (f.label || f.value))}</strong></li>`).join('')}${_critEleves}</ul>`
     : '<p>Aucun filtre appliqué.</p>';
   // Une ligne de l'open data = une formation
   // v27.5.99 — table de vœux : une ligne = un vœu (« 15 576 vœux », pas « lignes » ni « candidats »)

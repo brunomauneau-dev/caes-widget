@@ -125,11 +125,54 @@ await describe('Vocabulaire de l’affectation', () => {
   assert(compte(c, 'combien de vœux à Bordeaux') === A.voeux.filter(v => A.offre.find(o => o.Code_voeu_eleve === v.Code_voeu_eleve).Ville_etab_voeu === 'BORDEAUX').length, '« vœux à Bordeaux » : la ville de l’établissement demandé');
 });
 
+// Règle changée en v27.5.101 : les parts et les comparaisons se calculent désormais en élèves différents (avant : arrêt).
+// Restent arrêtés les calculs qui compteraient un élève plusieurs fois (moyenne par élève).
 await describe('Calculs pas encore adaptés : arrêt, jamais un élève compté plusieurs fois', () => {
-  for (const q of ['part des élèves des Landes', "comparer les élèves de Gironde et des Landes", "nombre moyen de vœux par élève"]) {
+  for (const q of ["nombre moyen de vœux par élève"]) {
     const e = ask(c, q);
     assert(!e || e.kind === 'unresolved', `« ${q} » : arrêt expliqué`);
   }
+});
+
+await describe('Parts et comparaisons en élèves différents', () => {
+  const O = new Map(A.offre.map(o => [o.Code_voeu_eleve, o]));
+  const ids = [...parEleve.keys()];
+  const a = (id, f) => parEleve.get(id).some(v => f(v, O.get(v.Code_voeu_eleve)));
+  const AF = id => a(id, v => v.Nombre_d_admis_tous_voeux_oui_non === 'Oui'), VU = id => a(id, v => v.Nombre_d_admis_voeu1_oui_non === 'Oui');
+  const dep = d => id => E.get(id).Departement_origine_eleve === d;
+  const p = (P, C) => { const x = ids.filter(P); return [x.filter(C).length, x.length]; };
+  const nd = e => e && e.kind === 'part' ? [e.result.num, e.result.den] : e?.kind;
+  const eq = (x, y) => JSON.stringify(x) === JSON.stringify(y);
+  assert(eq(nd(ask(c, 'part des élèves des Landes qui ont obtenu leur vœu 1')), p(dep('Landes'), VU)), 'part des élèves des Landes qui ont obtenu leur vœu 1 (avant : arrêt)');
+  assert(eq(nd(ask(c, "taux d'affectation des élèves de Gironde")), p(dep('Gironde'), AF)), "taux d'affectation des élèves de Gironde");
+  assert(eq(nd(ask(c, "taux d'affectation des élèves")), p(() => true, AF)), "taux d'affectation de tous les élèves");
+  assert(eq(nd(ask(c, "pourcentage d'élèves affectés parmi les élèves venant de 2nde pro")), p(id => E.get(id).Classe_origine === '2nde PRO', AF)), '« parmi les élèves venant de 2nde pro »');
+  // « qui ne sont pas » reformulé en « non » : le périmètre reste (avant correction de la série : 11 sur TOUS les élèves)
+  assert(eq(nd(ask(c, 'part des élèves venant de 2nde GT qui ne sont pas affectés')), p(id => E.get(id).Classe_origine === '2nde GT', id => !AF(id))), 'non affectés parmi les 2nde GT (le périmètre est gardé)');
+  assert(eq(nd(ask(c, 'part des élèves des Landes')), p(() => true, dep('Landes'))), 'part des élèves des Landes : sur tous les élèves');
+  // « ayant demandé une 1re pro qui sont affectés » : affectés sur n'importe quel vœu ; « affectés en 1re pro » : sur ce vœu
+  const pro = id => a(id, (v, o) => o.Mnemonique_formation_voeu === '1PRO');
+  assert(eq(nd(ask(c, 'part des élèves ayant demandé une 1re pro qui sont affectés')), p(pro, AF)), 'ayant demandé une 1re pro, affectés sur n’importe quel vœu');
+  assert(compte(c, "combien d'élèves ayant demandé une 1re pro sont affectés") === ids.filter(id => pro(id) && AF(id)).length, 'comptage : même lecture (élève affecté ailleurs compris)');
+  assert(compte(c, "combien d'élèves sont affectés en 1re pro") === ids.filter(id => a(id, (v, o) => o.Mnemonique_formation_voeu === '1PRO' && v.Nombre_d_admis_tous_voeux_oui_non === 'Oui')).length, '« affectés en 1re pro » : sur un vœu de 1re pro (inchangé)');
+  assert(eq(nd(ask(c, 'part des vœux en 1re pro')), [A.voeux.filter(v => O.get(v.Code_voeu_eleve).Mnemonique_formation_voeu === '1PRO').length, A.voeux.length]), 'part des vœux : en lignes');
+  // par groupe et comparaisons
+  const g = ask(c, "taux d'affectation des élèves par département d'origine");
+  assert(g?.kind === 'part_groupes' && g.result.groupes.every(x => eq([x.num, x.den], p(dep(x.valeur), AF))), "taux d'affectation par département d'origine : un taux dans chaque département (avant : des effectifs)");
+  const k = ask(c, "comparer le taux d'affectation des élèves de Gironde et des Landes");
+  assert(k?.kind === 'part_groupes' && k.result.groupes.length === 2 && k.result.groupes.every(x => eq([x.num, x.den], p(dep(x.valeur), AF))), 'comparer le taux d’affectation de deux départements');
+  const n = ask(c, 'comparer les élèves de Gironde et des Landes');
+  assert(n?.kind === 'group_by' && (n.result.rows || []).length === 2 && n.result.rows.every(x => x.count === ids.filter(dep(x.value)).length), 'comparer les élèves de deux départements : élèves différents');
+  // affichage : le critère sur l'élève est visible (avant : « Aucun filtre appliqué » pour « non affectés »)
+  const na = ask(c, "combien d'élèves ne sont pas affectés");
+  assert(/sans affectation/.test(String(run(c, 'renderDataEngineResultHtml')(na.plan.tool, na.plan, na.result))) , '« non affectés » : le critère est affiché');
+  const h = String(ask(c, 'part des élèves des Landes qui ont obtenu leur vœu 1').html).replace(/<[^>]+>/g, ' ');
+  assert(/élèves différents dans le périmètre/.test(h) && /un élève compte une fois/.test(h), 'part : périmètre et méthode dits en élèves');
+  // faux positifs : arrêt plutôt qu'une part fausse
+  assert(ask(c, 'part des élèves de la licorne qui sont affectés')?.kind === 'unresolved', 'périmètre inconnu : arrêt (jamais la part sur tous les élèves)');
+  assert(ask(c, 'comparer les élèves de Gironde et les élèves affectés')?.kind === 'unresolved', 'groupes de colonnes différentes : arrêt');
+  const od = ctxOpenData(D.openData(1500, 7));
+  assert(ask(od, 'part des BTS en Gironde')?.plan?.part?.mode !== 'eleves', 'open data : part inchangée (pas en élèves)');
 });
 
 await describe('Formation et établissement DEMANDÉS (table Offre) : pas la classe d’origine', () => {
