@@ -5130,6 +5130,24 @@ function _uniteVoeu(plan) {
   if (['count_rows', 'group_by', 'top', 'export_excel', 'export_csv', 'export_current_excel', 'export_current_csv', 'chart_current'].includes(plan.tool)) return null;
   return unresolvedConceptExecution(plan, [], `dans une table de vœux (un élève y a plusieurs lignes), ce calcul compterait chaque élève autant de fois qu'il a de vœux ; il n'est pas encore pris en charge. Demandez plutôt « combien d'élèves … » ou « nombre d'élèves par … »`);
 }
+// v27.5.102 — questions proposées à l'accueil pour une table de vœux (base d'affectation) : seulement celles dont les
+// colonnes existent (avant : questions de l'open data, « moyenne de vœux confirmés », « répartition par Bonus_filiere_OPA »)
+function suggestionsAffectation(table, max = 6) {
+  if (!table || table.rowUnit !== 'voeu' || !table.cleEleve) return null;
+  const H = table.headers || [];
+  const colH = re => H.find(h => re.test(normalizeText(String(h).replace(/_/g, ' '))));
+  const colV1 = colH(/admis voeu ?1\b/), colTous = colH(/admis tous (?:les )?voeux/), colDep = colH(/^departement origine/);
+  const colClasse = colH(/^classe (?:d )?origine$/), colForm = colH(/^libelle formation voeu$/) || colH(/^mnemonique formation voeu$/);
+  const a = (col, re) => col && _distinctValues(table, col).some(v => re.test(normalizeText(v)));
+  const out = [];
+  if (colV1) out.push("Combien d'élèves ont obtenu leur vœu 1 ?");
+  if (colTous) out.push(colDep ? "Taux d'affectation des élèves par département d'origine" : "Taux d'affectation des élèves");
+  if (a(colForm, /^1re pro\b|\b1pro\b/)) out.push("Combien d'élèves ont demandé une 1re pro ?");
+  if (colTous && a(colClasse, /^2nde pro$/)) out.push("Part des élèves venant de 2nde pro qui sont affectés");
+  if (colDep) out.push("Nombre d'élèves par département d'origine");
+  out.push('Combien de vœux dans toute la base ?');
+  return out.slice(0, max);
+}
 // v27.5.101 — part en ÉLÈVES dans une table de vœux : « part des élèves des Landes qui ont obtenu leur vœu 1 »,
 // « pourcentage d'élèves affectés parmi ceux venant de 2nde pro », « taux d'affectation des élèves de Gironde par
 // département d'origine ». Deux comptages d'élèves différents (déjà vérifiés) : le périmètre, puis le périmètre ET la
