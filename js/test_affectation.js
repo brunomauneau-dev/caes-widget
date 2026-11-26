@@ -203,6 +203,27 @@ await describe('Formation et établissement DEMANDÉS (table Offre) : pas la cla
   assert(f && /formation demandée 1re professionnelle : .*METIERS/.test(f.label), 'le filtre nomme les formations retenues');
 });
 
+await describe('Questions proposées à l’accueil : adaptées à la base, et toutes calculées', () => {
+  const sug = run(c, 'suggestionsAffectation')(run(c, 'getActiveQueryTables()[0]'));
+  // avant : « Quelle est la moyenne de vœux confirmés ? », « Répartition par Bonus_filiere_OPA » (questions de l'open data)
+  assert(Array.isArray(sug) && sug.length >= 5 && !sug.some(q => /confirm|Bonus/i.test(q)), `questions de la base d'affectation (${(sug || []).length})`);
+  for (const q of sug || []) {
+    const e = ask(c, q);
+    assert(e && e.kind !== 'unresolved', `« ${q} » : calculée (${e?.kind})`);
+  }
+  assert(ask(c, "Combien d'élèves ont obtenu leur vœu 1 ?")?.result?.count === nb(() => true, V1), 'la première question donne le bon chiffre');
+  // sans la table Offre ni Eleves : seules les questions possibles
+  const sans = ctxAff({ liees: false });
+  const s2 = run(sans, 'suggestionsAffectation')(run(sans, 'getActiveQueryTables()[0]'));
+  assert(s2 && !s2.some(q => /1re pro|département|2nde/.test(q)), 'sans tables liées : pas de question sur la formation ni l’origine');
+  for (const q of s2 || []) assert(ask(sans, q)?.kind !== 'unresolved', `sans tables liées, « ${q} » : calculée`);
+  // faux positifs : open data et fichiers gardent leurs questions
+  const od = ctxOpenData(D.openData(500, 3));
+  assert(run(od, 'suggestionsAffectation')(run(od, 'getActiveQueryTables()[0]')) === null, 'open data : pas de questions d’affectation');
+  const src = fs.readFileSync(path.join(__dirname, 'albert.js'), 'utf8');
+  assert(/suggestionsAffectation\(table, max\)/.test(src), 'albert.js les affiche à l’accueil et sous la saisie');
+});
+
 await describe('Libellés : une ligne = un vœu (titre, phrase, « J’ai compris », relecture)', () => {
   const c2 = ctxAff();
   const titre = e => run(c2, 'extractBlockTitle')(e, '');

@@ -820,6 +820,8 @@ function buildDynamicSuggestions(max = 6) {
   let table = useGrist ? buildGristQueryTable() : null;
   if ((!table || !table.headers || !table.headers.length) && typeof getActiveQueryTables === 'function') table = (getActiveQueryTables() || [])[0] || null;
   if (!table || !table.headers || !table.headers.length) return null;
+  // v27.6.28 — base d'affectation (table de vœux) : des questions sur les élèves, l'affectation et les formations demandées
+  if (typeof suggestionsAffectation === 'function') { const sa = suggestionsAffectation(table, max); if (sa && sa.length) return sa; }
   const fields = table.headers.filter(f => f !== 'id' && f !== 'manualSort');
   const seenKinds = new Map(); // kind -> nom de colonne (le premier rencontré dans l'ordre du schéma)
   fields.forEach(col => {
