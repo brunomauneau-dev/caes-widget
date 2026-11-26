@@ -203,6 +203,31 @@ await describe('Formation et établissement DEMANDÉS (table Offre) : pas la cla
   assert(f && /formation demandée 1re professionnelle : .*METIERS/.test(f.label), 'le filtre nomme les formations retenues');
 });
 
+await describe('Fautes de frappe et abréviations : le bon chiffre ou un arrêt, jamais tous les élèves', () => {
+  const O = new Map(A.offre.map(o => [o.Code_voeu_eleve, o]));
+  const el = pr => new Set(A.voeux.filter(v => pr(v, O.get(v.Code_voeu_eleve), E.get(v.Identifiant_eleve))).map(v => v.Identifiant_eleve)).size;
+  const pro = (v, o) => o.Mnemonique_formation_voeu === '1PRO', spro = (v, o, e) => e.Classe_origine === '2nde PRO';
+  // avant : mention ignorée → les 800 élèves
+  for (const q of ["combien d'élèves ont demandé une 1 pro", "combien d'élèves ont demandé une 1PRO", "combien d'élèves ont demandé une 1ère pro"]) assert(compte(c, q) === el(pro), `« ${q} » = 1re pro`);
+  for (const q of ["combien d'élèves venant de 2de pro", "combien d'élèves venant de 2nd pro", "combien d'élèves venant de seconde pro"]) assert(compte(c, q) === el(spro), `« ${q} » = 2nde pro`);
+  assert(compte(c, "combien d'élèves ont obtenus leur voeux 1") === nb(() => true, V1), '« obtenus leur voeux 1 » (avant : tous les élèves)');
+  assert(compte(c, "combien d'élèves ont demandé une 1re pro en voeux 1") === el((v, o) => pro(v, o) && v.Rang_voeu_eleve === 1), '« en voeux 1 » : rang');
+  // avant : arrêt ou question pour Albert
+  assert(compte(c, "cb d'élèves ont eu leur 1er vœu") === nb(() => true, V1), '« cb » = combien');
+  assert(compte(c, 'combien deleves sont affectés') === nb(() => true, AFF), '« deleves » = d’élèves');
+  assert(compte(c, 'nb d eleves des Landes') === nb(e => e.Departement_origine_eleve === 'Landes'), '« nb d eleves »');
+  assert(compte(c, 'combien d eleves landais') === nb(e => e.Departement_origine_eleve === 'Landes'), '« landais » = des Landes');
+  assert(compte(c, "combien d'élèves des Lande") === nb(e => e.Departement_origine_eleve === 'Landes'), '« des Lande » = des Landes');
+  // garde-fous : une classe ou un « vœu 1 » non compris arrêtent le calcul
+  assert(ask(c, "combien d'élèves venant de 2nde bidule")?.kind === 'unresolved', 'classe d’origine introuvable : arrêt');
+  assert(ask(c, "combien d'élèves avec un voeu 1")?.kind === 'unresolved', '« vœu 1 » ni admission ni rang : arrêt');
+  assert(ask(ctxAff({ liees: false }), "combien d'élèves venant de 2nde pro")?.kind === 'unresolved', 'sans la table Eleves : « 2nde pro » arrête (pas tous les élèves)');
+  // faux positifs : le rang « en 2e vœu » et le « 2e tour » ne sont pas des classes
+  assert(compte(c, "combien d'élèves ont demandé une 1re STMG en 2e vœu") === el((v, o) => o.Mnemonique_formation_voeu === '1STMG' && v.Rang_voeu_eleve === 2), '« en 2e vœu » reste un rang');
+  const od = ctxOpenData(D.openData(1500, 7));
+  assert(compte(od, 'combien de BTS landais') === compte(od, 'combien de BTS dans les Landes'), 'open data : « landais » = dans les Landes');
+});
+
 await describe('Questions proposées à l’accueil : adaptées à la base, et toutes calculées', () => {
   const sug = run(c, 'suggestionsAffectation')(run(c, 'getActiveQueryTables()[0]'));
   // avant : « Quelle est la moyenne de vœux confirmés ? », « Répartition par Bonus_filiere_OPA » (questions de l'open data)

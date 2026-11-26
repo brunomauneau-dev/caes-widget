@@ -3101,9 +3101,14 @@ const REFORMULATIONS = [
   // maximum de la mesure (avant : classement des formations, parfois sur la colonne de la condition ou dans le mauvais sens)
   [/^\s*(?:quel(?:le)?\s+est\s+)?(?:le|la)\s+plus\s+(grand|grande|élevé|élevée|eleve|elevee|haut|haute|fort|forte|petit|petite|bas|basse|faible)\s+(nombre|taux|pourcentage|%|capacité|capacite|effectif|part)(?=[\s']|$)(?!\s+(?:de\s+)?(?:formations?|établissements?|etablissements?|lycées?|lycees?|académies?|academies?|départements?|departements?|régions?|regions?|villes?|communes?)\b)/gi,
     (m, sens, mesure) => `${/^(grand|grande|élevé|élevée|eleve|elevee|haut|haute|fort|forte)$/i.test(sens) ? 'maximum' : 'minimum'} du ${mesure}`],
-  [/\b(?:nb|nbre|nbr)\.?\s+(?=de\b|d['’]|des\b|total\b)/gi, 'nombre '],
+  [/\b(?:nb|nbre|nbr)\.?\s+(?=de\b|d['’]|d\s|des\b|total\b)/gi, 'nombre '],
   // v27.25 — fautes de frappe courantes (« conbien de BTS » partait vers Albert)
   [/\b(?:conbien|combein|cobien|combiens|conbiens|cmbien|comben|combie)\b/gi, 'combien'],
+  // v27.5.103 — « cb d'élèves », « deleves », gentilés (« élèves landais »), « des Lande » (avant : arrêt ou question pour Albert)
+  [/^\s*(?:cb|cmb|cbn|cbien)\b\s*/i, 'combien '],
+  [/\bd[eé]l[eèé]ve(s?)\b/gi, "d'élève$1"],
+  [/\blandais(?:es?)?\b/gi, 'des Landes'], [/\bgirondin(?:e)?s?\b/gi, 'de Gironde'], [/\b(?:p[ée]rigourdin(?:e)?s?|dordognais(?:es?)?)\b/gi, 'de Dordogne'],
+  [/\blot[- ]et[- ]garonnais(?:es?)?\b/gi, 'du Lot-et-Garonne'], [/\b(des|les)\s+lande\b/gi, 'des Landes'],
   // v27.5.76 — écarts et rangs : « combien de BTS de plus en Gironde que dans les Landes », « différence entre le nombre
   // de BTS en Gironde et dans les Landes », « y a-t-il plus de BTS en Gironde ou dans les Landes » = une comparaison
   // (avec l'écart) ; « quelle est la deuxième académie pour le nombre de BTS » = le classement (avant : arrêt)
@@ -4968,7 +4973,7 @@ function _parlePersonnes(question) {
 // Codes de décision (déclarés par l'utilisateur) : 1 affecté, 2 en attente, 3 refusé — au tour 1 ; les autres tours ne
 // sont pas établis : arrêt.
 const _AFF_NEG = /\b(?:non|pas|aucune?|sans|jamais|ni)\b(?:\s+\w+){0,3}?\s+(?:affecte|admis|obtenu|satisfait|affectation|place)\w*|\bnon (?:affecte|admis)\w*/;
-const _AFF_V1 = /\b(?:obtenu|eu|satisfait|affecte|admis|accepte)\w*\b(?:\s+\w+){0,4}?\s+(?:premier voeu|1er voeu|voeu (?:n )?1|voeu numero 1|voeu un)\b|\b(?:premier voeu|1er voeu|voeu (?:n )?1)\b(?:\s+\w+){0,3}?\s+(?:obtenu|satisfait|accepte)\w*/;
+const _AFF_V1 = /\b(?:obtenu|eu|satisfait|affecte|admis|accepte)\w*\b(?:\s+\w+){0,4}?\s+(?:premiers? voeux?|1ers? voeux?|voeux? (?:n )?1|voeux? numero 1|voeux? un)\b|\b(?:premiers? voeux?|1ers? voeux?|voeux? (?:n )?1)\b(?:\s+\w+){0,3}?\s+(?:obtenu|satisfait|accepte)\w*/;
 const _AFF_TOUS = /\b(?:affecte(?:e)?s?|admis(?:es)?|affectation|obtenu une place|ont une place)\b/;
 const _AFF_ATT = /\ben attente\b|\bliste (?:d attente|supplementaire)\b/;
 const _AFF_REF = /\brefuse(?:e)?s?\b/;
@@ -4982,7 +4987,11 @@ function _vocabulaireAffectation(plan) {
   // « ont demandé une 1re pro », « affectés en 1re STMG », « vœux en métiers de l'électricité » = la formation du vœu ;
   // « venant de 2nde pro », « élèves de 2nde GT » = la classe d'origine (avant : « 1re pro » était toujours lu comme la
   // classe d'origine, « demandé une 1re générale » comptait les élèves venant de 1re GT)
-  const qs = q.replace(/\bseconde\b/g, '2nde').replace(/\b(?:premiere|1ere)\b/g, '1re').replace(/\bterminale\b/g, 'term').replace(/\b(?:generale et technologique|generale|gen)\b/g, 'gt').replace(/\bprofessionnelle\b/g, 'pro');
+  // v27.5.103 — « 2de pro », « 2nd pro », « 1 pro », « 1PRO », « 1ère STMG » (avant : mention ignorée, tous les élèves)
+  const CLS = '(?:pro|gt|generale?|gen|techno\\w*|stmg|sti2d|st2s|stl|std2a|sthr|s2tmd|stav|cap)';
+  const q0 = q.replace(new RegExp(`\\b1(${CLS.slice(3, -1)})\\b`, 'g'), '1re $1').replace(/\b2(?:nde|de|nd)?(pro|gt)\b/g, '2nde $1')
+    .replace(new RegExp(`\\b(?:2de|2nd|2eme|2e|2d)\\s+(?=${CLS}\\b)`, 'g'), '2nde ').replace(new RegExp(`\\b(?:1|1e|1er|1ere|1eme)\\s+(?=${CLS}\\b)`, 'g'), '1re ');
+  const qs = q0.replace(/\bseconde\b/g, '2nde').replace(/\b(?:premiere|1ere)\b/g, '1re').replace(/\bterminale\b/g, 'term').replace(/\b(?:generale et technologique|generale|gen)\b/g, 'gt').replace(/\bprofessionnelle\b/g, 'pro');
   const esc = x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const colClasse = colH(/^classe (?:d )?origine$/);
   const colLibF = colH(/^libelle formation voeu$/), colMnem = colH(/^mnemonique formation voeu$/), colSpeF = colH(/^specialite formation voeu$/);
@@ -5010,6 +5019,9 @@ function _vocabulaireAffectation(plan) {
       plan.filters.push({ col: colClasse, op: 'eq', value: v, label: `classe d'origine ${v} (venant de, seconde, premiere, terminale, generale, professionnelle)`, source: 'affectation' });
     }
   }
+  // classe de 2nde ou de terminale citée mais introuvable : arrêt (jamais tous les élèves)
+  const mCl = !classeTrouvee && qs.match(/\b(2nde|term)\s+(?!(?:tour|fois|vague|voeu|voeux|liste|phase|session|annee|choix)\b)([a-z0-9]+)\b/);
+  if (mCl) return colClasse ? `classe d'origine « ${mCl[1]} ${mCl[2]} » introuvable dans « ${colClasse} »` : `la classe d'origine n'est dans aucune colonne de cette table (elle est dans la table Eleves)`;
   // texte sans la classe d'origine reconnue (« venant de 2nde pro ont demandé une 1re gt » : seule « 1re gt » reste)
   const qf = classeTrouvee ? `${qs.slice(0, classeTrouvee.debut)} ${qs.slice(classeTrouvee.fin)}` : qs;
   if (colLibF || colMnem) {
@@ -5080,7 +5092,7 @@ function _vocabulaireAffectation(plan) {
   }
   // rang du vœu : « en vœu 1 », « en premier vœu », « en 2e vœu » (une demande, pas une admission)
   const colRang = colH(/^rang voeu(?: eleve)?$/);
-  const mr = qs.match(/\ben (?:(premier|1er|deuxieme|2e|2eme|second|troisieme|3e|3eme) (?:voeu|choix)|voeu (?:n )?(\d))\b/);
+  const mr = qs.match(/\ben (?:(premier|1er|deuxieme|2e|2eme|second|troisieme|3e|3eme) (?:voeux?|choix)|voeux? (?:n )?(\d))\b/);
   if (mr && !_AFF_V1.test(q)) {
     const rang = mr[2] ? Number(mr[2]) : ({ premier: 1, '1er': 1, deuxieme: 2, '2e': 2, '2eme': 2, second: 2, troisieme: 3, '3e': 3, '3eme': 3 })[mr[1]];
     if (!colRang) return `aucune colonne n'indique le rang du vœu dans cette table`;
@@ -5088,6 +5100,9 @@ function _vocabulaireAffectation(plan) {
     plan.filters.push({ col: colRang, op: 'eq', value: rang, label: `vœu de rang ${rang} (premier voeu, rang, choix)`, source: 'affectation' });
   }
   const v1 = _AFF_V1.test(q), tous = !v1 && _AFF_TOUS.test(q), att = _AFF_ATT.test(q), ref = _AFF_REF.test(q);
+  // « vœu 1 » cité mais compris ni comme une admission ni comme un rang : arrêt (jamais tous les élèves)
+  if (!v1 && /\b(?:premiers? voeux?|1ers? voeux?|voeux? (?:n )?1|voeux? numero 1)\b/.test(q) && !(plan.filters || []).some(f => f && f.source === 'affectation' && /^vœu de rang/.test(String(f.label || ''))))
+    return `« vœu 1 » : je n'ai pas compris s'il s'agit des élèves admis sur leur vœu 1 (« ont obtenu leur vœu 1 ») ou des vœux de rang 1 (« ont demandé … en vœu 1 »)`;
   if (!(v1 || tous || att || ref)) return null;
   if (_AFF_TOUR2.test(q)) return `les codes de décision des tours suivants (4, 5, 7…) ne sont pas encore établis : seul le tour 1 est pris en charge (1 affecté, 2 en attente, 3 refusé)`;
   const neg = _AFF_NEG.test(q);
