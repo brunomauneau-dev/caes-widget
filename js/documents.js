@@ -130,6 +130,13 @@ function lignesDepuisColonnes(data) {
   for (let i = 0; i < n; i++) { const o = {}; cols.forEach(c => { o[c] = data[c][i]; }); out[i] = o; }
   return out;
 }
+// v27.5.29 — colonne Référence nommée d'après la table visée (« Etablissement » → table « Etablissements ») : Grist n'y
+// garde que le numéro de ligne. Renvoie le nom de cette colonne, ou null.
+function colonneVersTable(cols, tableId) {
+  const n = x => normalizeText(String(x || '').replace(/_/g, ' ')).replace(/\s+/g, '').replace(/s$/, '');
+  const cible = n(tableId);
+  return cible.length >= 3 ? ([...cols].find(c => n(c) === cible) || null) : null;
+}
 function joindreTablesLiees(objets, liees) {
   const jointures = [];
   if (!Array.isArray(objets) || !objets.length || !Array.isArray(liees) || !liees.length) return { objets, jointures };
@@ -145,7 +152,31 @@ function joindreTablesLiees(objets, liees) {
       const vals = lignes.map(r => String(r?.[c] ?? '').trim());
       return vals.every(Boolean) && new Set(vals).size === vals.length;
     });
-    if (!cle) continue;
+    if (!cle) {
+      // référence sans colonne commune : la colonne porte le nom de la table et contient ses numéros de ligne
+      const ref = colonneVersTable(pris, t.nom);
+      const parId = new Map(lignes.map(r => [r.id, r]));
+      if (!ref || !parId.size) continue;
+      const texte = colsU.find(c => lignes.every(r => typeof r[c] === 'string' && r[c].trim())) || null; // nom affiché à la place du numéro
+      const ajout = colsU.filter(c => !pris.has(c));
+      let trouves = 0;
+      const essai = res.map(o => {
+        let v = o?.[ref];
+        if (v && typeof v === 'object' && 'id' in v) v = v.id;
+        const r = typeof v === 'number' ? parId.get(v) : null;
+        if (!r) return o;
+        trouves++;
+        const n = { ...o };
+        if (texte) n[ref] = r[texte];
+        ajout.forEach(c => { n[c] = r[c]; });
+        return n;
+      });
+      if (trouves < res.length * 0.5) continue;
+      res = essai;
+      ajout.forEach(c => pris.add(c));
+      jointures.push({ table: t.nom, cle: ref, colonnes: ajout, trouves, reference: true });
+      continue;
+    }
     const parCle = new Map(lignes.map(r => [String(r[cle]).trim(), r]));
     const parId = new Map(lignes.map(r => [r.id, r]));
     const ajout = colsU.filter(c => c !== cle && !pris.has(c));
@@ -659,8 +690,9 @@ function buildFullTableSynthesis(table, question = '') {
 }
 
 function getColumnValues(table, col) {
+  // v27.5.29 — liste de choix de Grist (tableau) : chaque valeur (avant : « SVT,SES » comme une seule valeur)
   return table.objects
-    .map(r => r[col])
+    .flatMap(r => Array.isArray(r[col]) ? r[col] : [r[col]])
     .filter(v => v !== undefined && v !== null && String(v).trim() !== '');
 }
 
@@ -722,6 +754,13 @@ function rowMatchesFilter(row, filter) {
     return (filter.terms || []).every(t => [].concat(t).some(w => mots.has(w)));
   }
   if (filter && OPS_CHIFFRES[filter.op]) { const x = _chiffreCellule(row[filter.col]); return x !== null && OPS_CHIFFRES[filter.op](x, Number(filter.value)); }
+  // v27.5.29 — liste de choix de Grist : « = SVT » si la liste contient SVT ; « ≠ SVT » si elle ne le contient pas
+  if (filter && Array.isArray(row[filter.col])) {
+    const elems = row[filter.col].map(normalizeText).filter(Boolean), fv = normalizeText(filter.value);
+    if (filter.op === 'in') return elems.some(e => (filter.values || []).includes(e));
+    if (filter.op === 'neq') return elems.length > 0 && !elems.includes(fv);
+    return fv === '' ? !elems.length : elems.includes(fv);
+  }
   const rowValue = normalizeText(row[filter.col]);
   const filterValue = normalizeText(filter.value);
   if (filter.op === 'neq') return rowValue !== '' && rowValue !== filterValue;

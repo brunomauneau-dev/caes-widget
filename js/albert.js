@@ -460,7 +460,8 @@ async function chargerTablesLieesGrist() {
     for (const id of ids || []) {
       if (id === courante || /^_grist/i.test(id)) continue;
       const data = await grist.docApi.fetchTable(id);
-      if (!Object.keys(data || {}).some(c => champs.has(c))) continue; // aucune colonne commune : sans rapport
+      // aucune colonne commune, ni colonne Référence à son nom (« Etablissement » → « Etablissements ») : sans rapport
+      if (!Object.keys(data || {}).some(c => champs.has(c)) && !(typeof colonneVersTable === 'function' && colonneVersTable(champs, id))) continue;
       liees.push({ nom: id, objets: lignesDepuisColonnes(data) });
     }
     gristTablesLiees = liees;

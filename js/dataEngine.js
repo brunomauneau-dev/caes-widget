@@ -221,7 +221,7 @@ function _distinctValues(table, col) {
   if (!table || typeof table !== 'object') return [];
   const n = (table.objects || []).length;
   if (!table._distinct || table._distinct.n !== n) table._distinct = { n, m: new Map() };
-  if (!table._distinct.m.has(col)) table._distinct.m.set(col, [...new Set((table.objects || []).map(r => String(r?.[col] ?? '').trim()).filter(Boolean))]);
+  if (!table._distinct.m.has(col)) table._distinct.m.set(col, [...new Set((table.objects || []).flatMap(r => Array.isArray(r?.[col]) ? r[col] : [r?.[col]]).map(v => String(v ?? '').trim()).filter(Boolean))]); // liste de choix : chaque valeur
   return table._distinct.m.get(col).slice();
 }
 
@@ -326,7 +326,8 @@ function _dimensionSpecialite(table, question) {
 // chacune de ses spécialités) ; pct = part des lignes qui ont cette valeur
 function _comptesEclates(rows, col) {
   const m = new Map(); let filled = 0;
-  rows.forEach(r => { const parts = String(r?.[col] ?? '').split('|').map(x => x.trim().replace(/^Msgn\/\s*/, '')).filter(Boolean); if (!parts.length) return; filled++; [...new Set(parts)].forEach(p => m.set(p, (m.get(p) || 0) + 1)); });
+  // v27.5.107 — liste de choix de Grist (tableau de valeurs) : chaque valeur, comme une case « A | B »
+  rows.forEach(r => { const v = r?.[col]; const parts = (Array.isArray(v) ? v.map(x => String(x ?? '')) : String(v ?? '').split('|')).map(x => x.trim().replace(/^Msgn\/\s*/, '')).filter(Boolean); if (!parts.length) return; filled++; [...new Set(parts)].forEach(p => m.set(p, (m.get(p) || 0) + 1)); });
   const top = [...m].map(([value, count]) => ({ value, count, pct: filled ? count / filled * 100 : 0 })).sort((a, b) => b.count - a.count || a.value.localeCompare(b.value, 'fr'));
   return { top, filled, distinct: top.length, eclate: true };
 }
@@ -1410,8 +1411,11 @@ function formationTermsFromQuestion(table, question, otherFilters = []) {
     const _dansQ = w => _motsQ.has(w) || _motsQ.has(w + 's') || _motsQ.has(w + 'x');
     if (mots.filter(_dansQ).length >= 2) mots.forEach(w => { _deColonne.add(w); _deColonne.add(w + 's'); });
   });
+  // v27.5.107 — sigle écrit en capitales et présent dans les données (« SES », « NSI ») : une valeur, pas le mot « ses »
+  const _sigles = new Set(originals.filter(w => /^[A-Z0-9]{2,6}$/.test(w) && /[A-Z]/.test(w)).map(normalizeText));
   q.split(' ').forEach(tok => {
-    if (tok.length < 3 || /^\d+$/.test(tok) || FORMATION_TERM_STOP.has(tok) || covered.has(tok)) return;
+    const _sigle = _sigles.has(tok) && !!formationWordForm(tok, info);
+    if (tok.length < 3 || /^\d+$/.test(tok) || (FORMATION_TERM_STOP.has(tok) && !_sigle) || covered.has(tok)) return;
     if (_deColonne.has(tok) && !forced.has(tok)) return;
     if (_ens.has(tok)) return; // « spécialité SES / maths » au lycée : pas une formation d'accueil
     const form = formationWordForm(tok, info);
@@ -5220,6 +5224,42 @@ function suggestionsAffectation(table, max = 6) {
   out.push('Combien de vœux dans toute la base ?');
   return out.slice(0, max);
 }
+// v27.5.107 — « candidats sans note », « élèves sans établissement » : la colonne nommée est vide (avant : le mot était
+// ignoré et le chiffre portait sur toutes les lignes). Plusieurs colonnes possibles : arrêt avec la question.
+function _filtreSansValeur(plan) {
+  // une part ou une comparaison traite elle-même sa condition (« pourcentage de candidats sans proposition ») : rien ici
+  if (!['count_rows', 'group_by', 'top', 'sum', 'stats', 'pivot'].includes(plan.tool) || plan.part) return null;
+  const q = normalizeText(plan.question || '');
+  const H = (plan.table.headers || []).filter(h => !/^(id|manualSort)$/i.test(String(h)));
+  const motsH = h => normalizeText(String(h).replace(/_/g, ' ')).split(' ');
+  // chaque « sans X » de la question (« sans apprentissage sans note » : les deux)
+  for (const m of q.matchAll(/\b(?:sans|pas de|aucune?|n ayant pas de|qui n ont pas de)\s+(?:(?:de|d|l|la|le|les|une?)\s+)?([a-z]{3,})\b/g)) {
+    const mot = m[1];
+    const exact = H.filter(h => { const w = motsH(h).join(' '); return w === mot || w === `${mot}s` || `${w}s` === mot; });
+    const cands = exact.length ? exact : H.filter(h => motsH(h).some(w => w === mot || w === `${mot}s` || `${w}s` === mot));
+    if (!cands.length) continue;
+    // déjà traitée ailleurs : sauf un « = oui » posé sur le mot sans voir le « sans » (« sans apprentissage » comptait les
+    // apprentis) : retourné en « non »
+    const deja = (plan.filters || []).find(f => f && cands.includes(f.col));
+    if (deja) {
+      if (deja.op !== 'eq' || !/^(?:oui|true|vrai|1)$/.test(normalizeText(deja.value))) continue;
+      const non = _distinctValues(plan.table, deja.col).map(normalizeText).find(v => /^(?:non|false|faux|0)$/.test(v));
+      if (!non) return { arret: `« sans ${mot} » : la colonne « ${deja.col} » n'a pas de valeur « non »` };
+      plan.filters = [...plan.filters.filter(f => f !== deja), { col: deja.col, op: 'eq', value: non, label: `« ${deja.col} » = non (sans ${mot})`, source: 'vide' }];
+      continue;
+    }
+    if (cands.length > 1) return { arret: `« sans ${mot} » : plusieurs colonnes possibles (${cands.slice(0, 4).map(h => `« ${h} »`).join(', ')}) ; précisez laquelle` };
+    const col = cands[0];
+    // colonne oui / non (case à cocher de Grist, « Oui » / « Non ») : « sans X » = non ; sinon : la case est vide (0 possible)
+    const vals = new Set(_distinctValues(plan.table, col).map(normalizeText).filter(Boolean));
+    if (vals.size && [...vals].every(v => /^(?:oui|non|true|false|vrai|faux)$/.test(v))) {
+      const non = [...vals].find(v => /^(?:non|false|faux)$/.test(v));
+      if (!non) return { arret: `« sans ${mot} » : la colonne « ${col} » ne contient que des « oui »` };
+      plan.filters = [...(plan.filters || []), { col, op: 'eq', value: non, label: `« ${col} » = non (sans ${mot})`, source: 'vide' }];
+    } else plan.filters = [...(plan.filters || []), { col, op: 'eq', value: '', label: `« ${col} » vide (sans ${mot}, vide, non renseigné)`, source: 'vide' }];
+  }
+  return null;
+}
 // v27.5.101 — part en ÉLÈVES dans une table de vœux : « part des élèves des Landes qui ont obtenu leur vœu 1 »,
 // « pourcentage d'élèves affectés parmi ceux venant de 2nde pro », « taux d'affectation des élèves de Gironde par
 // département d'origine ». Deux comptages d'élèves différents (déjà vérifiés) : le périmètre, puis le périmètre ET la
@@ -5376,6 +5416,7 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
   plan = finalSanitizeAnalysisPlan(plan);
   if (!plan || !plan.table) return null;
   // v27.5.98 — table de vœux (base d'affectation) : « combien d'élèves » = élèves différents, pas des lignes
+  { const sv = _filtreSansValeur(plan); if (sv && sv.arret) return unresolvedConceptExecution(plan, [], sv.arret); }
   if (plan.table.rowUnit === 'voeu' && plan.table.cleEleve) {
     if (!plan._sousPart && plan.tool === 'compare') return _comparerEleves({ ...plan, _sousPart: true }, persistentFiltersOverride);
     if (!plan._sousPart) { const pe = _partEleves({ ...plan, _sousPart: true }, persistentFiltersOverride); if (pe) return pe; }
@@ -5602,6 +5643,8 @@ function runDataEnginePlan(plan, persistentFiltersOverride) {
     const col = plan.targetCol || plan.mentionedCols?.[0];
     if (!col) return null;
     const limit = plan.listMode ? 300 : (plan.limit || detectLimit(plan.question) || (plan.tool === 'top' ? 10 : 30));
+    // v27.5.107 — colonne « liste de choix » de Grist : répartition par valeur (avant : par combinaison « SES,NSI »)
+    if (!plan.eclater && !plan.distinctCol && !plan.groupSumCol && (plan.table.objects || []).some(r => Array.isArray(r?.[col]))) plan.eclater = true;
     let counts = plan.eclater ? _comptesEclates(rows, col) : plan.distinctCol ? distinctParGroupe(rows, col, plan.distinctCol, plan.distinctNom ? null : plan.table)
       : plan.groupSumCol ? sommesParGroupe(rows, col, plan.groupSumCol) : topCountsForRows(rows, col, Math.max(limit, 30));
     if (plan.croissant && !plan.distinctCol && !plan.groupSumCol) {
