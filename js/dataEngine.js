@@ -2872,6 +2872,8 @@ function motsNonReconnus(plan) {
     if (!w || /^\d/.test(w) || (w.length < 3 && MOTS_COURTS.has(w)) || w.length === 1) return;
     // v27.5.86 — « DN MADE » : « dn » est un mot d'intitulé, collé à « made » qui a servi au filtre (avant : arrêt sur « dn »)
     if (w.length === 2 && info.words.has(w) && [mots[i - 1], mots[i + 1]].some(v => v && v.length >= 3 && couvert(v))) return;
+    // v27.5.104 — « pires » ignoré seulement en superlatif (« les pires ») : « BTS pirés » (pour « privés ») n'est pas ignoré
+    if (w === 'pires' && !/^(?:les|la|le|des|aux)$/.test(mots[i - 1] || '')) { manque.push(w); return; }
     if (FORMATION_TERM_STOP.has(w) || MOTS_QUESTION.has(w) || info.geo.has(w) || couvert(w)) return;
     if (_fichierCandidats && MOTS_FICHIER_CANDIDATS.has(w)) return;
     manque.push(w);
@@ -3551,8 +3553,56 @@ function reformulerMobilite(question, table) {
   return /formation/i.test(m[2]) ? `répartition des ${qui} par grand groupe de formation` : `répartition des ${qui} par académie d'accueil`;
 }
 
+// v27.5.104 — fautes de frappe sur les mots du calcul (« capaciité », « candidatues », « établisesments ») : corrigées
+// quand UN SEUL mot du vocabulaire est à une lettre près (deux pour les mots de 11 lettres ou plus). Avant : la mesure ou la liste était
+// perdue (« capaciité totale des BTS » comptait des formations au lieu d'additionner des places). Les noms de lieux et
+// de formations ne sont jamais corrigés (un lieu inconnu doit arrêter le calcul, pas devenir un autre lieu).
+const _VOCAB_CALCUL = ['combien', 'nombre', 'capacité', 'capacités', 'candidatures', 'candidature', 'candidats', 'candidates', 'candidat',
+  'établissements', 'établissement', 'formations', 'formation', 'proposant', 'proposent', 'proposées', 'proposés', 'places', 'admises',
+  'boursiers', 'boursières', 'répartition', 'moyenne', 'médiane', 'pourcentage', 'proportion', 'sélectifs', 'sélectives', 'sélective',
+  'sélectif', 'public', 'publics', 'publiques', 'publique', 'privé', 'privée', 'privés', 'privées', 'licences', 'licence', 'totale', 'lycées', 'universités',
+  'université', 'écoles', 'ingénieurs', 'ingénieur', 'commerce', 'académie', 'académies', 'département', 'départements', 'région',
+  'régions', 'confirmés', 'apprentissage', 'apprentis', 'affectés', 'affectation', 'obtenu', 'demandé', 'élèves', 'origine', 'accueil',
+  'classement', 'comparer', 'comparaison', 'évolution', 'quels', 'quelles', 'liste'];
+const _VOCAB_NORM = new Map(_VOCAB_CALCUL.map(w => [normalizeText(w), w]));
+function _distanceOsa(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    let min = Infinity;
+    for (let j = 1; j <= b.length; j++) {
+      const c = a[i - 1] === b[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + c);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+      min = Math.min(min, d[i][j]);
+    }
+    if (min > max) return max + 1;
+  }
+  return d[a.length][b.length];
+}
+function corrigerFautesFrappe(question, ambigus) {
+  let connus = null;
+  const estConnu = w => {
+    if (!connus) { connus = new Set(); try { const t = (getActiveQueryTables() || [])[0]; if (t) { const i = formationTermsInfo(t); i.words.forEach(x => connus.add(x)); i.geo.forEach(x => connus.add(x)); (t.headers || []).forEach(h => _hx(h).split(' ').forEach(x => connus.add(x))); } } catch (e) { /* source absente */ } }
+    return connus.has(w) || connus.has(w.replace(/s$/, '')) || connus.has(`${w}s`);
+  };
+  return String(question ?? '').replace(/[A-Za-zÀ-ÿœŒ]{5,}/g, mot => {
+    const w = normalizeText(mot);
+    if (w.length < 5 || _VOCAB_NORM.has(w) || estConnu(w)) return mot;
+    const max = w.length >= 11 ? 2 : 1;
+    let best = max + 1, choix = [];
+    // une flexion d'un mot connu (« lycée » / « lycées », « compare » / « comparer ») n'est pas une faute
+    const flexion = n => { const [c, l] = w.length < n.length ? [w, n] : [n, w]; const suf = l.slice(c.length); return l.startsWith(c) && (/^(?:s|r|er|x|z|ez|nt|ent)$/.test(suf) || (/^(?:e|es)$/.test(suf) && !c.endsWith('e'))); };
+    if ([..._VOCAB_NORM.keys()].some(flexion)) return mot;
+    // « informations » contient « formations » : un autre mot, pas une faute
+    _VOCAB_NORM.forEach((canon, n) => { if (w.includes(n) || n.includes(w)) return; const d = _distanceOsa(w, n, max); if (d < best) { best = d; choix = [canon]; } else if (d === best) choix.push(canon); });
+    if (best === 1 && choix.length > 1 && ambigus) ambigus.push({ mot, choix });
+    return best <= max && choix.length === 1 ? choix[0] : mot;
+  });
+}
 function reformulerQuestion(question) {
-  let q = String(question ?? '');
+  let q = corrigerFautesFrappe(question);
   REFORMULATIONS.forEach(([re, rep]) => { q = q.replace(re, rep); });
   return q.replace(/\s{2,}/g, ' ').trim();
 }
@@ -3804,6 +3854,9 @@ function _essaiUnion(question, filterContextText, plan0) {
 }
 function detectDataEnginePlan(question, filterContextText = question) {
   let plan = _gardeRelances(_detectDataEnginePlanBase(question, filterContextText), question);
+  // v27.5.104 — mot du calcul mal écrit, proche de deux mots (« candidatues » : candidatures ou candidates ?) : on demande
+  const _amb = []; corrigerFautesFrappe(question, _amb);
+  if (plan && _amb.length) plan.clarification = `« ${_amb[0].mot} » : vouliez-vous dire ${_amb[0].choix.map(c => `« ${c} »`).join(' ou ')} ? Reformulez la question avec le mot voulu`;
   // v27.5.101 — table de vœux : « taux d'affectation des élèves » (sans autre critère) n'a pas de plan ; la part en élèves
   // est calculée à l'exécution (_partEleves)
   if (!plan) {
