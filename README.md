@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-89 fichiers, 3 349 tests. Depuis la racine du repo :
+90 fichiers, 3 369 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -198,6 +198,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 `js/test_fautes_frappe.js` vérifie que les fautes de frappe sur les mots du calcul (« capaciité totale », « candidaturees », « liste des établisesments », « du publiic ») sont corrigées quand un seul mot du vocabulaire est possible, que le widget demande quand deux mots sont possibles (« candidatues » : candidatures ou candidates ?), que les mots justes (« compare », « lycée », « sélection », « Montaigne », « informations ») et les noms de lieux ne sont jamais modifiés, et que les chiffres obtenus sont ceux de la question bien écrite. Banc correspondant (questions de l'open data déformées au hasard) : 0 chiffre faux sur 4 000.
 
 `js/test_ordre_chargement.js` charge les modules du calcul **dans l'ordre de `index.html`** (dataEngine.js avant documents.js, comme dans le navigateur) et vérifie qu'aucune erreur ne survient et qu'une question est calculée. Les autres tests chargent les modules dans un autre ordre : une erreur de ce type (v27.5.104 : plus aucun calcul dans le widget) passait inaperçue.
+
+`js/test_tables_grist.js` vérifie une table Grist telle que Grist la donne au widget : cases à cocher (true / false), listes de choix (plusieurs valeurs par case : « contient SVT », répartition par valeur et non par combinaison), cellules vides (« sans note »), « sans apprentissage » (case non cochée, avant : les apprentis), sigles en capitales (« SES » n'est pas le possessif « ses »), colonne Référence nommée d'après la table visée (« Etablissement » → table « Etablissements » : ville, département et nom du lycée). Banc correspondant : 0 chiffre faux sur 2 400.
 
 `js/test_part_groupes.js` vérifie les **taux par groupe** : « pourcentage de candidats sans proposition par département », « part des boursiers par académie », « taux de remplissage des BTS par académie » donnent un taux calculé **dans** chaque groupe (avant : la répartition du total entre groupes, lue à tort comme un taux), avec la ligne « Ensemble », l'export, le graphique et les relances (« taux de proposition des boursiers » puis « et par département ? »).
 
