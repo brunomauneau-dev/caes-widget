@@ -79,7 +79,7 @@ Le navigateur ne peut pas appeler Albert API directement (CORS). Le widget passe
 
 ## Suite de tests
 
-88 fichiers, 3 344 tests. Depuis la racine du repo :
+89 fichiers, 3 349 tests. Depuis la racine du repo :
 
 ```bash
 npm test
@@ -196,6 +196,8 @@ Tous les fichiers de test sont des modules ESM (`"type": "module"` dans `package
 `js/test_affectation.js` vérifie, sur une base d'affectation fictive (tables liées Voeux, Eleves, Offre ; une ligne = un vœu), que le widget posé sur Voeux lit aussi Eleves et Offre (colonne commune ou colonne Référence), que « combien d'élèves » compte des élèves différents et « combien de vœux » des lignes, le vocabulaire (« obtenu leur vœu 1 », « affectés », « non affectés », « en attente », « refusés » du tour 1, « venant de 2nde pro », établissement d'origine CEDEX compris), la formation et l'établissement demandés (« ont demandé une 1re pro », « affectés en 1re STMG », « métiers de l'électricité », « MELEC », « en vœu 1 », « ont demandé le lycée Montaigne ») distingués de la classe d'origine (« venant de 2nde pro »), l'arrêt quand la question est ambiguë (« élèves en 1re pro ») ou que la table Offre n'est pas lue, les parts et comparaisons en élèves différents (« part des élèves des Landes qui ont obtenu leur vœu 1 », « taux d'affectation par département d'origine », « comparer les élèves de Gironde et des Landes »), les fautes de frappe et abréviations (« 1 pro », « 1PRO », « 2de pro », « voeux 1 », « cb », « deleves », « landais » : le bon chiffre ou un arrêt, jamais tous les élèves), les questions proposées à l'accueil (adaptées aux colonnes présentes, toutes calculées), les libellés (« N vœux », total exprimé en élèves, pas de fausse alerte de relecture), l'arrêt des calculs non adaptés et, sur le fichier académique, l'arrêt de « ont obtenu leur vœu 1 » (avant : tous les candidats). Banc correspondant : 0 chiffre faux sur 600.
 
 `js/test_fautes_frappe.js` vérifie que les fautes de frappe sur les mots du calcul (« capaciité totale », « candidaturees », « liste des établisesments », « du publiic ») sont corrigées quand un seul mot du vocabulaire est possible, que le widget demande quand deux mots sont possibles (« candidatues » : candidatures ou candidates ?), que les mots justes (« compare », « lycée », « sélection », « Montaigne », « informations ») et les noms de lieux ne sont jamais modifiés, et que les chiffres obtenus sont ceux de la question bien écrite. Banc correspondant (questions de l'open data déformées au hasard) : 0 chiffre faux sur 4 000.
+
+`js/test_ordre_chargement.js` charge les modules du calcul **dans l'ordre de `index.html`** (dataEngine.js avant documents.js, comme dans le navigateur) et vérifie qu'aucune erreur ne survient et qu'une question est calculée. Les autres tests chargent les modules dans un autre ordre : une erreur de ce type (v27.5.104 : plus aucun calcul dans le widget) passait inaperçue.
 
 `js/test_part_groupes.js` vérifie les **taux par groupe** : « pourcentage de candidats sans proposition par département », « part des boursiers par académie », « taux de remplissage des BTS par académie » donnent un taux calculé **dans** chaque groupe (avant : la répartition du total entre groupes, lue à tort comme un taux), avec la ligne « Ensemble », l'export, le graphique et les relances (« taux de proposition des boursiers » puis « et par département ? »).
 
