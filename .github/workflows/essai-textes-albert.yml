@@ -1,0 +1,43 @@
+name: Essai textes Albert
+
+# Essai MESURÉ, lancement manuel : onglet Actions → « Essai textes Albert » → Run workflow.
+# Pose des questions ouvertes au vrai widget (Chromium, open data réel, Albert par le proxy : N appels, sur le quota
+# Albert) et vérifie les nombres des textes rédigés par Albert : inventés (et bandeau d'alerte affiché ?), ou
+# présents dans les données mais peut-être mal attribués. Rien ne change dans le widget en service. Lecture seule.
+
+on:
+  workflow_dispatch:
+    inputs:
+      nombre:
+        description: 'Nombre de questions ouvertes (appels à Albert)'
+        required: false
+        default: '200'
+
+permissions:
+  contents: read
+
+jobs:
+  essai:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Installer Chromium (Playwright)
+        run: |
+          npm install --no-save playwright@1.63.0
+          npx playwright install --with-deps chromium
+      - name: Poser les questions ouvertes au widget
+        run: node scripts/essai_textes_albert.mjs
+        env:
+          NOMBRE: ${{ inputs.nombre }}
+      - name: Garder le rapport
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: textes-albert
+          path: |
+            textes_albert.md
+            textes_albert.json

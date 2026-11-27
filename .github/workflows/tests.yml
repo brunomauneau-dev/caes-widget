@@ -15,3 +15,19 @@ jobs:
           node-version: '20'
       - name: Lancer toute la suite de tests
         run: npm test
+
+  # Le widget ouvert dans un vrai navigateur (la page, ses scripts dans leur ordre, Grist simulé) : une erreur qui ne se
+  # voit que dans la page (v27.5.104 : plus aucun calcul) bloque la modification.
+  navigateur:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Installer Chromium (Playwright)
+        run: |
+          npm install --no-save playwright@1.63.0
+          npx playwright install --with-deps chromium
+      - name: Ouvrir le widget et poser des questions
+        run: node tests/navigateur.mjs
