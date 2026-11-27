@@ -3564,7 +3564,10 @@ const _VOCAB_CALCUL = ['combien', 'nombre', 'capacité', 'capacités', 'candidat
   'université', 'écoles', 'ingénieurs', 'ingénieur', 'commerce', 'académie', 'académies', 'département', 'départements', 'région',
   'régions', 'confirmés', 'apprentissage', 'apprentis', 'affectés', 'affectation', 'obtenu', 'demandé', 'élèves', 'origine', 'accueil',
   'classement', 'comparer', 'comparaison', 'évolution', 'quels', 'quelles', 'liste'];
-const _VOCAB_NORM = new Map(_VOCAB_CALCUL.map(w => [normalizeText(w), w]));
+// v27.5.106 — construit au premier usage : dans la page, dataEngine.js est chargé AVANT documents.js (normalizeText)
+// (avant : erreur au chargement, plus aucun calcul dans le widget)
+let _vocabNormCache = null;
+const _vocabNorm = () => _vocabNormCache || (_vocabNormCache = new Map(_VOCAB_CALCUL.map(w => [normalizeText(w), w])));
 function _distanceOsa(a, b, max) {
   if (Math.abs(a.length - b.length) > max) return max + 1;
   const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
@@ -3589,6 +3592,7 @@ function corrigerFautesFrappe(question, ambigus) {
   };
   return String(question ?? '').replace(/[A-Za-zÀ-ÿœŒ]{5,}/g, mot => {
     const w = normalizeText(mot);
+    const _VOCAB_NORM = _vocabNorm();
     if (w.length < 5 || _VOCAB_NORM.has(w) || estConnu(w)) return mot;
     const max = w.length >= 11 ? 2 : 1;
     let best = max + 1, choix = [];
